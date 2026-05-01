@@ -1,572 +1,1863 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
-const router = useRouter()
-const prompt = ref('')
-const isGenerating = ref(false)
-const generatedImages = ref<string[]>([])
+// ── Types ───────────────────────────────────────────────
+interface Position { x: number; y: number }
 
-async function generate() {
-  if (!prompt.value.trim()) return
-  isGenerating.value = true
-  // TODO: call ComfyUI API
-  setTimeout(() => {
-    generatedImages.value = []
-    isGenerating.value = false
-  }, 2000)
+interface BaseNode {
+  id: string
+  type: string
+  x: number
+  y: number
+  selected: boolean
 }
 
-function goBack() {
-  router.push('/')
+interface PromptNode extends BaseNode {
+  type: 'prompt'
+  content: string
+  refImage?: string  // optional reference image for img2img
+  time: string
+}
+
+interface GenerationNode extends BaseNode {
+  type: 'generation'
+  images: string[]  // 4 images in 2x2 grid
+  time: string
+}
+
+interface BranchNode extends BaseNode {
+  type: 'upscale' | 'img2img' | 'video'
+  sourceGenId: string
+  sourceImgIndex: number
+  image?: string
+  content?: string
+  time: string
+}
+
+type AnyNode = PromptNode | GenerationNode | BranchNode
+
+interface Connection {
+  id: string
+  from: string
+  to: string
+  fromImgIndex?: number  // which image slot (0-3) in generation node
+}
+
+// ── State ──────────────────────────────────────────────
+const canvasRef = ref<HTMLDivElement>(null)
+
+// Canvas transform (pan + zoom)
+const pan = ref<Position>({ x: 0, y: 0 })
+const zoom = ref(1)
+
+// Interaction state
+const isPanning = ref(false)
+const panStart = ref<Position>({ x: 0, y: 0 })
+const draggingNode = ref<string | null>(null)
+const dragOffset = ref<Position>({ x: 0, y: 0 })
+
+// Connecting state (draw line from image)
+const isConnecting = ref(false)
+const connectFrom = ref<{ nodeId: string; imgIndex: number } | null>(null)
+const mousePos = ref<Position>({ x: 0, y: 0 })
+
+// Nodes & connections
+const nodes = ref<AnyNode[]>([
+  {
+    id: 'prompt-1',
+    type: 'prompt',
+    x: 400,
+    y: 580,  // bottom
+    selected: false,
+    content: 'A cyberpunk city at night with neon lights reflecting on wet streets, cinematic lighting',
+    refImage: '',
+    time: '10:32 AM'
+  },
+  {
+    id: 'gen-1',
+    type: 'generation',
+    x: 400,
+    y: 220,  // above prompt
+    selected: false,
+    images: ['', '', '', ''],
+    time: '10:32 AM'
+  }
+])
+
+const connections = ref<Connection[]>([
+  { id: 'conn-1', from: 'prompt-1', to: 'gen-1' }
+])
+
+// Right panel state
+const activeNode = ref<AnyNode | null>(null)
+const noteText = ref('')
+
+// Context menu
+const contextMenu = ref<{ show: boolean; x: number; y: number; nodeId: string | null }>({
+  show: false, x: 0, y: 0, nodeId: null
+})
+
+// Input
+const inputText = ref('')
+const selectedModel = ref('SDXL Turbo')
+const selectedStyle = ref('Cinematic')
+const selectedAspect = ref('16:9')
+const isGenerating = ref(false)
+
+const models = ['SDXL Turbo', 'DALL-E 3', 'Stable Diffusion', 'Midjourney v6']
+const styles = ['Cinematic', 'Photorealistic', 'Anime', 'Abstract', 'Minimalist']
+const aspects = ['1:1', '16:9', '9:16', '4:3', '3:4']
+
+// ── Computed ──────────────────────────────────────────
+const canvasTransform = computed(() =>
+  `translate(${pan.value.x}px, ${pan.value.y}px) scale(${zoom.value})`
+)
+
+// Temp connection line for drawing
+const tempConnPath = computed(() => {
+  if (!isConnecting.value || !connectFrom.value) return ''
+  const fromNode = nodes.value.find(n => n.id === connectFrom.value!.nodeId)
+  if (!fromNode) return ''
+
+  // Generation node center is at x + 160, y + 80
+  // Images are at 2x2 grid within node
+  const imgW = 156
+  const imgH = 104
+  const padL = 12
+  const padT = 56
+  const col = connectFrom.value.imgIndex % 2
+  const row = Math.floor(connectFrom.value.imgIndex / 2)
+  const fx = fromNode.x + padL + col * imgW + imgW / 2
+  const fy = fromNode.y + padT + row * imgH + imgH
+
+  const tx = (mousePos.value.x - pan.value.x) / zoom.value
+  const ty = (mousePos.value.y - pan.value.y) / zoom.value
+
+  const dy = Math.max(Math.abs(ty - fy) * 0.5, 60)
+  return `M ${fx} ${fy} C ${fx} ${fy + dy}, ${tx} ${ty - dy}, ${tx} ${ty}`
+})
+
+// ── Canvas Interaction ──────────────────────────────────
+function onCanvasMouseDown(e: MouseEvent) {
+  if (e.target === canvasRef.value || (e.target as HTMLElement).classList.contains('canvas-bg')) {
+    isPanning.value = true
+    panStart.value = { x: e.clientX - pan.value.x, y: e.clientY - pan.value.y }
+    nodes.value.forEach(n => n.selected = false)
+    activeNode.value = null
+    contextMenu.value.show = false
+    if (isConnecting.value) {
+      isConnecting.value = false
+      connectFrom.value = null
+    }
+  }
+}
+
+function onCanvasMouseMove(e: MouseEvent) {
+  mousePos.value = { x: e.clientX, y: e.clientY }
+  if (isPanning.value) {
+    pan.value = { x: e.clientX - panStart.value.x, y: e.clientY - panStart.value.y }
+  }
+  if (draggingNode.value) {
+    const node = nodes.value.find(n => n.id === draggingNode.value)
+    if (node) {
+      node.x = (e.clientX - pan.value.x - dragOffset.value.x) / zoom.value
+      node.y = (e.clientY - pan.value.y - dragOffset.value.y) / zoom.value
+    }
+  }
+}
+
+function onCanvasMouseUp() {
+  isPanning.value = false
+  draggingNode.value = null
+}
+
+function onWheel(e: WheelEvent) {
+  e.preventDefault()
+  const rect = canvasRef.value!.getBoundingClientRect()
+  const mouseX = e.clientX - rect.left
+  const mouseY = e.clientY - rect.top
+  const delta = e.deltaY > 0 ? 0.9 : 1.1
+  const newZoom = Math.min(Math.max(zoom.value * delta, 0.2), 3)
+
+  // Zoom towards mouse
+  const scale = newZoom / zoom.value
+  pan.value = {
+    x: mouseX - (mouseX - pan.value.x) * scale,
+    y: mouseY - (mouseY - pan.value.y) * scale
+  }
+  zoom.value = newZoom
+}
+
+// ── Node Interaction ────────────────────────────────────
+function onNodeMouseDown(e: MouseEvent, nodeId: string) {
+  e.stopPropagation()
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node) return
+
+  nodes.value.forEach(n => n.selected = false)
+  node.selected = true
+  activeNode.value = node
+  contextMenu.value.show = false
+  if (isConnecting.value) {
+    isConnecting.value = false
+    connectFrom.value = null
+  }
+
+  draggingNode.value = nodeId
+  dragOffset.value = {
+    x: e.clientX - (node.x * zoom.value + pan.value.x),
+    y: e.clientY - (node.y * zoom.value + pan.value.y)
+  }
+}
+
+function onNodeRightClick(e: MouseEvent, nodeId: string) {
+  e.preventDefault()
+  e.stopPropagation()
+  contextMenu.value = { show: true, x: e.clientX, y: e.clientY, nodeId }
+}
+
+function closeContextMenu() { contextMenu.value.show = false }
+
+// ── Image-level connect (start dragging a connection) ────
+function onImageConnectStart(e: MouseEvent, genId: string, imgIndex: number) {
+  e.stopPropagation()
+  isConnecting.value = true
+  connectFrom.value = { nodeId: genId, imgIndex }
+}
+
+function onCanvasMouseUpWhileConnecting(e: MouseEvent) {
+  if (!isConnecting.value || !connectFrom.value) return
+  // Check if dropped on canvas (not on another node)
+  const target = e.target as HTMLElement
+  if (target === canvasRef.value || target.classList.contains('canvas-bg') || target.classList.contains('dot-grid')) {
+    // Create branch menu near cursor
+    contextMenu.value = {
+      show: true,
+      x: e.clientX,
+      y: e.clientY,
+      nodeId: null
+    }
+  }
+  isConnecting.value = false
+  connectFrom.value = null
+}
+
+// ── Node Actions ───────────────────────────────────────
+function deleteNode(nodeId: string) {
+  // Also delete child connections
+  const childConns = connections.value.filter(c => c.from === nodeId)
+  childConns.forEach(c => deleteNode(c.to))
+  nodes.value = nodes.value.filter(n => n.id !== nodeId)
+  connections.value = connections.value.filter(c => c.from !== nodeId && c.to !== nodeId)
+  if (activeNode.value?.id === nodeId) activeNode.value = null
+  contextMenu.value.show = false
+}
+
+function duplicateNode(nodeId: string) {
+  const orig = nodes.value.find(n => n.id === nodeId)
+  if (!orig) return
+  const copy: AnyNode = {
+    ...JSON.parse(JSON.stringify(orig)),
+    id: `${orig.type}-${Date.now()}`,
+    x: orig.x + 30,
+    y: orig.y + 60,  // duplicate below
+    selected: false
+  }
+  nodes.value.push(copy)
+  contextMenu.value.show = false
+}
+
+function addBranch(branchType: 'upscale' | 'img2img' | 'video') {
+  if (!connectFrom.value) return
+  const sourceGen = nodes.value.find(n => n.id === connectFrom.value!.nodeId) as GenerationNode
+  if (!sourceGen) return
+
+  const newNode: BranchNode = {
+    id: `${branchType}-${Date.now()}`,
+    type: branchType,
+    x: sourceGen.x + (connectFrom.value.imgIndex % 2 === 0 ? -120 : 120),
+    y: sourceGen.y + 220,
+    selected: false,
+    sourceGenId: sourceGen.id,
+    sourceImgIndex: connectFrom.value.imgIndex,
+    image: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  nodes.value.push(newNode)
+  connections.value.push({
+    id: `conn-${Date.now()}`,
+    from: sourceGen.id,
+    to: newNode.id,
+    fromImgIndex: connectFrom.value.imgIndex
+  })
+  contextMenu.value.show = false
+  isConnecting.value = false
+  connectFrom.value = null
+}
+
+function addBranchFromCtx(branchType: 'upscale' | 'img2img' | 'video', genId: string, imgIndex: number) {
+  const sourceGen = nodes.value.find(n => n.id === genId) as GenerationNode
+  if (!sourceGen) return
+
+  const newNode: BranchNode = {
+    id: `${branchType}-${Date.now()}`,
+    type: branchType,
+    x: sourceGen.x + (imgIndex % 2 === 0 ? -120 : 120),
+    y: sourceGen.y + 220,
+    selected: false,
+    sourceGenId: sourceGen.id,
+    sourceImgIndex: imgIndex,
+    image: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  nodes.value.push(newNode)
+  connections.value.push({
+    id: `conn-${Date.now()}`,
+    from: sourceGen.id,
+    to: newNode.id,
+    fromImgIndex: imgIndex
+  })
+  contextMenu.value.show = false
+}
+
+function addVariation(genId: string) {
+  const gen = nodes.value.find(n => n.id === genId)
+  if (!gen) return
+  const newGen: GenerationNode = {
+    id: `gen-${Date.now()}`,
+    type: 'generation',
+    x: gen.x + 320,
+    y: gen.y,
+    selected: false,
+    images: ['', '', '', ''],
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+  nodes.value.push(newGen)
+  connections.value.push({ id: `conn-${Date.now()}`, from: gen.id, to: newGen.id })
+}
+
+function addUpscale(genId: string, imgIndex: number) {
+  const gen = nodes.value.find(n => n.id === genId) as GenerationNode
+  if (!gen) return
+  const newNode: BranchNode = {
+    id: `up-${Date.now()}`,
+    type: 'upscale',
+    x: gen.x + (imgIndex % 2 === 0 ? -130 : 130),
+    y: gen.y + 240,
+    selected: false,
+    sourceGenId: gen.id,
+    sourceImgIndex: imgIndex,
+    image: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+  nodes.value.push(newNode)
+  connections.value.push({ id: `conn-${Date.now()}`, from: gen.id, to: newNode.id, fromImgIndex: imgIndex })
+}
+
+// ── Connection Path ────────────────────────────────────
+function getConnectionPath(conn: Connection) {
+  const from = nodes.value.find(n => n.id === conn.from)
+  const to = nodes.value.find(n => n.id === conn.to)
+  if (!from || !to) return ''
+
+  let fx = 0, fy = 0, tx = 0, ty = 0
+
+  if (from.type === 'prompt') {
+    fx = from.x + 140
+    fy = from.y
+    tx = to.x + 160
+    ty = to.y + 200
+  } else if (from.type === 'generation') {
+    const idx = conn.fromImgIndex ?? 0
+    const imgW = 156
+    const imgH = 104
+    const padL = 12
+    const padT = 56
+    const col = idx % 2
+    const row = Math.floor(idx / 2)
+    fx = from.x + padL + col * imgW + imgW / 2
+    fy = from.y + padT + row * imgH + imgH
+    tx = to.x + 100
+    ty = to.y
+  } else {
+    // Branch node output
+    fx = from.x + 100
+    fy = from.y + 80
+    tx = to.x + 100
+    ty = to.y
+  }
+
+  const dx = Math.abs(tx - fx) * 0.5
+  return `M ${fx} ${fy} C ${fx} ${fy + dx}, ${tx} ${ty - dx}, ${tx} ${ty}`
+}
+
+// ── Send Message ───────────────────────────────────────
+function sendMessage() {
+  if (!inputText.value.trim()) return
+  const promptId = `prompt-${Date.now()}`
+  const genId = `gen-${Date.now() + 1}`
+
+  const cx = (-pan.value.x + canvasRef.value!.clientWidth / 2) / zoom.value
+  const cy = (-pan.value.y + canvasRef.value!.clientHeight / 2) / zoom.value
+
+  const promptNode: PromptNode = {
+    id: promptId,
+    type: 'prompt',
+    x: cx - 140,
+    y: cy + 100,  // below generated
+    selected: false,
+    content: inputText.value,
+    refImage: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const genNode: GenerationNode = {
+    id: genId,
+    type: 'generation',
+    x: cx - 160,
+    y: cy - 120,  // above prompt
+    selected: false,
+    images: ['', '', '', ''],
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  nodes.value.push(promptNode, genNode)
+  connections.value.push({ id: `conn-${Date.now()}`, from: promptId, to: genId })
+
+  inputText.value = ''
+  isGenerating.value = true
+  setTimeout(() => { isGenerating.value = false }, 2000)
+}
+
+// ── Auto Layout ───────────────────────────────────────
+function autoLayout() {
+  const prompts = nodes.value.filter(n => n.type === 'prompt')
+  prompts.forEach((prompt, pi) => {
+    const baseY = 580 + pi * 500
+    prompt.x = 400
+    prompt.y = baseY
+
+    const gens = connections.value
+      .filter(c => c.from === prompt.id)
+      .map(c => nodes.value.find(n => n.id === c.to))
+      .filter(n => n?.type === 'generation') as GenerationNode[]
+
+    gens.forEach((gen, gi) => {
+      gen.x = prompt.x
+      gen.y = baseY - 360
+
+      // Branch nodes
+      const branches = connections.value
+        .filter(c => c.from === gen.id)
+        .map(c => nodes.value.find(n => n.id === c.to))
+        .filter(Boolean) as BranchNode[]
+
+      branches.forEach((branch, bi) => {
+        branch.x = gen.x + (bi % 2 === 0 ? -140 : 140)
+        branch.y = gen.y + 240
+      })
+    })
+  })
+}
+
+// ── Zoom Controls ─────────────────────────────────────
+function zoomIn() { zoom.value = Math.min(zoom.value * 1.2, 3) }
+function zoomOut() { zoom.value = Math.max(zoom.value / 1.2, 0.2) }
+function zoomReset() { zoom.value = 1; pan.value = { x: 0, y: 0 } }
+
+// ── Global listeners ───────────────────────────────────
+function globalMouseUp(e: MouseEvent) {
+  isPanning.value = false
+  draggingNode.value = null
+  if (isConnecting.value) {
+    onCanvasMouseUpWhileConnecting(e)
+  }
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Delete' && activeNode.value) {
+    deleteNode(activeNode.value.id)
+  }
+  if (e.key === 'Escape') {
+    contextMenu.value.show = false
+    isConnecting.value = false
+    connectFrom.value = null
+    nodes.value.forEach(n => n.selected = false)
+    activeNode.value = null
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('mouseup', globalMouseUp)
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('click', closeContextMenu)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('mouseup', globalMouseUp)
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('click', closeContextMenu)
+})
+
+// Branch type colors
+const branchColor: Record<string, string> = {
+  upscale: '#00d9ff',
+  img2img: '#a855f7',
+  video: '#f59e0b'
+}
+const branchLabel: Record<string, string> = {
+  upscale: 'UPSCA',
+  img2img: 'IMG2IMG',
+  video: 'VIDEO'
 }
 </script>
 
 <template>
-  <div class="generate-page">
-    <!-- AI Gallery Background -->
-    <div class="bg-gallery">
-      <div class="gallery-grid">
-        <div v-for="i in 16" :key="i" class="gallery-item">
-          <div class="gallery-img"></div>
+  <div class="generate-page" @keydown="onKeyDown">
+    <!-- Left Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <div class="brand">
+          <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+          </svg>
+          <span class="brand-name">AI Image Generator</span>
         </div>
-      </div>
-      <div class="bg-overlay"></div>
-    </div>
-
-    <!-- Top Nav -->
-    <header class="top-nav">
-      <div class="nav-left">
-        <button class="back-btn" @click="goBack">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
+        <button class="new-canvas-btn" @click="zoomReset">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+            <path d="M12 5v14M5 12h14"/>
           </svg>
-        </button>
-        <svg class="nav-logo-icon" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
-          <path d="M5 3L5.75 6L8 6.75L5.75 7.5L5 10.5L4.25 7.5L2 6.75L4.25 6L5 3Z" opacity="0.6"/>
-          <path d="M19 3L19.75 6L22 6.75L19.75 7.5L19 10.5L18.25 7.5L16 6.75L18.25 6L19 3Z" opacity="0.6"/>
-          <path d="M5 14L5.75 17L8 17.75L5.75 18.5L5 21.5L4.25 18.5L2 17.75L4.25 17L5 14Z" opacity="0.6"/>
-          <path d="M19 14L19.75 17L22 17.75L19.75 18.5L19 21.5L18.25 18.5L16 17.75L18.25 17L19 14Z" opacity="0.6"/>
-        </svg>
-        <span class="nav-brand">AI Image Generator</span>
-        <span class="nav-sep">/</span>
-        <span class="nav-current">Create</span>
-      </div>
-      <nav class="nav-links">
-        <a href="#features" class="nav-link">Features</a>
-        <a href="#pricing" class="nav-link">Pricing</a>
-        <a href="#gallery" class="nav-link">Gallery</a>
-      </nav>
-    </header>
-
-    <!-- Main Content -->
-    <main class="main-content">
-      <!-- Left: Prompt Panel -->
-      <div class="prompt-panel">
-        <div class="panel-header">
-          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-            <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
-          </svg>
-          <h2 class="panel-title">Describe Your Vision</h2>
-        </div>
-        <p class="panel-desc">Be specific about style, mood, lighting, and details for best results</p>
-        
-        <textarea
-          v-model="prompt"
-          class="prompt-input"
-          placeholder="A cyberpunk city at night with neon lights reflecting on wet streets, cinematic lighting, highly detailed..."
-          rows="10"
-        ></textarea>
-
-        <div class="prompt-tips">
-          <span class="tip-label">Quick prompts</span>
-          <div class="tip-chips">
-            <button class="chip" @click="prompt = 'Cyberpunk portrait, neon lighting, ultra detailed'">Cyberpunk</button>
-            <button class="chip" @click="prompt = 'Studio product photography, soft lighting, 4K'">Product</button>
-            <button class="chip" @click="prompt = 'Abstract art, vibrant colors, geometric patterns'">Abstract</button>
-            <button class="chip" @click="prompt = 'Fantasy landscape, golden hour, volumetric lighting'">Fantasy</button>
-          </div>
-        </div>
-
-        <button class="generate-btn" @click="generate" :disabled="isGenerating || !prompt.trim()">
-          <svg v-if="!isGenerating" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
-          <div v-else class="spinner"></div>
-          {{ isGenerating ? 'Generating...' : 'Generate Image' }}
-          <svg v-if="!isGenerating" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-          </svg>
+          New Canvas
         </button>
       </div>
 
-      <!-- Right: Result Panel -->
-      <div class="result-panel">
-        <div class="panel-header">
-          <svg class="panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <circle cx="8.5" cy="8.5" r="1.5"/>
-            <path d="M21 15l-5-5L5 21"/>
-          </svg>
-          <h2 class="panel-title">Generated Result</h2>
+      <div class="sidebar-section">
+        <span class="section-label">Canvas Controls</span>
+        <div class="sidebar-btns">
+          <button class="sidebar-action-btn" @click="zoomIn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/>
+            </svg>
+            Zoom In
+          </button>
+          <button class="sidebar-action-btn" @click="zoomOut">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M8 11h6"/>
+            </svg>
+            Zoom Out
+          </button>
+          <button class="sidebar-action-btn" @click="zoomReset">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+            Reset View
+          </button>
         </div>
+      </div>
 
-        <div class="result-area">
-          <!-- Generating State -->
-          <div v-if="isGenerating" class="generating-state">
-            <div class="gen-animation">
-              <div class="gen-orb"></div>
-              <div class="gen-orb ring-2"></div>
-              <div class="gen-orb ring-3"></div>
-            </div>
-            <p class="gen-text">AI is crafting your image<span class="dots"><span>.</span><span>.</span><span>.</span></span></p>
-            <p class="gen-sub">This usually takes 5-15 seconds</p>
+      <div class="sidebar-section">
+        <span class="section-label">Nodes</span>
+        <div class="sidebar-btns">
+          <button class="sidebar-action-btn" @click="autoLayout">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+              <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+            </svg>
+            Auto Layout
+          </button>
+          <button class="sidebar-action-btn" @click="() => { nodes = []; connections = []; activeNode = null }">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Clear All
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <span class="section-label">Quick Actions</span>
+        <div class="sidebar-btns">
+          <button
+            class="sidebar-action-btn"
+            @click="addVariation(activeNode?.id || '')"
+            :disabled="!activeNode || activeNode.type !== 'generation'"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <path d="M1 4v6h6M23 20v-6h-6"/>
+              <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+            </svg>
+            Add Variation
+          </button>
+          <button
+            class="sidebar-action-btn"
+            @click="addUpscale(activeNode?.id || '', 0)"
+            :disabled="!activeNode || activeNode.type !== 'generation'"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+            </svg>
+            Add Upscale
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-node-list">
+        <span class="section-label">Nodes ({{ nodes.length }})</span>
+        <div class="node-list-items">
+          <button
+            v-for="node in nodes"
+            :key="node.id"
+            class="node-list-item"
+            :class="{ active: activeNode?.id === node.id }"
+            @click="() => {
+              activeNode = node
+              nodes.forEach(n => n.selected = n.id === node.id)
+            }"
+          >
+            <span class="node-type-dot" :class="node.type"></span>
+            <span class="node-list-label">{{ node.type }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="user-info">
+          <div class="user-avatar">A</div>
+          <div class="user-details">
+            <span class="user-name">admin</span>
+            <span class="user-plan">Pro Plan</span>
           </div>
+        </div>
+      </div>
+    </aside>
 
-          <!-- Empty State -->
-          <div v-else-if="generatedImages.length === 0" class="empty-state">
-            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" width="56" height="56">
+    <!-- Center: Infinite Canvas -->
+    <main
+      class="canvas-container"
+      ref="canvasRef"
+      @mousedown="onCanvasMouseDown"
+      @mousemove="onCanvasMouseMove"
+      @wheel.prevent="onWheel"
+    >
+      <!-- SVG Connections Layer -->
+      <svg class="connections-svg" :style="{ transform: canvasTransform }">
+        <defs>
+          <marker id="arrow-up" markerWidth="10" markerHeight="8" refX="5" refY="4" orient="auto">
+            <polygon points="0 8, 5 0, 10 8" fill="#00d9ff" opacity="0.7"/>
+          </marker>
+          <marker id="arrow-down" markerWidth="10" markerHeight="8" refX="5" refY="4" orient="auto">
+            <polygon points="0 0, 5 8, 10 0" fill="#00d9ff" opacity="0.7"/>
+          </marker>
+        </defs>
+
+        <!-- Existing connections -->
+        <path
+          v-for="conn in connections"
+          :key="conn.id"
+          :d="getConnectionPath(conn)"
+          fill="none"
+          :stroke="branchColor[conn.from] || '#00d9ff'"
+          :stroke-width="1.5"
+          :stroke-opacity="0.5"
+          :marker-end="conn.from.includes('gen') ? 'url(#arrow-down)' : 'url(#arrow-up)'"
+          class="connection-path"
+          @contextmenu.prevent="(e) => {
+            e.preventDefault()
+            // Remove connection on right-click
+            connections = connections.filter(c => c.id !== conn.id)
+          }"
+        />
+
+        <!-- Temp connecting line -->
+        <path
+          v-if="isConnecting"
+          :d="tempConnPath"
+          fill="none"
+          stroke="#00d9ff"
+          stroke-width="1.5"
+          stroke-opacity="0.6"
+          stroke-dasharray="6 4"
+        />
+      </svg>
+
+      <!-- Dot Grid Background -->
+      <div class="canvas-bg dot-grid"></div>
+
+      <!-- Nodes Canvas -->
+      <div class="nodes-canvas" :style="{ transform: canvasTransform }">
+
+        <!-- PROMPT NODE (bottom) -->
+        <div
+          v-for="node in nodes.filter(n => n.type === 'prompt')"
+          :key="node.id"
+          class="node prompt-node"
+          :class="{ selected: node.selected, dragging: draggingNode === node.id }"
+          :style="{ left: node.x + 'px', top: node.y + 'px' }"
+          @mousedown="(e) => onNodeMouseDown(e, node.id)"
+          @contextmenu="(e) => onNodeRightClick(e, node.id)"
+        >
+          <div class="node-header">
+            <span class="node-tag prompt-tag">PROMPT</span>
+            <span class="node-time">{{ (node as PromptNode).time }}</span>
+          </div>
+          <div class="prompt-content">
+            {{ (node as PromptNode).content }}
+          </div>
+          <!-- Reference image thumbnail (bottom-left) -->
+          <div v-if="(node as PromptNode).refImage" class="ref-thumb">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" width="14" height="14">
               <rect x="3" y="3" width="18" height="18" rx="2"/>
               <circle cx="8.5" cy="8.5" r="1.5"/>
               <path d="M21 15l-5-5L5 21"/>
             </svg>
-            <p class="empty-title">Your creations will appear here</p>
-            <p class="empty-sub">Describe your vision and click Generate</p>
           </div>
-
-          <!-- Generated Images -->
-          <div v-else class="images-grid">
-            <img v-for="(img, i) in generatedImages" :key="i" :src="img" class="result-img" />
+          <div class="node-toolbar">
+            <button class="tool-btn" title="Copy" @click.stop="duplicateNode(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <rect x="9" y="9" width="13" height="13" rx="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
+            <button class="tool-btn danger" title="Delete" @click.stop="deleteNode(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
           </div>
         </div>
+
+        <!-- GENERATION NODE (middle/upper) -->
+        <div
+          v-for="node in nodes.filter(n => n.type === 'generation')"
+          :key="node.id"
+          class="node generation-node"
+          :class="{ selected: node.selected, dragging: draggingNode === node.id }"
+          :style="{ left: node.x + 'px', top: node.y + 'px' }"
+          @mousedown="(e) => onNodeMouseDown(e, node.id)"
+          @contextmenu="(e) => onNodeRightClick(e, node.id)"
+        >
+          <div class="node-header">
+            <span class="node-tag gen-tag">GENERATED</span>
+            <span class="node-badge">2×2</span>
+            <span class="node-time">{{ (node as GenerationNode).time }}</span>
+          </div>
+
+          <!-- 2x2 Image Grid -->
+          <div class="gen-images">
+            <div
+              v-for="(img, i) in (node as GenerationNode).images"
+              :key="i"
+              class="gen-img-slot"
+              @mousedown.stop="onImageConnectStart($event, node.id, i)"
+            >
+              <div class="gen-img-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" width="24" height="24">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <path d="M21 15l-5-5L5 21"/>
+                </svg>
+              </div>
+
+              <!-- Hover toolbar per image -->
+              <div class="img-hover-toolbar">
+                <button class="img-tool-btn" title="Download">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                  </svg>
+                </button>
+                <button class="img-tool-btn" title="Favorite">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                  </svg>
+                </button>
+                <button class="img-tool-btn" title="Regenerate">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                    <path d="M23 4v6h-6M1 20v-6h6"/>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                  </svg>
+                </button>
+                <button class="img-tool-btn danger" title="Delete" @click.stop="() => {}">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- "引用此图" label below image -->
+              <div class="ref-img-label">↓ 引用此图</div>
+            </div>
+          </div>
+
+          <div class="node-toolbar">
+            <button class="tool-btn" title="Variation" @click.stop="addVariation(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <path d="M1 4v6h6M23 20v-6h-6"/>
+                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+              </svg>
+            </button>
+            <button class="tool-btn" title="Upscale" @click.stop="addUpscale(node.id, 0)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+              </svg>
+            </button>
+            <button class="tool-btn" title="Favorite">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+            </button>
+            <button class="tool-btn danger" title="Delete" @click.stop="deleteNode(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- BRANCH NODES (below generation, from single images) -->
+        <div
+          v-for="node in nodes.filter(n => n.type !== 'prompt' && n.type !== 'generation')"
+          :key="node.id"
+          class="node branch-node"
+          :class="['branch-' + node.type, { selected: node.selected, dragging: draggingNode === node.id }]"
+          :style="{
+            left: node.x + 'px',
+            top: node.y + 'px',
+            borderColor: branchColor[node.type] + '40',
+          }"
+          @mousedown="(e) => onNodeMouseDown(e, node.id)"
+          @contextmenu="(e) => onNodeRightClick(e, node.id)"
+        >
+          <div class="node-header">
+            <span class="node-tag" :style="{ background: branchColor[node.type] + '22', color: branchColor[node.type] }">
+              {{ branchLabel[node.type] }}
+            </span>
+            <span class="node-time">{{ (node as BranchNode).time }}</span>
+          </div>
+
+          <div class="branch-img">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" width="28" height="28">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <path d="M21 15l-5-5L5 21"/>
+            </svg>
+          </div>
+
+          <div class="node-toolbar">
+            <button class="tool-btn" title="Download">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              </svg>
+            </button>
+            <button class="tool-btn danger" title="Delete" @click.stop="deleteNode(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+      </div><!-- /nodes-canvas -->
+
+      <!-- Zoom indicator -->
+      <div class="zoom-indicator">{{ Math.round(zoom * 100) }}%</div>
+
+      <!-- Generating overlay hint -->
+      <div v-if="isGenerating" class="generating-hint">
+        <div class="gen-orbs"><div class="orb"></div><div class="orb"></div><div class="orb"></div></div>
+        AI is creating your images...
       </div>
     </main>
+
+    <!-- Right Panel -->
+    <aside class="right-panel">
+      <template v-if="activeNode">
+        <div class="panel-section">
+          <h3 class="section-title">Node Info</h3>
+          <div class="info-grid">
+            <div class="info-row">
+              <span class="info-key">Type</span>
+              <span class="info-val" :style="{ color: activeNode.type === 'prompt' ? '#a855f7' : activeNode.type === 'generation' ? '#00d9ff' : branchColor[activeNode.type] }">
+                {{ activeNode.type.toUpperCase() }}
+              </span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Position</span>
+              <span class="info-val">{{ Math.round(activeNode.x) }}, {{ Math.round(activeNode.y) }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">ID</span>
+              <span class="info-val id-val">{{ activeNode.id }}</span>
+            </div>
+          </div>
+        </div>
+
+        <template v-if="activeNode.type === 'prompt'">
+          <div class="panel-section">
+            <h3 class="section-title">Prompt</h3>
+            <div class="prompt-preview">{{ (activeNode as PromptNode).content }}</div>
+          </div>
+        </template>
+
+        <template v-if="activeNode.type === 'generation'">
+          <div class="panel-section">
+            <h3 class="section-title">Images ({{ (activeNode as GenerationNode).images.length }})</h3>
+            <p class="panel-hint">Click an image to start a branch connection</p>
+          </div>
+        </template>
+
+        <div class="panel-section">
+          <h3 class="section-title">Parameters</h3>
+          <div class="param-list">
+            <div class="param-item">
+              <span class="param-key">Model</span>
+              <select v-model="selectedModel" class="param-val-select">
+                <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <div class="param-item">
+              <span class="param-key">Style</span>
+              <select v-model="selectedStyle" class="param-val-select">
+                <option v-for="s in styles" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </div>
+            <div class="param-item">
+              <span class="param-key">Aspect</span>
+              <select v-model="selectedAspect" class="param-val-select">
+                <option v-for="a in aspects" :key="a" :value="a">{{ a }}</option>
+              </select>
+            </div>
+          </div>
+          <button class="regen-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <path d="M23 4v6h-6M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Regenerate from Node
+          </button>
+        </div>
+
+        <div class="panel-section">
+          <h3 class="section-title">Branch Actions</h3>
+          <div class="branch-btns">
+            <button
+              v-for="bt in (['upscale', 'img2img', 'video'] as const)"
+              :key="bt"
+              class="branch-btn"
+              :style="{ borderColor: branchColor[bt] + '50', color: branchColor[bt] }"
+              @click="addBranch(bt)"
+              :disabled="!activeNode || activeNode.type !== 'generation'"
+            >
+              + {{ bt.toUpperCase() }}
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3 class="section-title">Notes</h3>
+          <textarea
+            v-model="noteText"
+            class="note-textarea"
+            placeholder="Add notes about this node..."
+          ></textarea>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="empty-panel">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32" style="color: rgba(0,217,255,0.25)">
+            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+          </svg>
+          <p>Select a node to view its details</p>
+        </div>
+      </template>
+    </aside>
+
+    <!-- Bottom Input Bar -->
+    <div class="bottom-input-bar">
+      <div class="input-row">
+        <select v-model="selectedModel" class="param-select">
+          <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+        </select>
+        <select v-model="selectedStyle" class="param-select">
+          <option v-for="s in styles" :key="s" :value="s">{{ s }}</option>
+        </select>
+        <select v-model="selectedAspect" class="param-select">
+          <option v-for="a in aspects" :key="a" :value="a">{{ a }}</option>
+        </select>
+      </div>
+      <div class="input-box">
+        <textarea
+          v-model="inputText"
+          class="prompt-textarea"
+          placeholder="Describe what you want to create... (Enter to send)"
+          rows="1"
+          @keydown.enter.exact.prevent="sendMessage"
+        ></textarea>
+        <button class="send-btn" @click="sendMessage" :disabled="!inputText.trim() || isGenerating">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Context Menu (branch type selector) -->
+    <Teleport to="body">
+      <div
+        v-if="contextMenu.show && !contextMenu.nodeId"
+        class="context-menu branch-context"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="ctx-title">Add Branch Node</div>
+        <button class="ctx-branch-btn upscale" @click="addBranch('upscale')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#00d9ff" stroke-width="2" width="13" height="13">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+          </svg>
+          Upscale (Super Resolution)
+        </button>
+        <button class="ctx-branch-btn img2img" @click="addBranch('img2img')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" width="13" height="13">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <path d="M21 15l-5-5L5 21"/>
+          </svg>
+          Img2Img (Image to Image)
+        </button>
+        <button class="ctx-branch-btn video" @click="addBranch('video')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" width="13" height="13">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+          Video Generation
+        </button>
+        <div class="ctx-divider"></div>
+        <button class="ctx-item" @click="contextMenu.show = false">Cancel</button>
+      </div>
+
+      <div
+        v-if="contextMenu.show && contextMenu.nodeId"
+        class="context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @click.stop
+      >
+        <button class="ctx-item" @click="duplicateNode(contextMenu.nodeId!)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          Duplicate
+        </button>
+        <div class="ctx-divider"></div>
+        <button class="ctx-item danger" @click="deleteNode(contextMenu.nodeId!)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+          Delete
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .generate-page {
-  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: #0a0a0f;
+}
+
+/* ── Left Sidebar ────────────────────────────── */
+.sidebar {
+  width: 210px;
+  flex-shrink: 0;
+  background: #0d0d14;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
-  background: #0a0a0f;
-  position: relative;
-  overflow: hidden;
-}
-
-/* ── Background ────────────────────────────── */
-.bg-gallery {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  opacity: 0.2;
-}
-
-.gallery-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(4, 1fr);
-  gap: 4px;
-  padding: 4px;
-  height: 100%;
-}
-
-.gallery-item { overflow: hidden; border-radius: 4px; }
-
-.gallery-img {
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 25%, #0f3460 50%, #1a1a2e 75%, #16213e 100%);
-  background-size: 400% 400%;
-  animation: galleryShift 20s ease infinite;
-}
-
-.gallery-item:nth-child(1) .gallery-img { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-.gallery-item:nth-child(2) .gallery-img { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-.gallery-item:nth-child(3) .gallery-img { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-.gallery-item:nth-child(4) .gallery-img { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
-.gallery-item:nth-child(5) .gallery-img { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
-.gallery-item:nth-child(6) .gallery-img { background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); }
-.gallery-item:nth-child(7) .gallery-img { background: linear-gradient(135deg, #d299c2 0%, #fef9d7 100%); }
-.gallery-item:nth-child(8) .gallery-img { background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%); }
-.gallery-item:nth-child(9) .gallery-img { background: linear-gradient(135deg, #fddb92 0%, #d1fdff 100%); }
-.gallery-item:nth-child(10) .gallery-img { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); }
-.gallery-item:nth-child(11) .gallery-img { background: linear-gradient(135deg, #f68084 0%, #a60b68 100%); }
-.gallery-item:nth-child(12) .gallery-img { background: linear-gradient(135deg, #96e6a1 0%, #d4fc79 100%); }
-.gallery-item:nth-child(13) .gallery-img { background: linear-gradient(135deg, #ee9ca7 0%, #ffdde1 100%); }
-.gallery-item:nth-child(14) .gallery-img { background: linear-gradient(135deg, #bdc3c7 0%, #2c3e50 100%); }
-.gallery-item:nth-child(15) .gallery-img { background: linear-gradient(135deg, #0ba360 0%, #3cba92 100%); }
-.gallery-item:nth-child(16) .gallery-img { background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%); }
-
-@keyframes galleryShift {
-  0%, 100% { filter: hue-rotate(0deg) brightness(0.7); }
-  50% { filter: hue-rotate(30deg) brightness(0.9); }
-}
-
-.bg-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(10, 10, 15, 0.85);
-  backdrop-filter: blur(1px);
-}
-
-/* ── Top Nav ───────────────────────────────── */
-.top-nav {
-  position: relative;
+  overflow-y: auto;
+  padding-bottom: 80px; /* space for bottom bar */
   z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 56px;
-  padding: 0 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.nav-left {
+.sidebar-top { padding: 14px 14px 10px; }
+
+.brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 7px;
+  margin-bottom: 10px;
 }
 
-.back-btn {
+.brand-icon {
+  width: 19px;
+  height: 19px;
+  color: #00d9ff;
+  filter: drop-shadow(0 0 5px rgba(0, 217, 255, 0.5));
+}
+
+.brand-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.new-canvas-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  color: rgba(255, 255, 255, 0.6);
+  gap: 5px;
+  width: 100%;
+  padding: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  color: #000;
+  background: linear-gradient(135deg, #00d9ff, #00b4d8);
+  border: none;
+  border-radius: 7px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.back-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-}
+.new-canvas-btn:hover { box-shadow: 0 0 14px rgba(0, 217, 255, 0.4); }
 
-.nav-logo-icon {
-  width: 24px;
-  height: 24px;
-  color: #00d9ff;
-  filter: drop-shadow(0 0 6px rgba(0, 217, 255, 0.5));
-}
+.sidebar-section { padding: 8px 14px; }
 
-.nav-brand {
-  font-size: 14px;
+.section-label {
+  display: block;
+  font-size: 9px;
   font-weight: 600;
-  color: #ffffff;
+  color: rgba(255, 255, 255, 0.25);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  margin-bottom: 5px;
 }
 
-.nav-sep { color: rgba(255, 255, 255, 0.2); }
+.sidebar-btns { display: flex; flex-direction: column; gap: 3px; }
 
-.nav-current {
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.nav-links {
+.sidebar-action-btn {
   display: flex;
-  gap: 24px;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
 }
 
-.nav-link {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-  text-decoration: none;
-  transition: color 0.2s;
+.sidebar-action-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
-.nav-link:hover { color: #ffffff; }
+.sidebar-action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
-/* ── Main Content ──────────────────────────── */
-.main-content {
-  position: relative;
-  z-index: 10;
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  min-height: 0;
-}
+.sidebar-node-list { padding: 8px 14px; flex: 1; }
 
-/* ── Panels ───────────────────────────────── */
-.prompt-panel,
-.result-panel {
-  padding: 28px 32px;
+.node-list-items {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 3px;
+  max-height: 280px;
   overflow-y: auto;
 }
 
-.prompt-panel {
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+.node-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 7px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
 }
 
-.panel-header {
+.node-list-item:hover { background: rgba(255, 255, 255, 0.04); }
+.node-list-item.active { background: rgba(0, 217, 255, 0.08); border-color: rgba(0, 217, 255, 0.2); }
+
+.node-type-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.node-type-dot.prompt { background: #a855f7; box-shadow: 0 0 4px #a855f7; }
+.node-type-dot.generation { background: #00d9ff; box-shadow: 0 0 4px #00d9ff; }
+.node-type-dot.upscale { background: #00d9ff; box-shadow: 0 0 4px #00d9ff; }
+.node-type-dot.img2img { background: #a855f7; box-shadow: 0 0 4px #a855f7; }
+.node-type-dot.video { background: #f59e0b; box-shadow: 0 0 4px #f59e0b; }
+
+.node-list-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: capitalize;
+}
+
+.sidebar-bottom {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: auto;
+}
+
+.user-info { display: flex; align-items: center; gap: 7px; }
+
+.user-avatar {
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6b21a8, #a855f7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.user-details { display: flex; flex-direction: column; gap: 1px; }
+.user-name { font-size: 11px; font-weight: 600; color: #fff; }
+.user-plan { font-size: 9px; color: #a855f7; }
+
+/* ── Canvas ──────────────────────────────────── */
+.canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.canvas-container:active { cursor: grabbing; }
+
+.dot-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+
+.connections-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.connection-path {
+  transition: stroke-opacity 0.2s;
+  cursor: pointer;
+}
+
+.connection-path:hover { stroke-opacity: 1; stroke-width: 2; }
+
+.nodes-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* ── Nodes ────────────────────────────────────── */
+.node {
+  position: absolute;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1a1a24;
+  cursor: move;
+  user-select: none;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.node:hover { border-color: rgba(255, 255, 255, 0.15); }
+
+.node.selected {
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.25), 0 0 20px rgba(0, 217, 255, 0.1);
+}
+
+.node.dragging {
+  opacity: 0.92;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 217, 255, 0.3);
+  z-index: 100;
+}
+
+/* Node Header */
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 10px 0;
+}
+
+.node-tag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.prompt-tag {
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.gen-tag {
+  background: rgba(0, 217, 255, 0.12);
+  color: #00d9ff;
+  border: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.node-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(0, 217, 255, 0.15);
+  color: #00d9ff;
+  border: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.node-time {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+  margin-left: auto;
+}
+
+/* Prompt Node */
+.prompt-node {
+  width: 280px;
+  padding: 8px 12px 10px;
+  border-color: rgba(168, 85, 247, 0.3);
+  background: linear-gradient(180deg, rgba(107, 33, 168, 0.25), rgba(168, 85, 247, 0.1));
+}
+
+.prompt-content {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.5;
+  margin: 8px 0 6px;
+  max-height: 80px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.ref-thumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 9px;
+  margin-bottom: 4px;
+}
+
+/* Generation Node */
+.generation-node {
+  width: 320px;
+  padding: 8px 10px 10px;
+}
+
+.gen-images {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px;
+  margin: 8px 0 6px;
+}
+
+.gen-img-slot {
+  position: relative;
+  aspect-ratio: 1;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  cursor: crosshair;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.gen-img-slot:hover { border-color: rgba(0, 217, 255, 0.35); }
+
+.gen-img-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.1);
+}
+
+/* Per-image hover toolbar */
+.img-hover-toolbar {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.gen-img-slot:hover .img-hover-toolbar { opacity: 1; }
+
+.img-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.img-tool-btn:hover { background: rgba(0, 217, 255, 0.2); border-color: rgba(0, 217, 255, 0.4); color: #00d9ff; }
+.img-tool-btn.danger:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #ef4444; }
+
+/* "引用此图" label */
+.ref-img-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 8px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.35);
+  padding: 3px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.gen-img-slot:hover .ref-img-label { opacity: 1; }
+
+/* Branch Nodes */
+.branch-node {
+  width: 200px;
+  padding: 8px 10px 10px;
+  border-style: dashed;
+  background: rgba(10, 10, 15, 0.8);
+}
+
+.branch-img {
+  aspect-ratio: 16/9;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.1);
+  margin: 8px 0 6px;
+}
+
+/* Node Toolbar */
+.node-toolbar {
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.node:hover .node-toolbar { opacity: 1; }
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tool-btn:hover { background: rgba(0, 217, 255, 0.15); border-color: rgba(0, 217, 255, 0.3); color: #00d9ff; }
+.tool-btn.danger:hover { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); color: #ef4444; }
+
+/* Zoom Indicator */
+.zoom-indicator {
+  position: absolute;
+  bottom: 90px;
+  right: 16px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+/* Generating hint */
+.generating-hint {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.panel-icon {
-  color: #00d9ff;
-  filter: drop-shadow(0 0 6px rgba(0, 217, 255, 0.4));
-}
-
-.panel-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #ffffff;
-}
-
-.panel-desc {
+  background: rgba(13, 13, 20, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  border-radius: 10px;
+  padding: 10px 18px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: -8px;
+  color: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
 }
 
-/* ── Prompt Input ──────────────────────────── */
-.prompt-input {
-  flex: 1;
-  width: 100%;
-  min-height: 200px;
+.gen-orbs { display: flex; gap: 4px; }
+.orb {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #00d9ff;
+  animation: orbBounce 1.4s ease-in-out infinite;
+}
+.orb:nth-child(2) { animation-delay: 0.2s; }
+.orb:nth-child(3) { animation-delay: 0.4s; }
+@keyframes orbBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* ── Right Panel ─────────────────────────────── */
+.right-panel {
+  width: 230px;
+  flex-shrink: 0;
+  background: #0d0d14;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-y: auto;
   padding: 14px;
-  font-size: 13px;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  color: #ffffff;
-  resize: none;
-  outline: none;
-  transition: all 0.2s;
-  line-height: 1.6;
-}
-
-.prompt-input::placeholder { color: rgba(255, 255, 255, 0.25); }
-
-.prompt-input:focus {
-  border-color: rgba(0, 217, 255, 0.5);
-  background: rgba(0, 217, 255, 0.03);
-  box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.08);
-}
-
-/* ── Quick Prompts ─────────────────────────── */
-.prompt-tips {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
+  padding-bottom: 90px;
 }
 
-.tip-label {
-  font-size: 11px;
+.right-panel::-webkit-scrollbar { width: 3px; }
+.right-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+.panel-section { display: flex; flex-direction: column; gap: 7px; }
+
+.section-title {
+  font-size: 9px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.3);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.7px;
+  margin: 0;
 }
 
-.tip-chips {
+.panel-hint {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  margin: 0;
+  font-style: italic;
+}
+
+.info-grid { display: flex; flex-direction: column; gap: 4px; }
+.info-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.info-key { font-size: 11px; color: rgba(255, 255, 255, 0.4); }
+.info-val { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.8); }
+.id-val { font-size: 9px; font-family: monospace; color: rgba(0, 217, 255, 0.5); }
+
+.prompt-preview {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  padding: 8px 10px;
+  word-break: break-word;
 }
 
-.chip {
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
+.param-list { display: flex; flex-direction: column; gap: 4px; }
+.param-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.param-key { font-size: 11px; color: rgba(255, 255, 255, 0.4); }
+.param-val-select {
+  font-size: 10px;
+  font-family: 'Inter', sans-serif;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 2px 5px;
+  outline: none;
+}
+.param-val-select option { background: #1a1a2e; }
+
+.regen-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px;
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  color: #000;
+  background: linear-gradient(135deg, #00d9ff, #00b4d8);
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.regen-btn:hover { box-shadow: 0 0 14px rgba(0, 217, 255, 0.4); }
+
+.branch-btns { display: flex; flex-direction: column; gap: 4px; }
+.branch-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  background: transparent;
+  border: 1px solid;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+.branch-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.04); }
+.branch-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.note-textarea {
+  width: 100%;
+  min-height: 65px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  color: rgba(255, 255, 255, 0.7);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  cursor: pointer;
-  transition: all 0.2s;
+  border-radius: 7px;
+  outline: none;
+  resize: vertical;
+  line-height: 1.5;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
 }
+.note-textarea::placeholder { color: rgba(255, 255, 255, 0.25); }
+.note-textarea:focus { border-color: rgba(0, 217, 255, 0.3); }
 
-.chip:hover {
-  color: #00d9ff;
-  border-color: rgba(0, 217, 255, 0.3);
-  background: rgba(0, 217, 255, 0.05);
-}
-
-/* ── Generate Button ────────────────────────── */
-.generate-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 13px 20px;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: linear-gradient(135deg, #00d9ff 0%, #00b4d8 100%);
-  color: #000000;
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.generate-btn:hover:not(:disabled) {
-  box-shadow: 0 0 24px rgba(0, 217, 255, 0.4);
-  transform: translateY(-1px);
-}
-
-.generate-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ── Result Area ────────────────────────────── */
-.result-area {
+.empty-panel {
   flex: 1;
-  min-height: 300px;
-  border: 1px dashed rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.01);
-}
-
-/* ── Empty State ────────────────────────────── */
-.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   text-align: center;
-  padding: 40px;
 }
+.empty-panel p { font-size: 11px; color: rgba(255, 255, 255, 0.3); margin: 0; }
 
-.empty-icon {
-  color: rgba(255, 255, 255, 0.12);
-  margin-bottom: 8px;
-}
-
-.empty-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-.empty-sub {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.2);
-}
-
-/* ── Generating State ──────────────────────── */
-.generating-state {
+/* ── Bottom Input Bar ─────────────────────────── */
+.bottom-input-bar {
+  position: absolute;
+  bottom: 0;
+  left: 210px;
+  right: 230px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 40px;
+  gap: 5px;
+  background: rgba(10, 10, 15, 0.97);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 16px;
+  z-index: 20;
 }
 
-.gen-animation {
-  position: relative;
-  width: 80px;
-  height: 80px;
+.input-row {
+  display: flex;
+  gap: 5px;
+}
+
+.param-select {
+  flex: 1;
+  padding: 5px 7px;
+  font-size: 10px;
+  font-family: 'Inter', sans-serif;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+}
+.param-select option { background: #1a1a2e; color: #fff; }
+
+.input-box {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 7px 7px 7px 14px;
+  transition: border-color 0.2s;
+}
+.input-box:focus-within { border-color: rgba(0, 217, 255, 0.4); }
+
+.prompt-textarea {
+  flex: 1;
+  font-size: 12px;
+  font-family: 'Inter', sans-serif;
+  color: #fff;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  line-height: 1.5;
+  max-height: 100px;
+}
+.prompt-textarea::placeholder { color: rgba(255, 255, 255, 0.3); }
+
+.send-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.gen-orb {
-  position: absolute;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
   background: linear-gradient(135deg, #00d9ff, #00b4d8);
-  animation: orbPulse 2s ease-in-out infinite;
-}
-
-.gen-orb.ring-2 {
-  width: 60px;
-  height: 60px;
-  animation-delay: 0.3s;
-  opacity: 0.5;
-}
-
-.gen-orb.ring-3 {
-  width: 80px;
-  height: 80px;
-  animation-delay: 0.6s;
-  opacity: 0.25;
-}
-
-@keyframes orbPulse {
-  0%, 100% { transform: scale(0.8); opacity: 0.8; }
-  50% { transform: scale(1.2); opacity: 0.4; }
-}
-
-.gen-text {
-  font-size: 15px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.gen-sub {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-.dots span {
-  animation: blink 1.4s infinite both;
-}
-.dots span:nth-child(2) { animation-delay: 0.2s; }
-.dots span:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes blink {
-  0%, 80%, 100% { opacity: 0; }
-  40% { opacity: 1; }
-}
-
-/* ── Spinner ──────────────────────────────── */
-.spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(0, 0, 0, 0.3);
-  border-top-color: #000000;
+  border: none;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  color: #000;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
 }
+.send-btn:hover:not(:disabled) { box-shadow: 0 0 16px rgba(0, 217, 255, 0.5); }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* ── Images Grid ───────────────────────────── */
-.images-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
-  padding: 12px;
-  width: 100%;
-}
-
-.result-img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 10px;
+/* ── Context Menu ─────────────────────────────── */
+.context-menu {
+  position: fixed;
+  background: rgba(13, 13, 22, 0.98);
+  backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 5px;
+  min-width: 155px;
+  z-index: 9999;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
-/* ── Responsive ────────────────────────────── */
-@media (max-width: 900px) {
-  .main-content { grid-template-columns: 1fr; }
-  .prompt-panel { border-right: none; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
-  .nav-links { display: none; }
+.ctx-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 5px 10px 6px;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-family: 'Inter', sans-serif;
+  color: rgba(255, 255, 255, 0.7);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+.ctx-item:hover { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.95); }
+.ctx-item.danger:hover { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+
+.ctx-branch-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: 'Inter', sans-serif;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+}
+.ctx-branch-btn:hover { background: rgba(255, 255, 255, 0.05); }
+.ctx-branch-btn.upscale { color: #00d9ff; border-color: rgba(0, 217, 255, 0.2); }
+.ctx-branch-btn.img2img { color: #a855f7; border-color: rgba(168, 85, 247, 0.2); }
+.ctx-branch-btn.video { color: #f59e0b; border-color: rgba(245, 158, 11, 0.2); }
+
+.ctx-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 4px 0;
 }
 </style>

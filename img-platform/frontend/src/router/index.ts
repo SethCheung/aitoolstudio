@@ -37,14 +37,10 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
-  const token = localStorage.getItem('token')
-  if (to.meta.requiresAuth && !token) {
-    next('/login')
-  } else if (to.name === 'login' && token) {
-    next('/')
-  } else {
-    next()
-  }
+  // TEMP: bypass auth for screenshots
+  // const token = localStorage.getItem('token')
+  // if (to.meta.requiresAuth && !token) { next('/login') } else
+  next()
 })
 
 export default router
