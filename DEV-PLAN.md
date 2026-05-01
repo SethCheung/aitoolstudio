@@ -1,0 +1,281 @@
+# Development Plan — 内网 AI 生图协作平台
+
+> 本文件记录项目的开发阶段划分、当前进度和剩余工作。
+> 新 session 启动时应首先阅读此文件，了解项目状态后再继续开发。
+
+---
+
+## Phase 1: 项目骨架（Vue 3 + FastAPI + SQLite）
+
+**交付内容**：
+- Vue 3 + TypeScript + Vite 前端项目初始化
+- FastAPI 后端项目初始化（Python 3.10+）
+- SQLite 数据库初始化（sqlite3 + SQLAlchemy ORM）
+- Element Plus UI 组件库集成
+- Tailwind CSS 工具类集成
+- 基础目录结构和路由配置
+- 前后端通信（Axios + FastAPI CORS）
+
+**关键文件**：
+- `img-platform/frontend/package.json` — 前端依赖配置
+- `img-platform/frontend/src/main.ts` — Vue 应用入口
+- `img-platform/frontend/src/App.vue` — 根组件
+- `img-platform/frontend/vite.config.ts` — Vite 配置（CORS、代理）
+- `img-platform/backend/requirements.txt` — Python 依赖配置
+- `img-platform/backend/main.py` — FastAPI 应用入口
+- `img-platform/backend/models/database.py` — 数据库初始化
+- `docker-compose.yml` — Docker Compose 基础配置
+
+**验收标准**：
+- 前端 `npm run dev` 可启动，显示空白页面 + Element Plus 组件测试
+- 后端 `uvicorn main:app --reload` 可启动，`/docs` 显示 Swagger UI
+- Docker Compose 可启动前后端容器
+
+---
+
+## Phase 2: 用户认证系统
+
+**交付内容**：
+- users 数据表（id, username, password_hash, is_admin, created_at）
+- JWT Token 认证机制（access_token + refresh_token）
+- 登录 API（POST /api/auth/login）— 返回 JWT Token
+- 用户信息 API（GET /api/users/me）— 获取当前用户信息
+- 前端登录页面（用户名 + 密码输入框）
+- 认证中间件（保护需要登录的 API 路由）
+- 前端 Auth Store（Pinia 状态管理，存储 Token 和用户信息）
+
+**关键文件**：
+- `img-platform/backend/models/user.py` — User 模型定义
+- `img-platform/backend/schemas/auth.py` — 认证相关的 Pydantic Schema
+- `img-platform/backend/api/auth.py` — 认证 API 路由
+- `img-platform/backend/core/security.py` — JWT Token 生成和验证、密码哈希
+- `img-platform/frontend/src/stores/auth.ts` — 认证状态管理
+- `img-platform/frontend/src/views/LoginView.vue` — 登录页面
+- `img-platform/frontend/src/router/index.ts` — 路由守卫（需要登录的路由）
+
+**验收标准**：
+- 管理员可通过脚本创建初始账号
+- 用户输入用户名密码可登录，获取 Token
+- 登录后访问需要认证的页面正常，未登录跳转登录页
+- 刷新后 Token 不丢失（LocalStorage 持久化）
+
+---
+
+## Phase 3: ComfyUI API 集成
+
+**交付内容**：
+- ComfyUI 客户端封装（WebSocket + HTTP API）
+- 工作流数据表（workflows: id, name, description, workflow_json, is_enabled, created_at）
+- 工作流管理 API（CRUD：/api/workflows）
+- 生图任务队列（Celery + Redis）
+- 生图 API（POST /api/generate/comfyui）— 提交任务到队列，返回 task_id
+- 任务状态 API（GET /api/tasks/{task_id}）— 查询进度和结果
+- 生成历史记录表（generations: id, user_id, workflow_id, prompt, negative_prompt, image_path, parameters, created_at）
+
+**关键文件**：
+- `img-platform/backend/models/workflow.py` — Workflow 模型定义
+- `img-platform/backend/models/generation.py` — Generation 模型定义
+- `img-platform/backend/services/comfyui_client.py` — ComfyUI API 客户端封装
+- `img-platform/backend/api/workflows.py` — 工作流管理 API
+- `img-platform/backend/api/generate.py` — 生图 API
+- `img-platform/backend/tasks/generation_tasks.py` — Celery 生图任务
+- `img-platform/backend/core/celery_app.py` — Celery 配置
+- `img-platform/frontend/src/stores/generation.ts` — 生图状态管理
+
+**验收标准**：
+- 管理员可通过 API 上传 ComfyUI JSON 工作流
+- 用户可提交生图请求，返回 task_id
+- 前端可轮询任务状态，显示进度条
+- 生成完成后图像保存到磁盘，记录到数据库
+
+---
+
+## Phase 4: MiniMax API 集成
+
+**交付内容**：
+- MiniMax API 客户端封装（HTTP + SSE）
+- 提示词优化 API（POST /api/minimax/optimize-prompt）— M2.7 模型扩写 prompt
+- 图像理解 API（POST /api/minimax/analyze-image）— 视觉模型分析图像，返回标签和描述
+- MiniMax 生图 API（POST /api/generate/minimax）— image-01 模型生图
+- API 配额追踪表（api_quotas: id, user_id, model_type, used_tokens, reset_at）
+- 配额检查中间件（限制用户 API 调用频率和额度）
+
+**关键文件**：
+- `img-platform/backend/services/minimax_client.py` — MiniMax API 客户端封装
+- `img-platform/backend/api/minimax.py` — MiniMax 相关 API
+- `img-platform/backend/models/api_quota.py` — API 配额模型定义
+- `img-platform/backend/middleware/quota_check.py` — 配额检查中间件
+- `img-platform/frontend/src/services/minimax.ts` — MiniMax API 前端调用封装
+
+**验收标准**：
+- 输入简单描述可调用 M2.7 扩写为详细 prompt
+- 上传图像可返回自动标签和描述
+- 调用 MiniMax image-01 可生成图像并保存
+- API Token 使用量记录到数据库
+
+---
+
+## Phase 5: 对话式生图界面（核心功能）
+
+**交付内容**：
+- 对话式布局组件（类似 ChatGPT/lovart.ai）
+- 消息气泡组件（用户消息右侧，系统回复左侧）
+- 输入区组件（多行文本框 + AI 优化按钮 + 上传图片 + 工作流选择 + 引擎切换）
+- 图像网格展示组件（1-9 张图，支持点击查看大图）
+- 操作按钮（下载、保存提示词、重新生成、放大、局部重绘）
+- 加载状态组件（进度条 + 预估时间）
+- 侧边栏组件（可折叠：我的作品、提示词库、快捷操作）
+
+**关键文件**：
+- `img-platform/frontend/src/views/ChatView.vue` — 对话式生图主页面
+- `img-platform/frontend/src/components/chat/message-bubble.vue` — 消息气泡
+- `img-platform/frontend/src/components/chat/input-area.vue` — 输入区
+- `img-platform/frontend/src/components/chat/image-grid.vue` — 图像网格
+- `img-platform/frontend/src/components/chat/loading-progress.vue` — 加载进度
+- `img-platform/frontend/src/components/layout/sidebar.vue` — 侧边栏
+- `img-platform/frontend/src/composables/useChat.ts` — 聊天逻辑封装
+
+**验收标准**：
+- 用户可输入描述、选择工作流、点击发送
+- 等待时显示进度条和预估时间
+- 生成完成后显示图像网格和操作按钮
+- AI 优化按钮可调用 MiniMax 扩写 prompt
+
+---
+
+## Phase 6: 历史记录/图库管理
+
+**交付内容**：
+- "我的作品"页面（按日期/标签/工作流筛选）
+- 搜索功能（按提示词关键词搜索）
+- 图像详情页（大图展示 + 元数据 + 操作按钮）
+- 批量下载功能（多选图像打包为 ZIP）
+- 提示词库页面（保存的提示词模板，支持分类和标签）
+- 收藏/删除功能
+
+**关键文件**：
+- `img-platform/frontend/src/views/GalleryView.vue` — 图库页面
+- `img-platform/frontend/src/views/PromptLibraryView.vue` — 提示词库页面
+- `img-platform/frontend/src/components/gallery/image-card.vue` — 图像卡片
+- `img-platform/frontend/src/components/gallery/filter-bar.vue` — 筛选栏
+- `img-platform/backend/api/generations.py` — 历史记录 API（列表、搜索、删除）
+- `img-platform/backend/api/prompts.py` — 提示词库 API
+
+**验收标准**：
+- 用户可查看自己的所有生成历史
+- 支持按日期、工作流、标签筛选
+- 搜索提示词关键词可找到相关图像
+- 可批量下载选中的图像
+
+---
+
+## Phase 7: 管理员后台
+
+**交付内容**：
+- 管理员入口（仅 admin 角色可见）
+- 用户管理页面（创建账号、禁用账号、重置密码）
+- 工作流配置页面（上传 JSON、设置名称说明、启用/禁用）
+- API 配额管理页面（MiniMax token 使用统计、自定义配额设置）
+- 使用统计页面（生成次数排行、热门模型/工作流、用户活跃度图表）
+- 系统设置页面（GPU 监控：温度/显存占用、生成队列管理、系统日志）
+
+**关键文件**：
+- `img-platform/frontend/src/views/admin/AdminDashboard.vue` — 管理员仪表盘
+- `img-platform/frontend/src/views/admin/UserManagement.vue` — 用户管理
+- `img-platform/frontend/src/views/admin/WorkflowManagement.vue` — 工作流配置
+- `img-platform/frontend/src/views/admin/QuotaManagement.vue` — API 配额管理
+- `img-platform/frontend/src/views/admin/StatsView.vue` — 使用统计
+- `img-platform/frontend/src/views/admin/SystemSettings.vue` — 系统设置
+- `img-platform/backend/api/admin.py` — 管理员 API（用户 CRUD、工作流 CRUD、配额设置）
+- `img-platform/backend/api/stats.py` — 统计 API（聚合查询）
+- `img-platform/backend/services/gpu_monitor.py` — GPU 监控服务（温度、显存）
+
+**验收标准**：
+- 仅 admin 角色可访问管理员后台
+- 可创建/禁用用户账号
+- 可上传和管理 ComfyUI 工作流
+- 可查看 MiniMax token 使用统计
+- GPU 温度和显存占用实时显示
+
+---
+
+## Phase 8: Docker Compose 部署 + 收尾
+
+**交付内容**：
+- 完整 Docker Compose 配置（前端、后端、Redis、ComfyUI）
+- Nginx 反向代理配置
+- 环境变量管理（.env 文件模板）
+- 启动脚本（一键部署和启动）
+- README.md 文档（安装、配置、使用说明）
+- 错误处理和日志系统完善
+- 性能优化（图像缓存、数据库索引、API 限流）
+
+**关键文件**：
+- `docker-compose.yml` — 完整服务编排
+- `docker/nginx.conf` — Nginx 配置
+- `.env.example` — 环境变量模板
+- `scripts/deploy.sh` — 部署脚本
+- `README.md` — 项目文档
+- `img-platform/backend/core/logging_config.py` — 日志配置
+
+**验收标准**：
+- 执行 `docker-compose up -d` 可一键启动所有服务
+- 通过浏览器访问内网 IP 可正常使用
+- GPU 监控正常工作，日志记录完整
+- README.md 文档清晰，新用户可按指引部署
+
+---
+
+## 技术栈
+
+| 层级 | 技术 | 版本 | 说明 |
+|------|------|------|------|
+| **前端框架** | Vue 3 + TypeScript | 3.4.x | 响应式 UI，类型安全 |
+| **UI 组件库** | Element Plus | 2.4.x | 完整的后台组件 |
+| **CSS 框架** | Tailwind CSS | 3.4.x | 工具类快速开发 |
+| **状态管理** | Pinia | 2.1.x | Vue 3 官方推荐 |
+| **HTTP 客户端** | Axios | 1.6.x | API 调用封装 |
+| **构建工具** | Vite | 5.0.x | 快速开发和打包 |
+| **后端框架** | FastAPI | 0.109.x | Python 异步 API，自动文档 |
+| **ORM** | SQLAlchemy | 2.0.x | Python 数据库 ORM |
+| **数据库** | SQLite | 3.x | 轻量级，无需额外服务 |
+| **任务队列** | Celery + Redis | 5.3.x / 7.2.x | 异步生图任务处理 |
+| **AI 引擎** | ComfyUI | latest | 本地生图，RTX 4090 GPU |
+| **AI API** | MiniMax API | latest | M2.7 文本、视觉模型、image-01 生图 |
+| **认证** | JWT (PyJWT) | latest | Token-based 认证 |
+| **部署** | Docker + Docker Compose | latest | 容器化一键部署 |
+| **包管理** | pnpm (前端) / pip (后端) | latest | 快速、磁盘高效 |
+
+---
+
+## 数据库表
+
+| 表名 | 所属 Phase | 用途 |
+|------|-----------|------|
+| `users` | Phase 2 | 用户账号（id, username, password_hash, is_admin, created_at） |
+| `workflows` | Phase 3 | ComfyUI 工作流配置（id, name, description, workflow_json, is_enabled） |
+| `generations` | Phase 3 | 生图历史记录（id, user_id, workflow_id, prompt, image_path, parameters） |
+| `api_quotas` | Phase 4 | API 配额追踪（id, user_id, model_type, used_tokens, reset_at） |
+| `saved_prompts` | Phase 6 | 提示词库（id, user_id, name, content, tags） |
+
+---
+
+## 开发规则
+
+- 每完成一个 Phase 执行四步走：Code Review → 测试完整性 → 编译验证 → 功能测试
+- 四步走全部通过后才能 commit
+- Commit message 格式：`phase-N: 简要描述`
+- 包管理器：pnpm（前端）/ pip（后端）
+- Python 版本：3.10+
+- Node.js 版本：18.x LTS
+
+---
+
+## 已知风险与限制
+
+| Phase | 风险/限制 | 应对方案 |
+|-------|----------|---------|
+| Phase 3 | ComfyUI API 版本兼容性可能变化 | 封装客户端层，隔离变化；定期更新验证 |
+| Phase 4 | MiniMax API 需要网络连通性（可能需要代理） | 配置文件中预留代理设置；错误处理友好提示 |
+| Phase 7 | GPU 监控需要 NVIDIA 驱动和 nvidia-smi | Docker 配置中启用 GPU 透传；文档中说明前置要求 |
+| Phase 8 | RTX 4090 显存有限（24GB），高并发可能 OOM | Celery 队列限制并发任务数；显存不足时排队等待 |
