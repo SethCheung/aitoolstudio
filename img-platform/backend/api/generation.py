@@ -31,11 +31,18 @@ def list_generations(
         items=[
             GenerationResponse(
                 id=g.id,
+                type=g.type or "image",
                 prompt=g.prompt,
                 image_urls=g.image_urls or [],
-                model=g.model,
+                audio_url=g.audio_url,
+                video_url=g.video_url,
+                model=g.model or "",
                 aspect_ratio=g.aspect_ratio,
-                n_generated=g.n_generated,
+                voice_model=g.voice_model,
+                voice_id=g.voice_id,
+                video_model=g.video_model,
+                video_duration=g.video_duration,
+                n_generated=g.n_generated or 0,
                 created_at=g.created_at,
             )
             for g in items

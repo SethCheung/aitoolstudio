@@ -119,12 +119,22 @@ const contextMenu = ref<{ show: boolean; x: number; y: number; nodeId: string | 
 
 // Input
 const inputText = ref('')
-const selectedModel = ref('SDXL Turbo')
+const selectedCategory = ref('image')  // 当前选中的模型类别
+const selectedModel = ref('image-01')  // 当前选中的模型名
 const selectedStyle = ref('Cinematic')
 const selectedAspect = ref('16:9')
 const isGenerating = ref(false)
 
-const models = ['SDXL Turbo', 'DALL-E 3', 'Stable Diffusion', 'Midjourney v6']
+// 从 /api/profiles/models 动态加载
+interface AvailableModels {
+  image?: string[]
+  voice?: string[]
+  video?: string[]
+  music?: string[]
+}
+const availableModels = ref<AvailableModels>({})
+const currentModelList = computed(() => (availableModels.value as Record<string, string[]>)[selectedCategory.value] ?? [])
+
 const styles = ['Cinematic', 'Photorealistic', 'Anime', 'Abstract', 'Minimalist']
 const aspects = ['1:1', '16:9', '9:16', '4:3', '3:4']
 
@@ -464,14 +474,6 @@ function getConnectionPath(conn: Connection) {
   return `M ${fx} ${fy} C ${fx} ${fy + dx}, ${tx} ${ty - dx}, ${tx} ${ty}`
 }
 
-// MiniMax model mapping (frontend name → API model)
-const modelMap: Record<string, string> = {
-  'SDXL Turbo': 'image-01',
-  'DALL-E 3': 'image-01',
-  'Stable Diffusion': 'image-01',
-  'Midjourney v6': 'image-01-live',
-}
-
 // ── Send Message ───────────────────────────────────────
 async function sendMessage() {
   if (!inputText.value.trim()) return
@@ -511,7 +513,7 @@ async function sendMessage() {
   try {
     const resp = await apiClient.post('/image/generate', {
       prompt: promptNode.content,
-      model: modelMap[selectedModel.value] ?? 'image-01',
+      model: selectedModel.value,  // 直接用 API 模型名
       aspect_ratio: selectedAspect.value,
       n: 4,
       response_format: 'url',
@@ -588,10 +590,23 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('mouseup', globalMouseUp)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('click', closeContextMenu)
+  // 动态加载可用模型
+  try {
+    const resp = await apiClient.get('/profiles/models')
+    availableModels.value = resp.data as AvailableModels
+    // 默认选中第一个模型
+    const firstCat = 'image'
+    selectedCategory.value = firstCat
+    if (availableModels.value[firstCat]?.length) {
+      selectedModel.value = availableModels.value[firstCat][0]
+    }
+  } catch (e) {
+    console.warn('Failed to load models from profiles:', e)
+  }
 })
 
 onUnmounted(() => {
@@ -1125,9 +1140,18 @@ const branchLabel: Record<string, string> = {
           <h3 class="section-title">参数</h3>
           <div class="param-list">
             <div class="param-item">
+              <span class="param-key">类别</span>
+              <select v-model="selectedCategory" class="param-val-select">
+                <option value="image">图片</option>
+                <option value="voice">语音</option>
+                <option value="video">视频</option>
+                <option value="music">音乐</option>
+              </select>
+            </div>
+            <div class="param-item">
               <span class="param-key">模型</span>
               <select v-model="selectedModel" class="param-val-select">
-                <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+                <option v-for="m in currentModelList" :key="m" :value="m">{{ m }}</option>
               </select>
             </div>
             <div class="param-item">
@@ -1191,8 +1215,14 @@ const branchLabel: Record<string, string> = {
     <!-- Bottom Input Bar -->
     <div class="bottom-input-bar">
       <div class="input-row">
+        <select v-model="selectedCategory" class="param-select">
+          <option value="image">图片</option>
+          <option value="voice">语音</option>
+          <option value="video">视频</option>
+          <option value="music">音乐</option>
+        </select>
         <select v-model="selectedModel" class="param-select">
-          <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+          <option v-for="m in currentModelList" :key="m" :value="m">{{ m }}</option>
         </select>
         <select v-model="selectedStyle" class="param-select">
           <option v-for="s in styles" :key="s" :value="s">{{ s }}</option>
