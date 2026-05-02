@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 
+// ── Tab ──────────────────────────────────────────────
 const sidebarItems = ['概览', '用户', '工作流', 'GPU 监控', '模型', '日志', '账单', '设置']
+const activeTab = ref(0)
+
 const users = [
   ['Alex Chen', 'alex@example.com', '管理员', '活跃'],
   ['Sarah Kim', 'sarah@example.com', '专业版', '活跃'],
@@ -14,6 +17,81 @@ const workflows = ['文生图流程', '图片增强', '批量处理']
 
 const totalGens = ref(0)
 
+// ── Profiles ─────────────────────────────────────────
+interface Profile {
+  name: string
+  api_key_masked: string
+  enabled: boolean
+  priority: number
+  models: Record<string, string[]>
+}
+const profiles = ref<Profile[]>([])
+const modelOptions = ['image-01', 'image-01-turbo', 'speech-02-hd', 'speech-02', 'hailuo-video-01', 'music-01']
+const modelCategories: Record<string, string[]> = {
+  image: ['image-01', 'image-01-turbo'],
+  voice: ['speech-02-hd', 'speech-02'],
+  video: ['hailuo-video-01'],
+  music: ['music-01'],
+}
+
+const showAddForm = ref(false)
+const editingProfile = ref<Profile | null>(null)
+const form = ref({ name: '', api_key: '', enabled: true, priority: 1, models: {} as Record<string, string[]> })
+const formError = ref('')
+
+async function fetchProfiles() {
+  try {
+    profiles.value = (await axios.get('/api/profiles')).data
+  } catch (e) {
+    console.error('Failed to load profiles', e)
+  }
+}
+
+function openAdd() {
+  editingProfile.value = null
+  form.value = { name: '', api_key: '', enabled: true, priority: 1, models: { image: ['image-01'], voice: [], video: [], music: [] } }
+  formError.value = ''
+  showAddForm.value = true
+}
+
+function openEdit(p: Profile) {
+  editingProfile.value = p
+  form.value = { name: p.name, api_key: '', enabled: p.enabled, priority: p.priority, models: { ...p.models } }
+  formError.value = ''
+  showAddForm.value = true
+}
+
+async function saveProfile() {
+  if (!form.value.name || !form.value.api_key) {
+    formError.value = '名称和 API Key 不能为空'
+    return
+  }
+  try {
+    if (editingProfile.value) {
+      await axios.put(`/api/profiles/${editingProfile.value.name}`, form.value)
+    } else {
+      await axios.post('/api/profiles', form.value)
+    }
+    showAddForm.value = false
+    fetchProfiles()
+  } catch (e: any) {
+    formError.value = e?.response?.data?.detail || '保存失败'
+  }
+}
+
+async function toggleProfile(name: string, enabled: boolean) {
+  const action = enabled ? 'enable' : 'disable'
+  await axios.post(`/api/profiles/${name}/${action}`)
+  fetchProfiles()
+}
+
+async function deleteProfile(name: string) {
+  if (!confirm(`确认删除 Profile "${name}"？`)) return
+  await axios.delete(`/api/profiles/${name}`)
+  fetchProfiles()
+}
+
+// ── Init ─────────────────────────────────────────────
 async function fetchStats() {
   try {
     const resp = await axios.get('/api/generations/stats')
@@ -23,7 +101,7 @@ async function fetchStats() {
   }
 }
 
-onMounted(fetchStats)
+onMounted(() => { fetchProfiles(); fetchStats() })
 </script>
 
 <template>
@@ -210,7 +288,92 @@ onMounted(fetchStats)
             </div>
           </div>
         </div>
+
+        <!-- Profile Management (设置 tab) -->
+        <div class="section-card surface-card" style="margin-top:24px">
+          <div class="section-header">
+            <h2 class="section-title">API Profile 配置</h2>
+            <button class="btn-primary" @click="openAdd">+ 新增 Profile</button>
+          </div>
+
+          <!-- Profile List -->
+          <div class="profile-list">
+            <div v-for="p in profiles" :key="p.name" class="profile-row">
+              <div class="profile-info">
+                <div class="profile-name">{{ p.name }}</div>
+                <div class="profile-meta">
+                  <span class="badge" :class="p.enabled ? 'badge-green' : 'badge-gray'">{{ p.enabled ? '已启用' : '已禁用' }}</span>
+                  <span class="meta-tag">优先级 {{ p.priority }}</span>
+                  <span class="meta-tag">{{ p.api_key_masked }}</span>
+                </div>
+                <div class="profile-models">
+                  <template v-for="(models, cat) in (p.models || {})" :key="cat">
+                    <span v-if="models && models.length" class="model-chip">
+                      {{ cat }}: {{ models.join(', ') }}
+                    </span>
+                  </template>
+                </div>
+              </div>
+              <div class="profile-actions">
+                <button class="btn-sm" @click="toggleProfile(p.name, !p.enabled)">{{ p.enabled ? '禁用' : '启用' }}</button>
+                <button class="btn-sm" @click="openEdit(p)">编辑</button>
+                <button class="btn-sm btn-danger" @click="deleteProfile(p.name)">删除</button>
+              </div>
+            </div>
+            <div v-if="profiles.length === 0" class="empty-state">暂无 Profile，点击上方按钮添加</div>
+          </div>
+        </div>
       </main>
+    </div>
+  </div>
+
+  <!-- Add/Edit Profile Modal -->
+  <div v-if="showAddForm" class="modal-overlay" @click.self="showAddForm = false">
+    <div class="modal-box surface-card">
+      <div class="modal-header">
+        <h3>{{ editingProfile ? '编辑' : '新增' }} Profile</h3>
+        <button class="modal-close" @click="showAddForm = false">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>名称</label>
+          <input v-model="form.name" placeholder="如: MiniMax-Pro" :disabled="!!editingProfile" />
+        </div>
+        <div class="form-group">
+          <label>API Key <span style="color:#888;font-weight:400">({{ editingProfile ? '留空则不修改' : '必填' }})</span></label>
+          <input v-model="form.api_key" type="password" placeholder="sk-..." />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>优先级</label>
+            <input v-model.number="form.priority" type="number" min="1" />
+          </div>
+          <div class="form-group">
+            <label>状态</label>
+            <select v-model="form.enabled">
+              <option :value="true">启用</option>
+              <option :value="false">禁用</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>支持的模型</label>
+          <div class="model-grid">
+            <div v-for="(models, cat) in modelCategories" :key="cat" class="model-cat">
+              <div class="cat-label">{{ cat }}</div>
+              <label v-for="m in models" :key="m" class="model-check">
+                <input type="checkbox" :value="m" v-model="form.models[cat]" />
+                {{ m }}
+              </label>
+            </div>
+          </div>
+        </div>
+        <div v-if="formError" class="form-error">{{ formError }}</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" @click="showAddForm = false">取消</button>
+        <button class="btn-primary" @click="saveProfile">保存</button>
+      </div>
     </div>
   </div>
 </template>
@@ -630,4 +793,52 @@ onMounted(fetchStats)
 }
 .status-green { color: #22c55e; }
 .status-amber { color: #f59e0b; }
+
+/* Profile Management */
+.section-card { padding: 24px; border-radius: 12px; border: 1px solid #1f2937; background: #0d1117; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.section-title { font-size: 16px; font-weight: 600; color: white; margin: 0; }
+.profile-list { display: flex; flex-direction: column; gap: 12px; }
+.profile-row { display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #151821; border-radius: 8px; gap: 16px; }
+.profile-info { flex: 1; min-width: 0; }
+.profile-name { font-weight: 600; color: white; margin-bottom: 4px; }
+.profile-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.meta-tag { font-size: 12px; color: #9ca3af; background: #1f2937; padding: 2px 8px; border-radius: 4px; }
+.profile-models { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-chip { font-size: 11px; background: #1a2a3a; color: #60a5fa; padding: 2px 8px; border-radius: 4px; }
+.profile-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.empty-state { text-align: center; color: #6b7280; padding: 32px; font-size: 14px; }
+
+/* Buttons */
+.btn-primary { background: #00d2ff; color: #05070a; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.btn-primary:hover { opacity: 0.85; }
+.btn-ghost { background: transparent; color: #9ca3af; border: 1px solid #374151; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.btn-ghost:hover { color: white; border-color: #6b7280; }
+.btn-sm { background: #1f2937; color: #d1d5db; border: none; padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+.btn-sm:hover { background: #374151; color: white; }
+.btn-danger { color: #f87171 !important; border: 1px solid #7f1d1d !important; }
+.btn-danger:hover { background: #7f1d1d !important; }
+
+/* Modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-box { width: 520px; max-width: 95vw; border-radius: 12px; border: 1px solid #374151; overflow: hidden; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #1f2937; }
+.modal-header h3 { margin: 0; font-size: 15px; color: white; }
+.modal-close { background: none; border: none; color: #6b7280; cursor: pointer; font-size: 16px; padding: 4px; }
+.modal-close:hover { color: white; }
+.modal-body { padding: 20px; max-height: 70vh; overflow-y: auto; }
+.modal-footer { padding: 16px 20px; border-top: 1px solid #1f2937; display: flex; justify-content: flex-end; gap: 10px; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; color: #9ca3af; margin-bottom: 6px; font-weight: 500; }
+.form-group input, .form-group select { width: 100%; background: #151821; border: 1px solid #374151; color: white; padding: 8px 12px; border-radius: 6px; font-size: 13px; box-sizing: border-box; }
+.form-group input:focus, .form-group select:focus { outline: none; border-color: #00d2ff; }
+.form-group input:disabled { opacity: 0.5; cursor: not-allowed; }
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group { flex: 1; }
+.form-error { color: #f87171; font-size: 13px; margin-top: 8px; }
+.model-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.model-cat { background: #151821; border-radius: 8px; padding: 10px; }
+.cat-label { font-size: 12px; color: #60a5fa; text-transform: uppercase; font-weight: 600; margin-bottom: 8px; }
+.model-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #d1d5db; cursor: pointer; margin-bottom: 4px; }
+.model-check input { accent-color: #00d2ff; }
 </style>

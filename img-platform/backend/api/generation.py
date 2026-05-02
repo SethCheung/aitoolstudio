@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -18,7 +18,7 @@ def list_generations(
     db: Session = Depends(get_db),
 ):
     """获取生图历史记录，分页"""
-    total = db.query(Generation).count()
+    total = db.query(func.count(Generation.id)).scalar()
     items = (
         db.query(Generation)
         .order_by(desc(Generation.created_at))
@@ -46,7 +46,8 @@ def list_generations(
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
     """获取统计数据（供 HomeView / AdminView 使用）"""
-    total = db.query(Generation).count()
+    from sqlalchemy import func
+    total = db.query(func.count(Generation.id)).scalar()
     return {
-        "total_generations": total,
+        "total_generations": total or 0,
     }

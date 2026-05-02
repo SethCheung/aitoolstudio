@@ -11,6 +11,7 @@ from api.voice import router as voice_router
 from api.video import router as video_router
 from api.music import router as music_router
 from api.generation import router as generation_router
+from api.profiles import router as profiles_router
 from models.database import init_db
 
 app = FastAPI(
@@ -45,6 +46,7 @@ app.include_router(voice_router)
 app.include_router(video_router)
 app.include_router(music_router)
 app.include_router(generation_router)
+app.include_router(profiles_router)
 
 
 @app.get("/")
