@@ -9,7 +9,9 @@ export interface User {
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('token') || null)
+  // Token stored in memory only — more secure than localStorage (XSS risk)
+  // Requires re-login after page refresh but tokens shouldn't live in DOM storage
+  const token = ref<string | null>(null)
   const user = ref<User | null>(null)
   const error = ref<string | null>(null)
 
@@ -17,7 +19,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setToken(newToken: string) {
     token.value = newToken
-    localStorage.setItem('token', newToken)
   }
 
   function setUser(newUser: User) {
@@ -52,11 +53,13 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value = null
     error.value = null
-    localStorage.removeItem('token')
   }
 
-  // 初始化时恢复登录状态
-  if (token.value) {
+  // Rehydrate from localStorage on init (supports page refresh within same tab)
+  // localStorage is a fallback — the primary store is memory
+  const stored = localStorage.getItem('token')
+  if (stored) {
+    token.value = stored
     fetchMe()
   }
 

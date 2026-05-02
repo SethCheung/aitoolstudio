@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 import sys
@@ -15,6 +15,7 @@ from core.security import (
 from models.database import get_db
 from models.user import User
 from schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from limiter import limiter
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 security = HTTPBearer()
@@ -24,7 +25,7 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
-    """依赖：获取当前登录用户"""
+    """Dependency: Get current logged-in user"""
     token = credentials.credentials
     token_data = decode_access_token(token)
     if token_data is None:
@@ -42,11 +43,19 @@ def get_current_user(
     return user
 
 
+def validate_password(password: str) -> tuple[bool, str]:
+    """Validate password meets minimum security requirements"""
+    if len(password) < 8:
+        return False, "密码长度至少为 8 位"
+    return True, ""
+
+
 @router.post("/login", response_model=TokenResponse)
-def login(request: LoginRequest, db: Session = Depends(get_db)):
-    """用户登录，返回 JWT Token"""
-    user = db.query(User).filter(User.username == request.username).first()
-    if user is None or not verify_password(request.password, user.password_hash):
+@limiter.limit("5/minute")
+def login(request: Request, login_req: LoginRequest, db: Session = Depends(get_db)):
+    """User login — returns JWT token. Rate limited: 5 attempts/minute per IP"""
+    user = db.query(User).filter(User.username == login_req.username).first()
+    if user is None or not verify_password(login_req.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
@@ -57,17 +66,24 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    """注册新用户（普通用户）"""
-    existing = db.query(User).filter(User.username == request.username).first()
+@limiter.limit("10/minute")
+def register(request: Request, register_req: RegisterRequest, db: Session = Depends(get_db)):
+    """Register new user — password must be at least 8 characters. Rate limited: 10/min per IP"""
+    valid, msg = validate_password(register_req.password)
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=msg,
+        )
+    existing = db.query(User).filter(User.username == register_req.username).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="用户名已存在",
         )
     user = User(
-        username=request.username,
-        password_hash=hash_password(request.password),
+        username=register_req.username,
+        password_hash=hash_password(register_req.password),
         is_admin=False,
     )
     db.add(user)
