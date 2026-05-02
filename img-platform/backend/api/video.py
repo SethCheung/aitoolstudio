@@ -1,19 +1,26 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import sys, os
+import sys, os, logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.video import VideoGenerateRequest, VideoResponse
 from schemas.generation import GenerationResponse
 from services.minimax import generate_video
 from models.database import get_db
+from models.user import User
 from models.generation import Generation
+from api.auth import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/video", tags=["视频生成"])
 
 
 @router.post("/generate", response_model=GenerationResponse)
-async def generate(req: VideoGenerateRequest, db: Session = Depends(get_db)):
+async def generate(
+    req: VideoGenerateRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
     """文生视频 — 代理 MiniMax Hailuo API，生成后入库"""
     try:
         result = await generate_video(
@@ -24,8 +31,9 @@ async def generate(req: VideoGenerateRequest, db: Session = Depends(get_db)):
             fps=req.fps,
             seed=req.seed,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Video generation failed")
+        raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
 
     base_resp = result.get("base_resp", {})
     if base_resp.get("status_code", 0) != 0:
