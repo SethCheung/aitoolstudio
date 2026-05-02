@@ -1,8 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
-from slowapi.util import get_remote_address
-import re
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -68,23 +66,24 @@ def login(request: Request, login_req: LoginRequest, db: Session = Depends(get_d
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    """Register new user — password must be at least 8 characters"""
-    valid, msg = validate_password(request.password)
+@limiter.limit("10/minute")
+def register(request: Request, register_req: RegisterRequest, db: Session = Depends(get_db)):
+    """Register new user — password must be at least 8 characters. Rate limited: 10/min per IP"""
+    valid, msg = validate_password(register_req.password)
     if not valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=msg,
         )
-    existing = db.query(User).filter(User.username == request.username).first()
+    existing = db.query(User).filter(User.username == register_req.username).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="用户名已存在",
         )
     user = User(
-        username=request.username,
-        password_hash=hash_password(request.password),
+        username=register_req.username,
+        password_hash=hash_password(register_req.password),
         is_admin=False,
     )
     db.add(user)
