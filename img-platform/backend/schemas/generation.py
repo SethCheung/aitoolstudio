@@ -5,18 +5,18 @@ from typing import Optional
 
 class GenerationResponse(BaseModel):
     id: int
-    type: str  # image | voice | video
+    type: str = "image"
     prompt: str
-    image_urls: list[str]
-    audio_url: Optional[str]
-    video_url: Optional[str]
-    model: str
-    aspect_ratio: Optional[str]
-    voice_model: Optional[str]
-    voice_id: Optional[str]
-    video_model: Optional[str]
-    video_duration: Optional[str]
-    n_generated: int
+    image_urls: list[str] = []
+    audio_url: Optional[str] = None
+    video_url: Optional[str] = None
+    model: str = ""
+    aspect_ratio: Optional[str] = None
+    voice_model: Optional[str] = None
+    voice_id: Optional[str] = None
+    video_model: Optional[str] = None
+    video_duration: Optional[str] = None
+    n_generated: int = 0
     created_at: datetime
 
     class Config:

@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import axios from 'axios'
 
 // ── Tab ──────────────────────────────────────────────
 const sidebarItems = ['概览', '用户', '工作流', 'GPU 监控', '模型', '日志', '账单', '设置']
-const activeTab = ref(0)
 
 const users = [
   ['Alex Chen', 'alex@example.com', '管理员', '活跃'],
@@ -26,7 +25,6 @@ interface Profile {
   models: Record<string, string[]>
 }
 const profiles = ref<Profile[]>([])
-const modelOptions = ['image-01', 'image-01-turbo', 'speech-02-hd', 'speech-02', 'hailuo-video-01', 'music-01']
 const modelCategories: Record<string, string[]> = {
   image: ['image-01', 'image-01-turbo'],
   voice: ['speech-02-hd', 'speech-02'],

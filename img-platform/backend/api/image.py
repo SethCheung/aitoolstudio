@@ -41,6 +41,7 @@ async def generate(req: ImageGenerateRequest, db: Session = Depends(get_db)):
 
     # 保存到数据库
     gen = Generation(
+        type="image",
         prompt=req.prompt,
         image_urls=image_urls,
         model=req.model,
@@ -54,10 +55,17 @@ async def generate(req: ImageGenerateRequest, db: Session = Depends(get_db)):
 
     return GenerationResponse(
         id=gen.id,
+        type=gen.type or "image",
         prompt=gen.prompt,
-        image_urls=image_urls,
-        model=gen.model,
+        image_urls=gen.image_urls or image_urls,
+        audio_url=gen.audio_url,
+        video_url=gen.video_url,
+        model=gen.model or "",
         aspect_ratio=gen.aspect_ratio,
-        n_generated=gen.n_generated,
+        voice_model=gen.voice_model,
+        voice_id=gen.voice_id,
+        video_model=gen.video_model,
+        video_duration=gen.video_duration,
+        n_generated=gen.n_generated or 0,
         created_at=gen.created_at,
     )
