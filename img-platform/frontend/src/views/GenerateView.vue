@@ -685,8 +685,8 @@ const branchLabel: Record<string, string> = {
         <div class="sidebar-btns">
           <button
             class="sidebar-action-btn"
-            @click="addVariation(activeNode?.id || '')"
-            :disabled="!activeNode || activeNode.type !== 'generation'"
+            title="即将支持"
+            @click="alert('即将支持')"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <path d="M1 4v6h6M23 20v-6h-6"/>
@@ -696,8 +696,8 @@ const branchLabel: Record<string, string> = {
           </button>
           <button
             class="sidebar-action-btn"
-            @click="addUpscale(activeNode?.id || '', 0)"
-            :disabled="!activeNode || activeNode.type !== 'generation'"
+            title="即将支持"
+            @click="alert('即将支持')"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
@@ -918,13 +918,13 @@ const branchLabel: Record<string, string> = {
           </div>
 
           <div class="node-toolbar">
-            <button class="tool-btn" title="Variation" @click.stop="addVariation(node.id)">
+            <button class="tool-btn" title="即将支持" @click.stop="alert('即将支持')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
                 <path d="M1 4v6h6M23 20v-6h-6"/>
                 <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
               </svg>
             </button>
-            <button class="tool-btn" title="Upscale" @click.stop="addUpscale(node.id, 0)">
+            <button class="tool-btn" title="即将支持" @click.stop="alert('即将支持')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
                 <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
               </svg>
@@ -1226,13 +1226,13 @@ const branchLabel: Record<string, string> = {
         @click.stop
       >
         <div class="ctx-title">添加分支节点</div>
-        <button class="ctx-branch-btn upscale" @click="addBranch('upscale')">
+        <button class="ctx-branch-btn upscale" disabled title="即将支持" @click="alert('即将支持')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#00d9ff" stroke-width="2" width="13" height="13">
             <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
           </svg>
           放大 (超分辨率)
         </button>
-        <button class="ctx-branch-btn img2img" @click="addBranch('img2img')">
+        <button class="ctx-branch-btn img2img" disabled title="即将支持" @click="alert('即将支持')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" width="13" height="13">
             <rect x="3" y="3" width="18" height="18" rx="2"/>
             <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -1240,7 +1240,7 @@ const branchLabel: Record<string, string> = {
           </svg>
           图生图
         </button>
-        <button class="ctx-branch-btn video" @click="addBranch('video')">
+        <button class="ctx-branch-btn video" disabled title="即将支持" @click="alert('即将支持')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" width="13" height="13">
             <polygon points="23 7 16 12 23 17 23 7"/>
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>

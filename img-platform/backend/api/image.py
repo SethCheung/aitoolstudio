@@ -49,12 +49,14 @@ async def generate(
 
     # 保存到数据库
     gen = Generation(
+        type="image",
         prompt=req.prompt,
         image_urls=image_urls,
-        model=req.model,
+        model=req.model or "image-01",
         aspect_ratio=req.aspect_ratio,
         n_generated=len(image_urls),
         mini_max_id=result.get("id", ""),
+        user_id=_current_user.id,
     )
     db.add(gen)
     db.commit()
@@ -62,6 +64,7 @@ async def generate(
 
     return GenerationResponse(
         id=gen.id,
+        type="image",
         prompt=gen.prompt,
         image_urls=image_urls,
         model=gen.model,

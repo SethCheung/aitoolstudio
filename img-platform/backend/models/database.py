@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, func
 from sqlalchemy.orm import sessionmaker, declarative_base
+import os
 
-DATABASE_URL = "sqlite:///./img_platform.db"
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./img_platform.db")
 
 engine = create_engine(
     DATABASE_URL, 
