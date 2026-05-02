@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import axios from 'axios'
+
+const apiClient = axios.create({ baseURL: '/api', timeout: 60000 })
 
 // ── Types ───────────────────────────────────────────────
 interface Position { x: number; y: number }
@@ -26,7 +29,7 @@ interface GenerationNode extends BaseNode {
 }
 
 interface BranchNode extends BaseNode {
-  type: 'upscale' | 'img2img' | 'video'
+  type: 'upscale' | 'img2img' | 'video' | 'voice' | 'music'
   sourceGenId: string
   sourceImgIndex: number
   image?: string
@@ -34,7 +37,24 @@ interface BranchNode extends BaseNode {
   time: string
 }
 
-type AnyNode = PromptNode | GenerationNode | BranchNode
+interface VoiceNode extends BaseNode {
+  type: 'voice'
+  content: string
+  voiceId: string
+  voiceModel: string
+  audioUrl?: string
+  time: string
+}
+
+interface MusicNode extends BaseNode {
+  type: 'music'
+  content: string
+  musicModel: string
+  audioUrl?: string
+  time: string
+}
+
+type AnyNode = PromptNode | GenerationNode | BranchNode | VoiceNode | MusicNode
 
 interface Connection {
   id: string
@@ -44,7 +64,7 @@ interface Connection {
 }
 
 // ── State ──────────────────────────────────────────────
-const canvasRef = ref<HTMLDivElement>(null)
+const canvasRef = ref<HTMLDivElement | null>(null)
 
 // Canvas transform (pan + zoom)
 const pan = ref<Position>({ x: 0, y: 0 })
@@ -164,11 +184,6 @@ function onCanvasMouseMove(e: MouseEvent) {
       node.y = (e.clientY - pan.value.y - dragOffset.value.y) / zoom.value
     }
   }
-}
-
-function onCanvasMouseUp() {
-  isPanning.value = false
-  draggingNode.value = null
 }
 
 function onWheel(e: WheelEvent) {
@@ -296,32 +311,6 @@ function addBranch(branchType: 'upscale' | 'img2img' | 'video') {
   connectFrom.value = null
 }
 
-function addBranchFromCtx(branchType: 'upscale' | 'img2img' | 'video', genId: string, imgIndex: number) {
-  const sourceGen = nodes.value.find(n => n.id === genId) as GenerationNode
-  if (!sourceGen) return
-
-  const newNode: BranchNode = {
-    id: `${branchType}-${Date.now()}`,
-    type: branchType,
-    x: sourceGen.x + (imgIndex % 2 === 0 ? -120 : 120),
-    y: sourceGen.y + 220,
-    selected: false,
-    sourceGenId: sourceGen.id,
-    sourceImgIndex: imgIndex,
-    image: '',
-    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  }
-
-  nodes.value.push(newNode)
-  connections.value.push({
-    id: `conn-${Date.now()}`,
-    from: sourceGen.id,
-    to: newNode.id,
-    fromImgIndex: imgIndex
-  })
-  contextMenu.value.show = false
-}
-
 function addVariation(genId: string) {
   const gen = nodes.value.find(n => n.id === genId)
   if (!gen) return
@@ -354,6 +343,88 @@ function addUpscale(genId: string, imgIndex: number) {
   }
   nodes.value.push(newNode)
   connections.value.push({ id: `conn-${Date.now()}`, from: gen.id, to: newNode.id, fromImgIndex: imgIndex })
+}
+
+// ── Add Voice Node ────────────────────────────────────
+function addVoiceNode() {
+  const cx = (-pan.value.x + (canvasRef.value?.clientWidth ?? 800) / 2) / zoom.value
+  const cy = (-pan.value.y + (canvasRef.value?.clientHeight ?? 600) / 2) / zoom.value
+  const newNode: VoiceNode = {
+    id: `voice-${Date.now()}`,
+    type: 'voice',
+    x: cx - 100,
+    y: cy,
+    selected: false,
+    content: '',
+    voiceId: 'male-qn-qingse',
+    voiceModel: 'speech-02-hd',
+    audioUrl: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+  nodes.value.push(newNode)
+  activeNode.value = newNode
+  nodes.value.forEach(n => n.selected = n.id === newNode.id)
+}
+
+// ── Add Music Node ────────────────────────────────────
+function addMusicNode() {
+  const cx = (-pan.value.x + (canvasRef.value?.clientWidth ?? 800) / 2) / zoom.value
+  const cy = (-pan.value.y + (canvasRef.value?.clientHeight ?? 600) / 2) / zoom.value
+  const newNode: MusicNode = {
+    id: `music-${Date.now()}`,
+    type: 'music',
+    x: cx - 100,
+    y: cy,
+    selected: false,
+    content: '',
+    musicModel: 'music-01',
+    audioUrl: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  }
+  nodes.value.push(newNode)
+  activeNode.value = newNode
+  nodes.value.forEach(n => n.selected = n.id === newNode.id)
+}
+
+// ── Send Voice ───────────────────────────────────────
+async function sendVoice(nodeId: string) {
+  const node = nodes.value.find(n => n.id === nodeId) as VoiceNode
+  if (!node || !node.content.trim()) return
+  isGenerating.value = true
+  try {
+    const resp = await apiClient.post('/voice/generate', {
+      text: node.content,
+      voice_id: node.voiceId,
+      model: node.voiceModel,
+    })
+    const data = resp.data as { audio_url: string }
+    node.audioUrl = data.audio_url
+  } catch (err: any) {
+    console.error('Voice generation failed:', err)
+    alert(`Voice generation failed: ${err?.response?.data?.detail ?? err.message}`)
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+// ── Send Music ───────────────────────────────────────
+async function sendMusic(nodeId: string) {
+  const node = nodes.value.find(n => n.id === nodeId) as MusicNode
+  if (!node || !node.content.trim()) return
+  isGenerating.value = true
+  try {
+    const resp = await apiClient.post('/music/generate', {
+      prompt: node.content,
+      model: node.musicModel,
+    })
+    const data = resp.data as { audio_url: string }
+    node.audioUrl = data.audio_url
+  } catch (err: any) {
+    console.error('Music generation failed:', err)
+    alert(`Music generation failed: ${err?.response?.data?.detail ?? err.message}`)
+  } finally {
+    isGenerating.value = false
+  }
 }
 
 // ── Connection Path ────────────────────────────────────
@@ -393,8 +464,16 @@ function getConnectionPath(conn: Connection) {
   return `M ${fx} ${fy} C ${fx} ${fy + dx}, ${tx} ${ty - dx}, ${tx} ${ty}`
 }
 
+// MiniMax model mapping (frontend name → API model)
+const modelMap: Record<string, string> = {
+  'SDXL Turbo': 'image-01',
+  'DALL-E 3': 'image-01',
+  'Stable Diffusion': 'image-01',
+  'Midjourney v6': 'image-01-live',
+}
+
 // ── Send Message ───────────────────────────────────────
-function sendMessage() {
+async function sendMessage() {
   if (!inputText.value.trim()) return
   const promptId = `prompt-${Date.now()}`
   const genId = `gen-${Date.now() + 1}`
@@ -406,7 +485,7 @@ function sendMessage() {
     id: promptId,
     type: 'prompt',
     x: cx - 140,
-    y: cy + 100,  // below generated
+    y: cy + 100,
     selected: false,
     content: inputText.value,
     refImage: '',
@@ -417,7 +496,7 @@ function sendMessage() {
     id: genId,
     type: 'generation',
     x: cx - 160,
-    y: cy - 120,  // above prompt
+    y: cy - 120,
     selected: false,
     images: ['', '', '', ''],
     time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
@@ -428,7 +507,27 @@ function sendMessage() {
 
   inputText.value = ''
   isGenerating.value = true
-  setTimeout(() => { isGenerating.value = false }, 2000)
+
+  try {
+    const resp = await apiClient.post('/image/generate', {
+      prompt: promptNode.content,
+      model: modelMap[selectedModel.value] ?? 'image-01',
+      aspect_ratio: selectedAspect.value,
+      n: 4,
+      response_format: 'url',
+      prompt_optimizer: false,
+    })
+    const data = resp.data as { image_urls: string[] }
+    // Fill up to 4 image slots
+    for (let i = 0; i < Math.min(data.image_urls.length, 4); i++) {
+      genNode.images[i] = data.image_urls[i]
+    }
+  } catch (err: any) {
+    console.error('生成失败:', err)
+    alert(`生成失败: ${err?.response?.data?.detail ?? err.message ?? '未知错误'}`)
+  } finally {
+    isGenerating.value = false
+  }
 }
 
 // ── Auto Layout ───────────────────────────────────────
@@ -444,7 +543,7 @@ function autoLayout() {
       .map(c => nodes.value.find(n => n.id === c.to))
       .filter(n => n?.type === 'generation') as GenerationNode[]
 
-    gens.forEach((gen, gi) => {
+    gens.forEach((gen, _gi) => {
       gen.x = prompt.x
       gen.y = baseY - 360
 
@@ -505,12 +604,16 @@ onUnmounted(() => {
 const branchColor: Record<string, string> = {
   upscale: '#00d9ff',
   img2img: '#a855f7',
-  video: '#f59e0b'
+  video: '#f59e0b',
+  voice: '#22d3ee',
+  music: '#f97316'
 }
 const branchLabel: Record<string, string> = {
-  upscale: 'UPSCA',
+  upscale: 'UPSCAL',
   img2img: 'IMG2IMG',
-  video: 'VIDEO'
+  video: 'VIDEO',
+  voice: 'VOICE',
+  music: 'MUSIC'
 }
 </script>
 
@@ -523,62 +626,62 @@ const branchLabel: Record<string, string> = {
           <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
           </svg>
-          <span class="brand-name">AI Image Generator</span>
+          <span class="brand-name">AI 图片生成器</span>
         </div>
         <button class="new-canvas-btn" @click="zoomReset">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
             <path d="M12 5v14M5 12h14"/>
           </svg>
-          New Canvas
+          新建画布
         </button>
       </div>
 
       <div class="sidebar-section">
-        <span class="section-label">Canvas Controls</span>
+        <span class="section-label">画布控制</span>
         <div class="sidebar-btns">
           <button class="sidebar-action-btn" @click="zoomIn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/>
             </svg>
-            Zoom In
+            放大
           </button>
           <button class="sidebar-action-btn" @click="zoomOut">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M8 11h6"/>
             </svg>
-            Zoom Out
+            缩小
           </button>
           <button class="sidebar-action-btn" @click="zoomReset">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
               <path d="M3 3v5h5"/>
             </svg>
-            Reset View
+            重置视图
           </button>
         </div>
       </div>
 
       <div class="sidebar-section">
-        <span class="section-label">Nodes</span>
+        <span class="section-label">节点</span>
         <div class="sidebar-btns">
           <button class="sidebar-action-btn" @click="autoLayout">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
               <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
             </svg>
-            Auto Layout
+            自动布局
           </button>
           <button class="sidebar-action-btn" @click="() => { nodes = []; connections = []; activeNode = null }">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
             </svg>
-            Clear All
+            清空全部
           </button>
         </div>
       </div>
 
       <div class="sidebar-section">
-        <span class="section-label">Quick Actions</span>
+        <span class="section-label">快捷操作</span>
         <div class="sidebar-btns">
           <button
             class="sidebar-action-btn"
@@ -589,7 +692,7 @@ const branchLabel: Record<string, string> = {
               <path d="M1 4v6h6M23 20v-6h-6"/>
               <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
             </svg>
-            Add Variation
+            添加变体
           </button>
           <button
             class="sidebar-action-btn"
@@ -599,13 +702,34 @@ const branchLabel: Record<string, string> = {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
             </svg>
-            Add Upscale
+            添加放大
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <span class="section-label">音频</span>
+        <div class="sidebar-btns">
+          <button class="sidebar-action-btn" @click="addVoiceNode">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" width="13" height="13">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+            新建语音
+          </button>
+          <button class="sidebar-action-btn" @click="addMusicNode">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" width="13" height="13">
+              <path d="M9 18V5l12-2v13"/>
+              <circle cx="6" cy="18" r="3"/>
+              <circle cx="18" cy="16" r="3"/>
+            </svg>
+            新建音乐
           </button>
         </div>
       </div>
 
       <div class="sidebar-node-list">
-        <span class="section-label">Nodes ({{ nodes.length }})</span>
+        <span class="section-label">节点 ({{ nodes.length }})</span>
         <div class="node-list-items">
           <button
             v-for="node in nodes"
@@ -628,7 +752,7 @@ const branchLabel: Record<string, string> = {
           <div class="user-avatar">A</div>
           <div class="user-details">
             <span class="user-name">admin</span>
-            <span class="user-plan">Pro Plan</span>
+            <span class="user-plan">专业版</span>
           </div>
         </div>
       </div>
@@ -749,7 +873,7 @@ const branchLabel: Record<string, string> = {
           <!-- 2x2 Image Grid -->
           <div class="gen-images">
             <div
-              v-for="(img, i) in (node as GenerationNode).images"
+              v-for="(_img, i) in (node as GenerationNode).images"
               :key="i"
               class="gen-img-slot"
               @mousedown.stop="onImageConnectStart($event, node.id, i)"
@@ -856,12 +980,97 @@ const branchLabel: Record<string, string> = {
             </button>
             <button class="tool-btn danger" title="Delete" @click.stop="deleteNode(node.id)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
               </svg>
             </button>
           </div>
         </div>
+
+        <!-- VOICE NODE -->
+        <div
+          v-for="node in nodes.filter(n => n.type === 'voice')"
+          :key="node.id"
+          class="node voice-node"
+          :class="{ selected: node.selected, dragging: draggingNode === node.id }"
+          :style="{ left: node.x + 'px', top: node.y + 'px', borderColor: branchColor['voice'] + '40' }"
+          @mousedown="(e) => onNodeMouseDown(e, node.id)"
+          @contextmenu="(e) => onNodeRightClick(e, node.id)"
+        >
+          <div class="node-header">
+            <span class="node-tag" :style="{ background: branchColor['voice'] + '22', color: branchColor['voice'] }">VOICE</span>
+            <span class="node-time">{{ (node as VoiceNode).time }}</span>
+          </div>
+          <div class="voice-content">
+            <textarea
+              class="voice-textarea"
+              v-model="(node as VoiceNode).content"
+              placeholder="输入要合成的文本..."
+              rows="3"
+            ></textarea>
+            <div class="voice-controls">
+              <select v-model="(node as VoiceNode).voiceId" class="voice-select">
+                <option value="male-qn-qingse">male-qn-qingse</option>
+                <option value="female-qn-qingse">female-qn-qingse</option>
+                <option value="male-qn-baihua">male-qn-baihua</option>
+                <option value="female-qn-baihua">female-qn-baihua</option>
+              </select>
+            </div>
+            <audio v-if="(node as VoiceNode).audioUrl" :src="(node as VoiceNode).audioUrl" controls class="voice-audio"></audio>
+          </div>
+          <div class="node-toolbar">
+            <button class="tool-btn" title="Generate Voice" @click.stop="sendVoice(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+            </button>
+            <button class="tool-btn danger" title="Delete" @click.stop="deleteNode(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- MUSIC NODE -->
+        <div
+          v-for="node in nodes.filter(n => n.type === 'music')"
+          :key="node.id"
+          class="node music-node"
+          :class="{ selected: node.selected, dragging: draggingNode === node.id }"
+          :style="{ left: node.x + 'px', top: node.y + 'px', borderColor: branchColor['music'] + '40' }"
+          @mousedown="(e) => onNodeMouseDown(e, node.id)"
+          @contextmenu="(e) => onNodeRightClick(e, node.id)"
+        >
+          <div class="node-header">
+            <span class="node-tag" :style="{ background: branchColor['music'] + '22', color: branchColor['music'] }">MUSIC</span>
+            <span class="node-time">{{ (node as MusicNode).time }}</span>
+          </div>
+          <div class="music-content">
+            <textarea
+              class="music-textarea"
+              v-model="(node as MusicNode).content"
+              placeholder="描述你想要的音乐..."
+              rows="3"
+            ></textarea>
+            <audio v-if="(node as MusicNode).audioUrl" :src="(node as MusicNode).audioUrl" controls class="music-audio"></audio>
+          </div>
+          <div class="node-toolbar">
+            <button class="tool-btn" title="Generate Music" @click.stop="sendMusic(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <path d="M9 18V5l12-2v13"/>
+                <circle cx="6" cy="18" r="3"/>
+                <circle cx="18" cy="16" r="3"/>
+              </svg>
+            </button>
+            <button class="tool-btn danger" title="Delete" @click.stop="deleteNode(node.id)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
 
       </div><!-- /nodes-canvas -->
 
@@ -871,7 +1080,7 @@ const branchLabel: Record<string, string> = {
       <!-- Generating overlay hint -->
       <div v-if="isGenerating" class="generating-hint">
         <div class="gen-orbs"><div class="orb"></div><div class="orb"></div><div class="orb"></div></div>
-        AI is creating your images...
+        AI 正在创作你的图片...
       </div>
     </main>
 
@@ -879,16 +1088,16 @@ const branchLabel: Record<string, string> = {
     <aside class="right-panel">
       <template v-if="activeNode">
         <div class="panel-section">
-          <h3 class="section-title">Node Info</h3>
+          <h3 class="section-title">节点信息</h3>
           <div class="info-grid">
             <div class="info-row">
-              <span class="info-key">Type</span>
+              <span class="info-key">类型</span>
               <span class="info-val" :style="{ color: activeNode.type === 'prompt' ? '#a855f7' : activeNode.type === 'generation' ? '#00d9ff' : branchColor[activeNode.type] }">
                 {{ activeNode.type.toUpperCase() }}
               </span>
             </div>
             <div class="info-row">
-              <span class="info-key">Position</span>
+              <span class="info-key">位置</span>
               <span class="info-val">{{ Math.round(activeNode.x) }}, {{ Math.round(activeNode.y) }}</span>
             </div>
             <div class="info-row">
@@ -900,35 +1109,35 @@ const branchLabel: Record<string, string> = {
 
         <template v-if="activeNode.type === 'prompt'">
           <div class="panel-section">
-            <h3 class="section-title">Prompt</h3>
+            <h3 class="section-title">提示词</h3>
             <div class="prompt-preview">{{ (activeNode as PromptNode).content }}</div>
           </div>
         </template>
 
         <template v-if="activeNode.type === 'generation'">
           <div class="panel-section">
-            <h3 class="section-title">Images ({{ (activeNode as GenerationNode).images.length }})</h3>
-            <p class="panel-hint">Click an image to start a branch connection</p>
+            <h3 class="section-title">图片 ({{ (activeNode as GenerationNode).images.length }})</h3>
+            <p class="panel-hint">点击图片开始分支连接</p>
           </div>
         </template>
 
         <div class="panel-section">
-          <h3 class="section-title">Parameters</h3>
+          <h3 class="section-title">参数</h3>
           <div class="param-list">
             <div class="param-item">
-              <span class="param-key">Model</span>
+              <span class="param-key">模型</span>
               <select v-model="selectedModel" class="param-val-select">
                 <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
               </select>
             </div>
             <div class="param-item">
-              <span class="param-key">Style</span>
+              <span class="param-key">风格</span>
               <select v-model="selectedStyle" class="param-val-select">
                 <option v-for="s in styles" :key="s" :value="s">{{ s }}</option>
               </select>
             </div>
             <div class="param-item">
-              <span class="param-key">Aspect</span>
+              <span class="param-key">比例</span>
               <select v-model="selectedAspect" class="param-val-select">
                 <option v-for="a in aspects" :key="a" :value="a">{{ a }}</option>
               </select>
@@ -939,12 +1148,12 @@ const branchLabel: Record<string, string> = {
               <path d="M23 4v6h-6M1 20v-6h6"/>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
-            Regenerate from Node
+            重新生成
           </button>
         </div>
 
         <div class="panel-section">
-          <h3 class="section-title">Branch Actions</h3>
+          <h3 class="section-title">分支操作</h3>
           <div class="branch-btns">
             <button
               v-for="bt in (['upscale', 'img2img', 'video'] as const)"
@@ -960,11 +1169,11 @@ const branchLabel: Record<string, string> = {
         </div>
 
         <div class="panel-section">
-          <h3 class="section-title">Notes</h3>
+          <h3 class="section-title">备注</h3>
           <textarea
             v-model="noteText"
             class="note-textarea"
-            placeholder="Add notes about this node..."
+            placeholder="添加关于此节点的备注..."
           ></textarea>
         </div>
       </template>
@@ -974,7 +1183,7 @@ const branchLabel: Record<string, string> = {
           <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32" style="color: rgba(0,217,255,0.25)">
             <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
           </svg>
-          <p>Select a node to view its details</p>
+          <p>选择节点查看详情</p>
         </div>
       </template>
     </aside>
@@ -996,7 +1205,7 @@ const branchLabel: Record<string, string> = {
         <textarea
           v-model="inputText"
           class="prompt-textarea"
-          placeholder="Describe what you want to create... (Enter to send)"
+          placeholder="描述你想创作的内容... (Enter 发送)"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"
         ></textarea>
@@ -1016,12 +1225,12 @@ const branchLabel: Record<string, string> = {
         :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
         @click.stop
       >
-        <div class="ctx-title">Add Branch Node</div>
+        <div class="ctx-title">添加分支节点</div>
         <button class="ctx-branch-btn upscale" @click="addBranch('upscale')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#00d9ff" stroke-width="2" width="13" height="13">
             <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
           </svg>
-          Upscale (Super Resolution)
+          放大 (超分辨率)
         </button>
         <button class="ctx-branch-btn img2img" @click="addBranch('img2img')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" width="13" height="13">
@@ -1029,17 +1238,17 @@ const branchLabel: Record<string, string> = {
             <circle cx="8.5" cy="8.5" r="1.5"/>
             <path d="M21 15l-5-5L5 21"/>
           </svg>
-          Img2Img (Image to Image)
+          图生图
         </button>
         <button class="ctx-branch-btn video" @click="addBranch('video')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" width="13" height="13">
             <polygon points="23 7 16 12 23 17 23 7"/>
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
           </svg>
-          Video Generation
+          视频生成
         </button>
         <div class="ctx-divider"></div>
-        <button class="ctx-item" @click="contextMenu.show = false">Cancel</button>
+        <button class="ctx-item" @click="contextMenu.show = false">取消</button>
       </div>
 
       <div
@@ -1053,15 +1262,14 @@ const branchLabel: Record<string, string> = {
             <rect x="9" y="9" width="13" height="13" rx="2"/>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
-          Duplicate
+          复制
         </button>
         <div class="ctx-divider"></div>
         <button class="ctx-item danger" @click="deleteNode(contextMenu.nodeId!)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
           </svg>
-          Delete
+          删除
         </button>
       </div>
     </Teleport>
@@ -1284,7 +1492,7 @@ const branchLabel: Record<string, string> = {
 .node {
   position: absolute;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   background: #1a1a24;
   cursor: move;
   user-select: none;
@@ -1485,6 +1693,80 @@ const branchLabel: Record<string, string> = {
   justify-content: center;
   color: rgba(255, 255, 255, 0.1);
   margin: 8px 0 6px;
+}
+
+/* Voice Node */
+.voice-node {
+  width: 220px;
+}
+.voice-content {
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.voice-textarea {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(34, 211, 238, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  font-family: inherit;
+  resize: none;
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+.voice-textarea:focus {
+  outline: none;
+  border-color: rgba(34, 211, 238, 0.4);
+}
+.voice-select {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(34, 211, 238, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.voice-audio {
+  width: 100%;
+  height: 28px;
+  border-radius: 4px;
+}
+
+/* Music Node */
+.music-node {
+  width: 220px;
+}
+.music-content {
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.music-textarea {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(249, 115, 22, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  font-family: inherit;
+  resize: none;
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+.music-textarea:focus {
+  outline: none;
+  border-color: rgba(249, 115, 22, 0.4);
+}
+.music-audio {
+  width: 100%;
+  height: 28px;
+  border-radius: 4px;
 }
 
 /* Node Toolbar */

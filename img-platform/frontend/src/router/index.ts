@@ -36,7 +36,7 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach((_to, _from, next) => {
   // TEMP: bypass auth for screenshots
   // const token = localStorage.getItem('token')
   // if (to.meta.requiresAuth && !token) { next('/login') } else

@@ -6,6 +6,11 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from api.auth import router as auth_router
+from api.image import router as image_router
+from api.voice import router as voice_router
+from api.video import router as video_router
+from api.music import router as music_router
+from api.generation import router as generation_router
 from models.database import init_db
 
 app = FastAPI(
@@ -35,6 +40,11 @@ def on_startup():
 
 # 注册路由
 app.include_router(auth_router)
+app.include_router(image_router)
+app.include_router(voice_router)
+app.include_router(video_router)
+app.include_router(music_router)
+app.include_router(generation_router)
 
 
 @app.get("/")

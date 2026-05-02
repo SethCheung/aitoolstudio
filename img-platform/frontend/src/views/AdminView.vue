@@ -1,743 +1,633 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import axios from 'axios'
 
-const stats = ref([
-  { label: 'Total Creations', value: '48,291', change: '+23%', up: true },
-  { label: 'Active Users', value: '1,392', change: '+8%', up: true },
-  { label: 'API Calls Today', value: '8,547', change: '+15%', up: true },
-  { label: 'Avg Generation Time', value: '8.2s', change: '-12%', up: true },
-])
+const sidebarItems = ['概览', '用户', '工作流', 'GPU 监控', '模型', '日志', '账单', '设置']
+const users = [
+  ['Alex Chen', 'alex@example.com', '管理员', '活跃'],
+  ['Sarah Kim', 'sarah@example.com', '专业版', '活跃'],
+  ['Mike Ross', 'mike@example.com', '用户', '停用'],
+  ['Emma Watson', 'emma@example.com', '专业版', '活跃'],
+  ['John Doe', 'john@example.com', '用户', '活跃'],
+]
+const workflows = ['文生图流程', '图片增强', '批量处理']
 
-const users = ref([
-  { id: 1, name: 'seth', email: 'seth@studio.ai', generations: 142, tokens: '2.1M', status: 'active' },
-  { id: 2, name: 'alice', email: 'alice@studio.ai', generations: 89, tokens: '1.3M', status: 'active' },
-  { id: 3, name: 'bob', email: 'bob@studio.ai', generations: 234, tokens: '3.8M', status: 'active' },
-  { id: 4, name: 'carol', email: 'carol@studio.ai', generations: 67, tokens: '0.9M', status: 'inactive' },
-  { id: 5, name: 'dave', email: 'dave@studio.ai', generations: 198, tokens: '2.9M', status: 'active' },
-  { id: 6, name: 'eve', email: 'eve@studio.ai', generations: 45, tokens: '0.6M', status: 'active' },
-])
+const totalGens = ref(0)
 
-const activeTab = ref('overview')
+async function fetchStats() {
+  try {
+    const resp = await axios.get('/api/generations/stats')
+    totalGens.value = resp.data.total_generations
+  } catch (e) {
+    console.error('Failed to load stats', e)
+  }
+}
+
+onMounted(fetchStats)
 </script>
 
 <template>
   <div class="admin-page">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <svg class="sidebar-logo-icon" viewBox="0 0 24 24" fill="currentColor">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="header-logo">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
           <path d="M5 3L5.75 6L8 6.75L5.75 7.5L5 10.5L4.25 7.5L2 6.75L4.25 6L5 3Z" opacity="0.6"/>
           <path d="M19 3L19.75 6L22 6.75L19.75 7.5L19 10.5L18.25 7.5L16 6.75L18.25 6L19 3Z" opacity="0.6"/>
           <path d="M5 14L5.75 17L8 17.75L5.75 18.5L5 21.5L4.25 18.5L2 17.75L4.25 17L5 14Z" opacity="0.6"/>
           <path d="M19 14L19.75 17L22 17.75L19.75 18.5L19 21.5L18.25 18.5L16 17.75L18.25 17L19 14Z" opacity="0.6"/>
         </svg>
-        <span class="sidebar-brand">AI Studio</span>
+        <span class="logo-text">AI 图片生成器</span>
       </div>
+      <div class="header-right">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          搜索...
+        </div>
+        <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <div class="user-avatar">AC</div>
+      </div>
+    </header>
 
-      <nav class="sidebar-nav">
-        <button class="nav-item" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
-            <rect x="3" y="3" width="7" height="7" rx="1"/>
-            <rect x="14" y="3" width="7" height="7" rx="1"/>
-            <rect x="14" y="14" width="7" height="7" rx="1"/>
-            <rect x="3" y="14" width="7" height="7" rx="1"/>
-          </svg>
-          Overview
-        </button>
-        <button class="nav-item" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-          Users
-        </button>
-        <button class="nav-item" :class="{ active: activeTab === 'creations' }" @click="activeTab = 'creations'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <circle cx="8.5" cy="8.5" r="1.5"/>
-            <path d="M21 15l-5-5L5 21"/>
-          </svg>
-          Creations
-        </button>
-        <button class="nav-item" :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
-            <path d="M12 1v6m0 6v10M1 12h6m6 0h10"/>
-          </svg>
-          Settings
-        </button>
-      </nav>
-
-      <div class="sidebar-footer">
-        <div class="user-info">
-          <div class="user-avatar">S</div>
-          <div class="user-details">
-            <span class="user-name">seth</span>
-            <span class="user-role">Admin</span>
+    <!-- Body: Sidebar + Main -->
+    <div class="admin-body">
+      <!-- Left Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-nav">
+          <div
+            v-for="(item, i) in sidebarItems"
+            :key="item"
+            class="sidebar-item"
+            :class="{ active: i === 0 }"
+          >
+            <!-- Grid3x3 for first item -->
+            <svg v-if="i === 0" class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+              <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            </svg>
+            <!-- Settings for others -->
+            <svg v-else class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            {{ item }}
           </div>
         </div>
-      </div>
-    </aside>
 
-    <!-- Main Area -->
-    <main class="main-area">
-      <!-- Top Bar -->
-      <header class="top-bar">
-        <div class="page-title-area">
-          <h1 class="page-title">Dashboard</h1>
-          <span class="page-sub">Overview of your AI Image Generator</span>
+        <!-- System Status -->
+        <div class="system-status surface-card">
+          <div class="status-row">
+            <div class="status-dot"></div>
+            <span class="status-text">所有系统运行正常</span>
+          </div>
+          <p class="status-meta">上次检查：2 分钟前</p>
         </div>
-        <div class="top-actions">
-          <button class="action-btn secondary">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-            </svg>
-            Export
-          </button>
-          <button class="action-btn primary">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-              <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-            New Generation
-          </button>
-        </div>
-      </header>
 
-      <!-- Content -->
-      <div class="content-area">
-        <!-- Stats Grid -->
-        <div class="stats-grid">
-          <div v-for="stat in stats" :key="stat.label" class="stat-card">
-            <div class="stat-top">
-              <span class="stat-label">{{ stat.label }}</span>
-              <span class="stat-change" :class="stat.up ? 'up' : 'down'">
-                <svg v-if="stat.up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-                  <path d="M18 15l-6-6-6 6"/>
+        <!-- User -->
+        <div class="sidebar-user">
+          <div class="user-avatar-lg">AC</div>
+          <div class="user-info">
+            <div class="user-name">Alex Chen</div>
+            <div class="user-role">Super Admin</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main -->
+      <main class="admin-main">
+        <!-- Page Header -->
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">概览</h1>
+            <p class="page-sub">AI 图片生成器 管理面板</p>
+          </div>
+          <div class="header-pills">
+            <div class="toolbar-pill">2026年5月1日</div>
+            <div class="toolbar-pill">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="pill-icon">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+              刷新
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="kpi-grid">
+          <div class="kpi-card surface-card">
+            <div class="kpi-label">用户总数</div>
+            <div class="kpi-value">1,248</div>
+            <div class="kpi-meta">+12.5%</div>
+          </div>
+          <div class="kpi-card surface-card">
+            <div class="kpi-label">生成图片数</div>
+            <div class="kpi-value">{{ totalGens > 0 ? totalGens.toLocaleString() : "—" }}</div>
+            <div class="kpi-meta">+18.7%</div>
+          </div>
+          <div class="kpi-card surface-card">
+            <div class="kpi-label">活跃 GPU</div>
+            <div class="kpi-value">12/16</div>
+            <div class="kpi-bar"><div class="kpi-bar-fill"></div></div>
+          </div>
+          <div class="kpi-card surface-card green-kpi">
+            <div class="kpi-label">运行时间</div>
+            <div class="kpi-value green-val">99.9%</div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+          <div class="chart-card surface-card">
+            <h2 class="chart-title">GPU 温度</h2>
+            <div class="chart-area">
+              <div class="chart-line cyan-line"></div>
+              <div class="chart-line purple-line"></div>
+              <div class="chart-line green-line"></div>
+              <div class="chart-line amber-line"></div>
+            </div>
+          </div>
+          <div class="chart-card surface-card">
+            <h2 class="chart-title">GPU 显存</h2>
+            <div class="chart-area">
+              <div class="chart-line cyan-line"></div>
+              <div class="chart-line purple-line"></div>
+              <div class="chart-line green-line"></div>
+              <div class="chart-line amber-line"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Section -->
+        <div class="bottom-grid">
+          <!-- Users Table -->
+          <div class="table-card surface-card">
+            <div class="table-header">
+              <div class="col">用户</div>
+              <div class="col">邮箱</div>
+              <div class="col">角色</div>
+              <div class="col">状态</div>
+            </div>
+            <div v-for="row in users" :key="row[0]" class="table-row">
+              <div class="cell">{{ row[0] }}</div>
+              <div class="cell">{{ row[1] }}</div>
+              <div class="cell">{{ row[2] }}</div>
+              <div class="cell">
+                <span class="status-badge" :class="row[3] === 'Active' ? 'badge-green' : 'badge-gray'">{{ row[3] }}</span>
+              </div>
+            </div>
+            <div class="pagination">
+              <button class="page-btn">上一页</button>
+              <button class="page-btn active-page">1 / 10</button>
+              <button class="page-btn">下一页</button>
+            </div>
+          </div>
+
+          <!-- Workflow Configs -->
+          <div class="workflow-card surface-card">
+            <h2 class="wf-title">工作流配置</h2>
+            <div v-for="(wf, i) in workflows" :key="wf" class="wf-item">
+              <div class="wf-name">
+                <svg class="wf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <line x1="6" y1="3" x2="6" y2="15"/>
+                  <circle cx="18" cy="6" r="3"/>
+                  <circle cx="6" cy="18" r="3"/>
+                  <path d="M18 9a9 9 0 0 1-9 9"/>
                 </svg>
-                {{ stat.change }}
+                {{ wf }}
+              </div>
+              <span class="wf-status" :class="i === 2 ? 'status-amber' : 'status-green'">
+                {{ i === 2 ? '已暂停' : '运行中' }}
               </span>
             </div>
-            <span class="stat-value">{{ stat.value }}</span>
-            <div class="stat-bar">
-              <div class="stat-bar-fill" :style="{ width: Math.random() * 60 + 40 + '%' }"></div>
-            </div>
           </div>
         </div>
-
-        <!-- Charts Row -->
-        <div class="charts-grid">
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Daily Generations</h3>
-              <div class="chart-tabs">
-                <button class="chart-tab active">7D</button>
-                <button class="chart-tab">30D</button>
-                <button class="chart-tab">90D</button>
-              </div>
-            </div>
-            <div class="bar-chart">
-              <div v-for="i in 7" :key="i" class="bar-col">
-                <div class="bar-fill" :style="{ height: [45, 65, 40, 80, 55, 70, 90][i-1] + '%' }"></div>
-                <span class="bar-label">{{ ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i-1] }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Model Usage</h3>
-            </div>
-            <div class="model-list">
-              <div class="model-item">
-                <div class="model-info">
-                  <span class="model-name">SDXL Turbo</span>
-                  <span class="model-pct">42%</span>
-                </div>
-                <div class="model-bar">
-                  <div class="model-bar-fill" style="width: 42%; background: #667eea;"></div>
-                </div>
-              </div>
-              <div class="model-item">
-                <div class="model-info">
-                  <span class="model-name">DALL-E 3</span>
-                  <span class="model-pct">28%</span>
-                </div>
-                <div class="model-bar">
-                  <div class="model-bar-fill" style="width: 28%; background: #f093fb;"></div>
-                </div>
-              </div>
-              <div class="model-item">
-                <div class="model-info">
-                  <span class="model-name">Stable Diffusion</span>
-                  <span class="model-pct">19%</span>
-                </div>
-                <div class="model-bar">
-                  <div class="model-bar-fill" style="width: 19%; background: #4facfe;"></div>
-                </div>
-              </div>
-              <div class="model-item">
-                <div class="model-info">
-                  <span class="model-name">Midjourney v6</span>
-                  <span class="model-pct">11%</span>
-                </div>
-                <div class="model-bar">
-                  <div class="model-bar-fill" style="width: 11%; background: #43e97b;"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Users Table -->
-        <div class="table-card">
-          <div class="table-header">
-            <h3 class="table-title">Recent Users</h3>
-            <button class="view-all-btn">View all</button>
-          </div>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Generations</th>
-                <th>Token Usage</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="user in users" :key="user.id">
-                <td>
-                  <div class="user-cell">
-                    <div class="user-avatar">{{ user.name[0].toUpperCase() }}</div>
-                    <div>
-                      <div class="user-name">{{ user.name }}</div>
-                      <div class="user-email">{{ user.email }}</div>
-                    </div>
-                  </div>
-                </td>
-                <td>{{ user.generations }}</td>
-                <td>{{ user.tokens }}</td>
-                <td>
-                  <span class="status-badge" :class="user.status">{{ user.status }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </main>
+      </main>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* ── Layout ───────────────────────────────── */
 .admin-page {
-  display: flex;
   min-height: 100vh;
-  background: #0a0a0f;
-}
-
-/* ── Sidebar ──────────────────────────────── */
-.sidebar {
-  width: 240px;
-  flex-shrink: 0;
-  background: rgba(15, 15, 20, 0.95);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  display: flex;
-  flex-direction: column;
-  backdrop-filter: blur(20px);
-}
-
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.sidebar-logo-icon {
-  width: 26px;
-  height: 26px;
-  color: #00d9ff;
-  filter: drop-shadow(0 0 6px rgba(0, 217, 255, 0.5));
-}
-
-.sidebar-brand {
-  font-size: 15px;
-  font-weight: 700;
-  color: #ffffff;
-  letter-spacing: -0.3px;
-}
-
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 16px 12px;
-  flex: 1;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  text-align: left;
-  width: 100%;
-}
-
-.nav-item svg { flex-shrink: 0; }
-
-.nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.nav-item.active {
-  background: rgba(0, 217, 255, 0.1);
-  color: #00d9ff;
-}
-
-.sidebar-footer {
-  padding: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.user-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #00d9ff, #00b4d8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-  color: #000000;
-  flex-shrink: 0;
-}
-
-.user-details {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.user-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #ffffff;
-}
-
-.user-role {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-/* ── Main Area ─────────────────────────────── */
-.main-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-}
-
-/* ── Top Bar ──────────────────────────────── */
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 28px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(10, 10, 15, 0.8);
-  backdrop-filter: blur(10px);
-}
-
-.page-title-area {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.page-sub {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-.top-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 500;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-  border: none;
+  background: #05070a;
+  color: white;
   font-family: 'Inter', -apple-system, sans-serif;
 }
 
-.action-btn.secondary {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.action-btn.secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-}
-
-.action-btn.primary {
-  background: linear-gradient(135deg, #00d9ff 0%, #00b4d8 100%);
-  color: #000000;
-  font-weight: 600;
-}
-
-.action-btn.primary:hover {
-  box-shadow: 0 0 16px rgba(0, 217, 255, 0.3);
-}
-
-/* ── Content ──────────────────────────────── */
-.content-area {
-  flex: 1;
-  padding: 24px 28px;
+/* Top Header */
+.top-header {
+  height: 64px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: #0d1117;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.logo-icon {
+  width: 24px;
+  height: 24px;
+  color: #00d2ff;
+}
+.logo-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: white;
+}
+.header-right {
+  display: flex;
+  align-items: center;
   gap: 20px;
 }
-
-/* ── Stats Grid ────────────────────────────── */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-
-.stat-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 20px;
+.search-box {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: all 0.2s;
-}
-
-.stat-card:hover {
-  border-color: rgba(0, 217, 255, 0.2);
-  background: rgba(0, 217, 255, 0.02);
-}
-
-.stat-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.stat-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.stat-change {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.stat-change.up { color: #3fb950; }
-.stat-change.down { color: #f85149; }
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: #ffffff;
-  letter-spacing: -0.5px;
-}
-
-.stat-bar {
-  height: 3px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-top: 4px;
-}
-
-.stat-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #00d9ff, #00b4d8);
-  border-radius: 2px;
-  transition: width 0.6s ease;
-}
-
-/* ── Charts Grid ───────────────────────────── */
-.charts-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-}
-
-.chart-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 20px;
-}
-
-.chart-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.chart-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #ffffff;
-}
-
-.chart-tabs {
-  display: flex;
-  gap: 4px;
-}
-
-.chart-tab {
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.4);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.chart-tab:hover { color: rgba(255, 255, 255, 0.7); }
-
-.chart-tab.active {
-  color: #00d9ff;
-  background: rgba(0, 217, 255, 0.1);
-  border-color: rgba(0, 217, 255, 0.2);
-}
-
-/* ── Bar Chart ────────────────────────────── */
-.bar-chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  height: 120px;
-}
-
-.bar-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 8px;
-  height: 100%;
-  justify-content: flex-end;
-}
-
-.bar-fill {
-  width: 100%;
-  background: linear-gradient(to top, #00d9ff, rgba(0, 217, 255, 0.5));
-  border-radius: 4px 4px 0 0;
-  transition: height 0.5s ease;
-  min-height: 4px;
-}
-
-.bar-label {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-/* ── Model List ────────────────────────────── */
-.model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.model-item { display: flex; flex-direction: column; gap: 6px; }
-
-.model-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.model-name {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500;
-}
-
-.model-pct {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.model-bar {
-  height: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.model-bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s ease;
-}
-
-/* ── Table Card ────────────────────────────── */
-.table-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 20px;
-}
-
-.table-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.table-title {
+  width: 200px;
+  height: 40px;
+  padding: 0 12px;
+  background: #151821;
+  border-radius: 8px;
   font-size: 14px;
-  font-weight: 600;
-  color: #ffffff;
+  color: #484f58;
 }
-
-.view-all-btn {
-  font-size: 12px;
-  font-weight: 500;
-  color: #00d9ff;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: color 0.15s;
+.search-icon { width: 16px; height: 16px; }
+.bell-icon {
+  width: 20px;
+  height: 20px;
+  color: #9ca3af;
 }
-
-.view-all-btn:hover { color: #00e6ff; }
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.data-table th {
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.4);
-  text-align: left;
-  padding: 0 12px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.data-table td {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
-  padding: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.data-table tr:last-child td { border-bottom: none; }
-
-.user-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .user-avatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #00d9ff, #00b4d8);
+  background: #00d2ff;
+  color: #05070a;
+  font-size: 12px;
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+}
+
+/* Admin Body */
+.admin-body {
+  display: flex;
+  height: calc(100vh - 64px);
+}
+
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: #0a0d12;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 8px;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.sidebar-item:hover {
+  background: #151821;
+  color: white;
+}
+.sidebar-item.active {
+  background: #00d2ff;
+  color: #05070a;
+}
+.sidebar-item.active .item-icon { stroke: #05070a; }
+.item-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* System Status */
+.system-status {
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
+  background: #0d1117;
+}
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+.status-text { color: white; }
+.status-meta {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 16px 0 0;
+}
+
+/* Sidebar User */
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #151821;
+  border-radius: 12px;
+}
+.user-avatar-lg {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #00d2ff;
+  color: #05070a;
   font-size: 12px;
   font-weight: 700;
-  color: #000000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
-
 .user-name {
-  font-weight: 500;
-  color: #ffffff;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 700;
+  color: white;
+}
+.user-role {
+  font-size: 12px;
+  color: #6b7280;
 }
 
-.user-email {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+/* Main */
+.admin-main {
+  flex: 1;
+  padding: 32px;
+  overflow-y: auto;
 }
 
+/* Page Header */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.page-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+}
+.page-sub {
+  font-size: 14px;
+  color: #9ca3af;
+  margin: 4px 0 0;
+}
+.header-pills {
+  display: flex;
+  gap: 12px;
+}
+.toolbar-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  background: #151821;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #d1d5db;
+  cursor: pointer;
+}
+.pill-icon { width: 14px; height: 14px; }
+
+/* KPI Grid */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 56px;
+}
+.kpi-card {
+  height: 120px;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
+  background: #0d1117;
+}
+.kpi-label {
+  font-size: 14px;
+  color: #9ca3af;
+}
+.kpi-value {
+  font-size: 30px;
+  font-weight: 700;
+  color: white;
+  margin-top: 8px;
+}
+.kpi-meta {
+  font-size: 14px;
+  color: #22c55e;
+  margin-top: 8px;
+}
+.kpi-bar {
+  height: 4px;
+  background: #243044;
+  border-radius: 99px;
+  margin-top: 16px;
+  overflow: hidden;
+}
+.kpi-bar-fill {
+  height: 100%;
+  width: 75%;
+  background: #00d2ff;
+  border-radius: 99px;
+}
+.green-kpi .kpi-value { color: #22c55e; }
+
+/* Charts */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+.chart-card {
+  height: 240px;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
+  background: #0d1117;
+}
+.chart-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+}
+.chart-area {
+  height: 150px;
+  background: #080b10;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.chart-line {
+  height: 2px;
+  border-radius: 99px;
+}
+.cyan-line { background: #00d2ff; }
+.purple-line { background: #7c3aed; }
+.green-line { background: #22c55e; }
+.amber-line { background: #f59e0b; }
+
+/* Bottom Grid */
+.bottom-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+/* Table */
+.table-card {
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
+  background: #0d1117;
+}
+.table-header {
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr 0.8fr 0.8fr;
+  gap: 12px;
+  font-size: 12px;
+  color: #9ca3af;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.table-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr 0.8fr 0.8fr;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.cell {
+  font-size: 14px;
+  color: #d1d5db;
+}
 .status-badge {
   display: inline-block;
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
   font-weight: 500;
-  border-radius: 10px;
+}
+.badge-green {
+  background: #22c55e;
+  color: white;
+}
+.badge-gray {
+  background: #6b7280;
+  color: white;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  font-size: 12px;
+}
+.page-btn {
+  padding: 8px 16px;
+  background: #151821;
+  border: none;
+  border-radius: 6px;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+.page-btn:hover { color: white; }
+.active-page {
+  background: #00d2ff;
+  color: #05070a;
+  font-weight: 600;
 }
 
-.status-badge.active {
-  background: rgba(63, 185, 80, 0.12);
-  color: #3fb950;
+/* Workflows */
+.workflow-card {
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
+  background: #0d1117;
 }
-
-.status-badge.inactive {
-  background: rgba(139, 148, 158, 0.12);
-  color: #8b949e;
+.wf-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: white;
+  margin: 0 0 16px;
 }
-
-/* ── Responsive ────────────────────────────── */
-@media (max-width: 1100px) {
-  .stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .charts-grid { grid-template-columns: 1fr; }
+.wf-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 16px;
+  background: #151821;
+  border-radius: 8px;
+  margin-bottom: 12px;
 }
+.wf-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: white;
+}
+.wf-icon {
+  width: 20px;
+  height: 20px;
+}
+.wf-name .wf-icon { color: #00d2ff; }
+.wf-status {
+  font-size: 12px;
+}
+.status-green { color: #22c55e; }
+.status-amber { color: #f59e0b; }
 </style>
