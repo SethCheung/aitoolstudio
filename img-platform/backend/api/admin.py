@@ -220,14 +220,16 @@ ADMIN_HTML = """<!doctype html>
         <label>Name<input id="name" required placeholder="MiniMax" /></label>
         <label>Base URL<input id="base_url" required placeholder="https://api.minimaxi.com" /></label>
       </div>
-      <label>API Key<input id="api_key" type="password" placeholder="sk-..." /></label>
       <div class="grid2">
         <label>Daily Quota<input id="daily_quota" type="number" min="0" placeholder="1000" /></label>
         <label>Monthly Quota<input id="monthly_quota" type="number" min="0" placeholder="30000" /></label>
       </div>
       <div class="grid2">
         <label>Priority<input id="priority" type="number" min="1" value="1" /></label>
-        <label>Status<select id="enabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+        <label>Auth Type<select id="auth_type" onchange="toggleApiKeyRow()"><option value="http">HTTP API</option><option value="cli">CLI (Token Plan)</option></select></label>
+      </div>
+      <div id="apiKeyRow">
+        <label>API Key<input id="api_key" type="password" placeholder="sk-..." /></label>
       </div>
       <label>Notes<textarea id="notes" placeholder="套餐、额度周期、负责人..."></textarea></label>
       <div class="model-grid" id="modelGrid"></div>
@@ -440,7 +442,9 @@ ADMIN_HTML = """<!doctype html>
       $('monthly_quota').value = editing?.monthly_quota ?? '';
       $('priority').value = editing?.priority || Math.max(1, profiles.length + 1);
       $('enabled').value = String(editing ? editing.enabled : true);
+      $('auth_type').value = editing?.auth_type || 'http';
       $('notes').value = editing?.notes || '';
+      toggleApiKeyRow();
       document.querySelectorAll('#modelGrid input[type=checkbox]').forEach((box) => {
         box.checked = !!editing?.models?.[box.dataset.category]?.includes(box.value);
       });
@@ -449,6 +453,11 @@ ADMIN_HTML = """<!doctype html>
       $('modal').classList.add('open');
     }
     function closeForm() { $('modal').classList.remove('open'); }
+    function toggleApiKeyRow() {
+      const row = $('apiKeyRow');
+      if (!row) return;
+      row.style.display = $('auth_type').value === 'cli' ? 'none' : 'block';
+    }
     function collectModels() {
       const result = { image: [], voice: [], video: [], music: [] };
       document.querySelectorAll('#modelGrid input[type=checkbox]:checked').forEach((box) => result[box.dataset.category].push(box.value));
@@ -456,9 +465,11 @@ ADMIN_HTML = """<!doctype html>
     }
     async function saveProfile(event) {
       event.preventDefault();
+      const authType = $('auth_type').value;
       const payload = {
         name: $('name').value.trim(),
-        api_key: $('api_key').value.trim() || undefined,
+        auth_type: authType,
+        api_key: authType === 'http' ? ($('api_key').value.trim() || undefined) : undefined,
         base_url: $('base_url').value.trim(),
         enabled: $('enabled').value === 'true',
         priority: Number($('priority').value || 99),
@@ -467,8 +478,8 @@ ADMIN_HTML = """<!doctype html>
         notes: $('notes').value.trim(),
         models: collectModels(),
       };
-      if (!editing && !payload.api_key) {
-        $('formError').textContent = '新增 API 必须填写 API Key';
+      if (authType === 'http' && !editing && !payload.api_key) {
+        $('formError').textContent = 'HTTP 模式必须填写 API Key';
         return;
       }
       try {

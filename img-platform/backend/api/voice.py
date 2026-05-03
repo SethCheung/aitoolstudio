@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import sys, os, uuid, binascii, logging
+import sys, os, uuid, binascii, logging, shutil
+from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.voice import VoiceGenerateRequest, VoiceResponse
@@ -34,6 +35,15 @@ def save_audio_hex(audio_hex: str, ext: str = "mp3") -> str:
     return f"/uploads/voices/{filename}"
 
 
+def serve_cli_file(src_path: "Path") -> str:
+    """将 CLI 生成的文件复制到 uploads 目录，返回访问路径"""
+    ext = src_path.suffix.lstrip(".") or "mp3"
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    dst = os.path.join(UPLOAD_DIR, filename)
+    shutil.copy2(src_path, dst)
+    return f"/uploads/voices/{filename}"
+
+
 @router.post("/generate", response_model=GenerationResponse)
 async def generate(
     req: VoiceGenerateRequest,
@@ -48,18 +58,28 @@ async def generate(
             detail=f"No enabled profile found for model '{req.model}'",
         )
     try:
-        result = await generate_voice(
-            text=req.text,
-            voice_id=req.voice_id,
-            model=req.model,
-            speed=req.speed,
-            vol=req.vol,
-            pitch=req.pitch,
-            emotion=req.emotion,
-            response_format=req.response_format,
-            api_key=profile["api_key"],
-            base_url=profile.get("base_url", "https://api.minimaxi.com"),
-        )
+        auth_type = profile.get("auth_type", "http")
+        if auth_type == "cli":
+            result = await cli_generate_voice(
+                text=req.text,
+                voice_id=req.voice_id,
+                model=req.model,
+                speed=req.speed,
+                output_format=req.response_format,
+            )
+        else:
+            result = await http_generate_voice(
+                text=req.text,
+                voice_id=req.voice_id,
+                model=req.model,
+                speed=req.speed,
+                vol=req.vol,
+                pitch=req.pitch,
+                emotion=req.emotion,
+                response_format=req.response_format,
+                api_key=profile["api_key"],
+                base_url=profile.get("base_url", "https://api.minimaxi.com"),
+            )
     except Exception:
         logger.exception("Voice generation failed")
         raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
@@ -72,8 +92,15 @@ async def generate(
         )
 
     data = result.get("data", {})
-    audio_hex = data.get("audio", "")
-    audio_url = save_audio_hex(audio_hex, ext=req.response_format)
+    audio_value = data.get("audio", "")
+
+    # CLI 模式：audio_value 是 Path 对象（文件路径），直接 serve
+    # HTTP 模式：audio_value 是 hex 编码的字符串
+    from pathlib import Path
+    if isinstance(audio_value, Path):
+        audio_url = serve_cli_file(audio_value)
+    else:
+        audio_url = save_audio_hex(audio_value, ext=req.response_format)
 
     gen = Generation(
         type="voice",
