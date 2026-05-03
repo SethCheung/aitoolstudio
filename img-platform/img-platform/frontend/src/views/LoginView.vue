@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const username = ref('')
 const password = ref('')
@@ -34,15 +36,15 @@ async function handleLogin() {
           <path d="M5 14L5.75 17L8 17.75L5.75 18.5L5 21.5L4.25 18.5L2 17.75L4.25 17L5 14Z" opacity="0.6"/>
           <path d="M19 14L19.75 17L22 17.75L19.75 18.5L19 21.5L18.25 18.5L16 17.75L18.25 17L19 14Z" opacity="0.6"/>
         </svg>
-        <span class="logo-text">AI 图片生成器</span>
+        <span class="logo-text">{{ t('generate.brand') }}</span>
       </div>
       <nav class="header-nav">
-        <span>功能</span>
-        <span>定价</span>
-        <span>文档</span>
-        <span>图库</span>
+        <span>Features</span>
+        <span>Pricing</span>
+        <span>Docs</span>
+        <span>Gallery</span>
       </nav>
-      <button class="btn-signin">登录</button>
+      <button class="btn-signin">{{ t('common.login') }}</button>
     </header>
 
     <!-- Login Card -->
@@ -58,13 +60,13 @@ async function handleLogin() {
         <!-- Title -->
         <div class="card-title-group">
           <div class="card-ai-label">AI</div>
-          <h1 class="card-title">图片生成器。</h1>
-          <p class="card-subtitle">将创意转化为精美视觉作品</p>
+          <h1 class="card-title">Image Generator.</h1>
+          <p class="card-subtitle">Turn ideas into stunning visuals</p>
         </div>
 
         <!-- Form -->
         <form @submit.prevent="handleLogin" class="login-form">
-          <label class="field-label">用户名</label>
+          <label class="field-label">{{ t('common.username') }}</label>
           <div class="field-input">
             <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -73,12 +75,12 @@ async function handleLogin() {
             <input
               v-model="username"
               type="text"
-              placeholder="输入用户名"
+              placeholder="{{ t('login.enterUsername') }}"
               autocomplete="username"
             />
           </div>
 
-          <label class="field-label">密码</label>
+          <label class="field-label">{{ t('common.password') }}</label>
           <div class="field-input">
             <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
@@ -87,7 +89,7 @@ async function handleLogin() {
             <input
               v-model="password"
               type="password"
-              placeholder="输入密码"
+              placeholder="{{ t('login.enterPassword') }}"
               autocomplete="current-password"
             />
           </div>
@@ -95,8 +97,8 @@ async function handleLogin() {
           <div v-if="auth.error" class="error-msg">{{ auth.error }}</div>
 
           <button type="submit" class="btn-submit" :disabled="isLoading">
-            <span v-if="!isLoading">登录</span>
-            <span v-else class="loading-dots">正在登录<span>.</span><span>.</span><span>.</span></span>
+            <span v-if="!isLoading">{{ t('common.login') }}</span>
+            <span v-else class="loading-dots">{{ t('login.loggingIn') }}<span>.</span><span>.</span><span>.</span></span>
             <svg v-if="!isLoading" class="btn-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
@@ -104,15 +106,15 @@ async function handleLogin() {
         </form>
 
         <p class="signup-link">
-          <span class="text-muted">还没有账号？</span>
-          <span class="text-cyan">注册</span>
+          <span class="text-muted">{{ t('login.noAccount') }}</span>
+          <span class="text-cyan">{{ t('common.register') }}</span>
         </p>
       </div>
     </div>
 
     <!-- Footer -->
     <footer class="login-footer">
-      <span class="copyright">&copy; 2024 AI 图片生成器</span>
+      <span class="copyright">&copy; 2024 {{ t('generate.brand') }}</span>
       <div class="footer-icons">
         <!-- MessageCircle -->
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="footer-icon">

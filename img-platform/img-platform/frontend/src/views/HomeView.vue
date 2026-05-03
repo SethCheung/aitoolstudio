@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
@@ -56,14 +58,14 @@ onMounted(fetchData)
           <path d="M5 14L5.75 17L8 17.75L5.75 18.5L5 21.5L4.25 18.5L2 17.75L4.25 17L5 14Z" opacity="0.6"/>
           <path d="M19 14L19.75 17L22 17.75L19.75 18.5L19 21.5L18.25 18.5L16 17.75L18.25 17L19 14Z" opacity="0.6"/>
         </svg>
-        <span class="logo-text">AI 工作室</span>
+        <span class="logo-text">{{ t('generate.brand') }}</span>
       </div>
       <nav class="header-nav">
-        <span class="nav-item active">首页</span>
-        <span class="nav-item">工作室</span>
-        <span class="nav-item">工作流</span>
-        <span class="nav-item">模型</span>
-        <span class="nav-item">社区</span>
+        <span class="nav-item active">Home</span>
+        <span class="nav-item">Studio</span>
+        <span class="nav-item">Workflow</span>
+        <span class="nav-item">Models</span>
+        <span class="nav-item">Community</span>
       </nav>
       <div class="header-right">
         <!-- Bell icon -->
@@ -83,10 +85,10 @@ onMounted(fetchData)
 
     <!-- Hero Section -->
     <section class="hero-section">
-      <h1 class="hero-title">AI 创意工作室</h1>
+      <h1 class="hero-title">AI Creative Studio</h1>
       <p class="hero-sub">
-  <span v-if="totalCount > 0">{{ totalCount }} 张图片已生成</span>
-  <span v-else>在一个地方生成、编辑和管理 AI 图片</span>
+  <span v-if="totalCount > 0">{{ totalCount }} images generated</span>
+  <span v-else>Generate, edit and manage AI images in one place</span>
 </p>
     </section>
 
@@ -101,8 +103,8 @@ onMounted(fetchData)
             <polyline points="21 15 16 10 5 21"/>
           </svg>
         </div>
-        <h3 class="feature-title">图像生成</h3>
-        <p class="feature-desc">从文本或参考图创建精美 AI 图片。</p>
+        <h3 class="feature-title">Image Generation</h3>
+        <p class="feature-desc">Create stunning AI images from text or reference images.</p>
         <svg class="feature-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M5 12h14M12 5l7 7-7 7"/>
         </svg>
@@ -117,8 +119,8 @@ onMounted(fetchData)
             <path d="M18 9a9 9 0 0 1-9 9"/>
           </svg>
         </div>
-        <h3 class="feature-title">工作流画布</h3>
-        <p class="feature-desc">可视化地构建和连接强大的 AI 工作流。</p>
+        <h3 class="feature-title">Workflow Canvas</h3>
+        <p class="feature-desc">Visually build and connect powerful AI workflows.</p>
         <svg class="feature-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M5 12h14M12 5l7 7-7 7"/>
         </svg>
@@ -130,8 +132,8 @@ onMounted(fetchData)
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
         </div>
-        <h3 class="feature-title">历史与图库</h3>
-        <p class="feature-desc">访问历史创作并管理您的素材资产。</p>
+        <h3 class="feature-title">History & Gallery</h3>
+        <p class="feature-desc">Access past creations and manage your assets.</p>
         <svg class="feature-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M5 12h14M12 5l7 7-7 7"/>
         </svg>
@@ -146,12 +148,12 @@ onMounted(fetchData)
             <circle cx="12" cy="12" r="10"/>
             <polyline points="12 6 12 12 16 14"/>
           </svg>
-          <h2 class="recent-title">最近项目</h2>
+          <h2 class="recent-title">Recent Projects</h2>
           <svg class="chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="6 9 12 15 18 9"/>
           </svg>
         </div>
-          <span class="view-all">查看全部</span>
+          <span class="view-all">View All</span>
       </div>
       <div v-if="recentGens.length > 0" class="project-grid">
         <div
@@ -178,7 +180,7 @@ onMounted(fetchData)
       <div v-else class="project-grid">
         <div v-for="i in 3" :key="i" class="project-card">
           <div class="project-thumb" style="background: #111827; opacity: 0.4;"></div>
-          <h3 class="project-name" style="opacity: 0.3;">暂无生成记录</h3>
+          <h3 class="project-name" style="opacity: 0.3;">No generations yet</h3>
           <div class="project-meta">
             <span>—</span>
           </div>
@@ -189,13 +191,13 @@ onMounted(fetchData)
     <!-- CTA -->
     <section class="cta-section">
       <button class="btn-primary" @click="goGenerate">
-        开始创作
+        Start Creating
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
           <path d="M5 12h14M12 5l7 7-7 7"/>
         </svg>
       </button>
       <router-link to="/history" class="btn-ghost">
-        查看历史
+        View History
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
           <circle cx="12" cy="12" r="10"/>
           <polyline points="12 6 12 12 16 14"/>

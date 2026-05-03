@@ -6,17 +6,17 @@ import axios from 'axios'
 const router = useRouter()
 
 const navItems = [
-  { icon: 'home', label: '首页' },
-  { icon: 'compass', label: '探索' },
-  { icon: 'image', label: '图库', active: true },
-  { icon: 'gitbranch', label: '工作流' },
-  { icon: 'cpu', label: '模型' },
-  { icon: 'folder', label: '素材' },
-  { icon: 'users', label: '成员' },
-  { icon: 'settings', label: '设置' },
+  { icon: 'home', label: 'Home' },
+  { icon: 'compass', label: 'Explore' },
+  { icon: 'image', label: 'Gallery', active: true },
+  { icon: 'gitbranch', label: 'Workflow' },
+  { icon: 'cpu', label: 'Models' },
+  { icon: 'folder', label: 'Assets' },
+  { icon: 'users', label: 'Members' },
+  { icon: 'settings', label: 'Settings' },
 ]
 
-const filterItems = ['全部时间', '今天', '昨天', '本周', '本月', '自定义范围']
+const filterItems = ['All Time', 'Today', 'Yesterday', 'This Week', 'This Month', 'Custom Range']
 
 interface Generation {
   id: number
@@ -143,10 +143,10 @@ onMounted(fetchGenerations)
 
       <!-- Filters -->
       <div class="sidebar-filters">
-        <div class="filter-label">筛选</div>
-        <div class="filter-clear">清除全部</div>
+        <div class="filter-label">Filter</div>
+        <div class="filter-clear">Clear All</div>
         <div class="filter-group">
-          <div class="filter-heading">按日期</div>
+          <div class="filter-heading">By Date</div>
           <div class="filter-dot active-dot"></div>
           <div v-for="f in filterItems" :key="f" class="filter-item" :class="{ active: f === 'All Time' }">{{ f }}</div>
         </div>
@@ -155,7 +155,7 @@ onMounted(fetchGenerations)
       <!-- Storage -->
       <div class="sidebar-storage">
         <div class="storage-visual"></div>
-        <div class="storage-label">存储</div>
+        <div class="storage-label">Storage</div>
         <div class="storage-amount">102.4 GB / 500 GB</div>
         <div class="storage-bar"><div class="storage-fill"></div></div>
         <div class="storage-pct">20%</div>
@@ -163,7 +163,7 @@ onMounted(fetchGenerations)
           <div class="user-avatar">AC</div>
           <div class="user-info">
             <div class="user-name">Alex Chen</div>
-            <div class="user-plan">专业版</div>
+            <div class="user-plan">{{ t('generate.proPlan') }}</div>
           </div>
         </div>
       </div>
@@ -174,7 +174,7 @@ onMounted(fetchGenerations)
       <!-- Content Header -->
       <div class="content-header">
         <div class="header-left">
-          <h1 class="page-title">图库</h1>
+          <h1 class="page-title">Gallery</h1>
           <div class="result-count">
             <div class="count-box"></div>
             <span>{{ totalCount.toLocaleString() }}</span>
@@ -186,22 +186,22 @@ onMounted(fetchGenerations)
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            搜索图片、工作流...
+            Search images, workflows...
           </div>
           <button class="btn-primary" @click="goGenerate">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
               <line x1="12" y1="5" x2="12" y2="19"/>
               <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-            新建生成
+            New Generation
           </button>
         </div>
       </div>
 
       <!-- Sort Bar -->
       <div class="sort-bar">
-        <span class="sort-label">排序：</span>
-        <span class="sort-value">最新</span>
+        <span class="sort-label">Sort:</span>
+        <span class="sort-value">Latest</span>
         <svg class="sort-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="6 9 12 15 18 9"/>
         </svg>
@@ -215,13 +215,13 @@ onMounted(fetchGenerations)
       <div v-if="isLoading" class="gallery-grid">
         <div v-for="i in 4" :key="i" class="gallery-card">
           <div class="card-thumb" style="background: #111827; opacity: 0.5;"></div>
-          <h3 class="card-title" style="opacity: 0.3;">加载中...</h3>
+          <h3 class="card-title" style="opacity: 0.3;">Loading...</h3>
           <p class="card-meta">—</p>
         </div>
       </div>
       <div v-else-if="generations.length === 0" class="gallery-grid" style="grid-column: 1/-1; text-align: center; padding: 60px 0;">
-        <p style="color: #9ca3af; font-size: 16px;">暂无生成记录， 开始创作吧！</p>
-        <button class="btn-primary" style="margin-top: 16px; display: inline-flex;" @click="goGenerate">新建生成</button>
+        <p style="color: #9ca3af; font-size: 16px;">No generations yet. Start creating!</p>
+        <button class="btn-primary" style="margin-top: 16px; display: inline-flex;" @click="goGenerate">New Generation</button>
       </div>
       <div v-else class="gallery-grid">
         <div
