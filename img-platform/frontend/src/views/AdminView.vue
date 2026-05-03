@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 
+const { t } = useI18n()
+
 // ── Tab ──────────────────────────────────────────────
-const sidebarItems = ['概览', '用户', '工作流', 'GPU 监控', '模型', '日志', '账单', '设置']
-const activeTab = ref(0)
+const sidebarItems = [t('admin.overview'), t('admin.users'), t('admin.workflow'), t('admin.gpuMonitor'), t('admin.models'), t('admin.logs'), t('admin.billing'), t('admin.settings')]
 
 const users = [
-  ['Alex Chen', 'alex@example.com', '管理员', '活跃'],
-  ['Sarah Kim', 'sarah@example.com', '专业版', '活跃'],
-  ['Mike Ross', 'mike@example.com', '用户', '停用'],
-  ['Emma Watson', 'emma@example.com', '专业版', '活跃'],
-  ['John Doe', 'john@example.com', '用户', '活跃'],
+  ['Alex Chen', 'alex@example.com', t('admin.roleAdmin'), t('admin.statusActive')],
+  ['Sarah Kim', 'sarah@example.com', t('generate.proPlan'), t('admin.statusActive')],
+  ['Mike Ross', 'mike@example.com', t('admin.roleUser'), t('admin.statusInactive')],
+  ['Emma Watson', 'emma@example.com', t('generate.proPlan'), t('admin.statusActive')],
+  ['John Doe', 'john@example.com', t('admin.roleUser'), t('admin.statusActive')],
 ]
-const workflows = ['文生图流程', '图片增强', '批量处理']
+const workflows = ['Text-to-Image', 'Image Enhancement', 'Batch Processing']
 
 const totalGens = ref(0)
 
@@ -26,7 +28,6 @@ interface Profile {
   models: Record<string, string[]>
 }
 const profiles = ref<Profile[]>([])
-const modelOptions = ['image-01', 'image-01-turbo', 'speech-02-hd', 'speech-02', 'hailuo-video-01', 'music-01']
 const modelCategories: Record<string, string[]> = {
   image: ['image-01', 'image-01-turbo'],
   voice: ['speech-02-hd', 'speech-02'],
@@ -63,7 +64,7 @@ function openEdit(p: Profile) {
 
 async function saveProfile() {
   if (!form.value.name || !form.value.api_key) {
-    formError.value = '名称和 API Key 不能为空'
+    formError.value = t('common.error')
     return
   }
   try {
@@ -75,7 +76,7 @@ async function saveProfile() {
     showAddForm.value = false
     fetchProfiles()
   } catch (e: any) {
-    formError.value = e?.response?.data?.detail || '保存失败'
+    formError.value = e?.response?.data?.detail || t('common.error')
   }
 }
 
@@ -86,7 +87,7 @@ async function toggleProfile(name: string, enabled: boolean) {
 }
 
 async function deleteProfile(name: string) {
-  if (!confirm(`确认删除 Profile "${name}"？`)) return
+  if (!confirm(`Confirm delete profile "${name}"？`)) return
   await axios.delete(`/api/profiles/${name}`)
   fetchProfiles()
 }
@@ -116,7 +117,7 @@ onMounted(() => { fetchProfiles(); fetchStats() })
           <path d="M5 14L5.75 17L8 17.75L5.75 18.5L5 21.5L4.25 18.5L2 17.75L4.25 17L5 14Z" opacity="0.6"/>
           <path d="M19 14L19.75 17L22 17.75L19.75 18.5L19 21.5L18.25 18.5L16 17.75L18.25 17L19 14Z" opacity="0.6"/>
         </svg>
-        <span class="logo-text">AI 图片生成器</span>
+        <span class="logo-text">{{ t('generate.brand') }}</span>
       </div>
       <div class="header-right">
         <div class="search-box">
@@ -124,7 +125,7 @@ onMounted(() => { fetchProfiles(); fetchStats() })
             <circle cx="11" cy="11" r="8"/>
             <line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          搜索...
+          Search...
         </div>
         <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -163,9 +164,9 @@ onMounted(() => { fetchProfiles(); fetchStats() })
         <div class="system-status surface-card">
           <div class="status-row">
             <div class="status-dot"></div>
-            <span class="status-text">所有系统运行正常</span>
+            <span class="status-text">All systems operational</span>
           </div>
-          <p class="status-meta">上次检查：2 分钟前</p>
+          <p class="status-meta">Last checked: 2 min ago</p>
         </div>
 
         <!-- User -->
@@ -183,18 +184,18 @@ onMounted(() => { fetchProfiles(); fetchStats() })
         <!-- Page Header -->
         <div class="page-header">
           <div>
-            <h1 class="page-title">概览</h1>
-            <p class="page-sub">AI 图片生成器 管理面板</p>
+            <h1 class="page-title">{{ t('admin.overview') }}</h1>
+            <p class="page-sub">{{ t('generate.brand') }} Admin Panel</p>
           </div>
           <div class="header-pills">
-            <div class="toolbar-pill">2026年5月1日</div>
+            <div class="toolbar-pill">May 1, 2026</div>
             <div class="toolbar-pill">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="pill-icon">
                 <polyline points="23 4 23 10 17 10"/>
                 <polyline points="1 20 1 14 7 14"/>
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
               </svg>
-              刷新
+              Refresh
             </div>
           </div>
         </div>
@@ -202,22 +203,22 @@ onMounted(() => { fetchProfiles(); fetchStats() })
         <!-- KPI Cards -->
         <div class="kpi-grid">
           <div class="kpi-card surface-card">
-            <div class="kpi-label">用户总数</div>
+            <div class="kpi-label">{{ t('admin.totalUsers') }}</div>
             <div class="kpi-value">1,248</div>
             <div class="kpi-meta">+12.5%</div>
           </div>
           <div class="kpi-card surface-card">
-            <div class="kpi-label">生成图片数</div>
+            <div class="kpi-label">Total Generations</div>
             <div class="kpi-value">{{ totalGens > 0 ? totalGens.toLocaleString() : "—" }}</div>
             <div class="kpi-meta">+18.7%</div>
           </div>
           <div class="kpi-card surface-card">
-            <div class="kpi-label">活跃 GPU</div>
+            <div class="kpi-label">{{ t('admin.activeGpu') }}</div>
             <div class="kpi-value">12/16</div>
             <div class="kpi-bar"><div class="kpi-bar-fill"></div></div>
           </div>
           <div class="kpi-card surface-card green-kpi">
-            <div class="kpi-label">运行时间</div>
+            <div class="kpi-label">Uptime</div>
             <div class="kpi-value green-val">99.9%</div>
           </div>
         </div>
@@ -225,7 +226,7 @@ onMounted(() => { fetchProfiles(); fetchStats() })
         <!-- Charts -->
         <div class="charts-grid">
           <div class="chart-card surface-card">
-            <h2 class="chart-title">GPU 温度</h2>
+            <h2 class="chart-title">{{ t('admin.gpuTemp') }}</h2>
             <div class="chart-area">
               <div class="chart-line cyan-line"></div>
               <div class="chart-line purple-line"></div>
@@ -234,7 +235,7 @@ onMounted(() => { fetchProfiles(); fetchStats() })
             </div>
           </div>
           <div class="chart-card surface-card">
-            <h2 class="chart-title">GPU 显存</h2>
+            <h2 class="chart-title">{{ t('admin.gpuMemory') }}</h2>
             <div class="chart-area">
               <div class="chart-line cyan-line"></div>
               <div class="chart-line purple-line"></div>
@@ -249,10 +250,10 @@ onMounted(() => { fetchProfiles(); fetchStats() })
           <!-- Users Table -->
           <div class="table-card surface-card">
             <div class="table-header">
-              <div class="col">用户</div>
-              <div class="col">邮箱</div>
-              <div class="col">角色</div>
-              <div class="col">状态</div>
+              <div class="col">User</div>
+              <div class="col">Email</div>
+              <div class="col">Role</div>
+              <div class="col">Status</div>
             </div>
             <div v-for="row in users" :key="row[0]" class="table-row">
               <div class="cell">{{ row[0] }}</div>
@@ -263,15 +264,15 @@ onMounted(() => { fetchProfiles(); fetchStats() })
               </div>
             </div>
             <div class="pagination">
-              <button class="page-btn">上一页</button>
+              <button class="page-btn">Prev</button>
               <button class="page-btn active-page">1 / 10</button>
-              <button class="page-btn">下一页</button>
+              <button class="page-btn">Next</button>
             </div>
           </div>
 
           <!-- Workflow Configs -->
           <div class="workflow-card surface-card">
-            <h2 class="wf-title">工作流配置</h2>
+            <h2 class="wf-title">{{ t('admin.workflowConfig') }}</h2>
             <div v-for="(wf, i) in workflows" :key="wf" class="wf-item">
               <div class="wf-name">
                 <svg class="wf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -283,17 +284,17 @@ onMounted(() => { fetchProfiles(); fetchStats() })
                 {{ wf }}
               </div>
               <span class="wf-status" :class="i === 2 ? 'status-amber' : 'status-green'">
-                {{ i === 2 ? '已暂停' : '运行中' }}
+                {{ i === 2 ? 'Paused' : 'Running' }}
               </span>
             </div>
           </div>
         </div>
 
-        <!-- Profile Management (设置 tab) -->
+        <!-- Profile Management (Settings tab) -->
         <div class="section-card surface-card" style="margin-top:24px">
           <div class="section-header">
-            <h2 class="section-title">API Profile 配置</h2>
-            <button class="btn-primary" @click="openAdd">+ 新增 Profile</button>
+            <h2 class="section-title">API Profile Config</h2>
+            <button class="btn-primary" @click="openAdd">+ Add Profile</button>
           </div>
 
           <!-- Profile List -->
@@ -302,8 +303,8 @@ onMounted(() => { fetchProfiles(); fetchStats() })
               <div class="profile-info">
                 <div class="profile-name">{{ p.name }}</div>
                 <div class="profile-meta">
-                  <span class="badge" :class="p.enabled ? 'badge-green' : 'badge-gray'">{{ p.enabled ? '已启用' : '已禁用' }}</span>
-                  <span class="meta-tag">优先级 {{ p.priority }}</span>
+                  <span class="badge" :class="p.enabled ? 'badge-green' : 'badge-gray'">{{ p.enabled ? 'Enabled' : 'Disabled' }}</span>
+                  <span class="meta-tag">Priority {{ p.priority }}</span>
                   <span class="meta-tag">{{ p.api_key_masked }}</span>
                 </div>
                 <div class="profile-models">
@@ -315,12 +316,12 @@ onMounted(() => { fetchProfiles(); fetchStats() })
                 </div>
               </div>
               <div class="profile-actions">
-                <button class="btn-sm" @click="toggleProfile(p.name, !p.enabled)">{{ p.enabled ? '禁用' : '启用' }}</button>
-                <button class="btn-sm" @click="openEdit(p)">编辑</button>
-                <button class="btn-sm btn-danger" @click="deleteProfile(p.name)">删除</button>
+                <button class="btn-sm" @click="toggleProfile(p.name, !p.enabled)">{{ p.enabled ? 'Disable' : 'Enable' }}</button>
+                <button class="btn-sm" @click="openEdit(p)">Edit</button>
+                <button class="btn-sm btn-danger" @click="deleteProfile(p.name)">Delete</button>
               </div>
             </div>
-            <div v-if="profiles.length === 0" class="empty-state">暂无 Profile，点击上方按钮添加</div>
+            <div v-if="profiles.length === 0" class="empty-state">No profiles. Click above to add.</div>
           </div>
         </div>
       </main>
@@ -331,33 +332,33 @@ onMounted(() => { fetchProfiles(); fetchStats() })
   <div v-if="showAddForm" class="modal-overlay" @click.self="showAddForm = false">
     <div class="modal-box surface-card">
       <div class="modal-header">
-        <h3>{{ editingProfile ? '编辑' : '新增' }} Profile</h3>
+        <h3>{{ editingProfile ? 'Edit' : 'Add' }} Profile</h3>
         <button class="modal-close" @click="showAddForm = false">✕</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label>名称</label>
-          <input v-model="form.name" placeholder="如: MiniMax-Pro" :disabled="!!editingProfile" />
+          <label>Name</label>
+          <input v-model="form.name" placeholder="e.g. MiniMax-Pro" :disabled="!!editingProfile" />
         </div>
         <div class="form-group">
-          <label>API Key <span style="color:#888;font-weight:400">({{ editingProfile ? '留空则不修改' : '必填' }})</span></label>
+          <label>API Key <span style="color:#888;font-weight:400">({{ editingProfile ? 'Leave blank to keep unchanged' : 'Required' }})</span></label>
           <input v-model="form.api_key" type="password" placeholder="sk-..." />
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>优先级</label>
+            <label>Priority</label>
             <input v-model.number="form.priority" type="number" min="1" />
           </div>
           <div class="form-group">
-            <label>状态</label>
+            <label>Status</label>
             <select v-model="form.enabled">
-              <option :value="true">启用</option>
-              <option :value="false">禁用</option>
+              <option :value="true">Enable</option>
+              <option :value="false">Disable</option>
             </select>
           </div>
         </div>
         <div class="form-group">
-          <label>支持的模型</label>
+          <label>Supported Models</label>
           <div class="model-grid">
             <div v-for="(models, cat) in modelCategories" :key="cat" class="model-cat">
               <div class="cat-label">{{ cat }}</div>
@@ -371,8 +372,8 @@ onMounted(() => { fetchProfiles(); fetchStats() })
         <div v-if="formError" class="form-error">{{ formError }}</div>
       </div>
       <div class="modal-footer">
-        <button class="btn-ghost" @click="showAddForm = false">取消</button>
-        <button class="btn-primary" @click="saveProfile">保存</button>
+        <button class="btn-ghost" @click="showAddForm = false">Cancel</button>
+        <button class="btn-primary" @click="saveProfile">Save</button>
       </div>
     </div>
   </div>
