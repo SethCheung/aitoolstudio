@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
 const apiClient = axios.create({ baseURL: '/api', timeout: 60000 })
@@ -401,7 +402,7 @@ async function sendVoice(nodeId: string) {
     node.audioUrl = data.audio_url
   } catch (err: any) {
     console.error('Voice generation failed:', err)
-    alert(`Voice generation failed: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`Voice generation failed: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -421,7 +422,7 @@ async function sendMusic(nodeId: string) {
     node.audioUrl = data.audio_url
   } catch (err: any) {
     console.error('Music generation failed:', err)
-    alert(`Music generation failed: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`Music generation failed: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -524,7 +525,7 @@ async function sendMessage() {
     }
   } catch (err: any) {
     console.error('生成失败:', err)
-    alert(`生成失败: ${err?.response?.data?.detail ?? err.message ?? '未知错误'}`)
+    ElMessage.error(`生成失败: ${err?.response?.data?.detail ?? err.message ?? '未知错误'}`)
   } finally {
     isGenerating.value = false
   }

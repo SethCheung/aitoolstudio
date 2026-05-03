@@ -10,14 +10,14 @@ class GenerationResponse(BaseModel):
     image_urls: list[str] = []
     audio_url: Optional[str] = None
     video_url: Optional[str] = None
-    model: str = "image-01"
+    model: Optional[str] = "image-01"
     aspect_ratio: Optional[str] = None
     voice_model: Optional[str] = None
     voice_id: Optional[str] = None
     video_model: Optional[str] = None
     video_duration: Optional[str] = None
-    n_generated: int = 1
-    created_at: datetime
+    n_generated: Optional[int] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

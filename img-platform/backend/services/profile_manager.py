@@ -1,16 +1,34 @@
 import json
 import os
+from functools import lru_cache
 from typing import Optional
 
 PROFILE_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "profiles.json")
 
 
+@lru_cache(maxsize=1)
 def _load() -> dict:
-    """从文件加载 profiles"""
+    """从文件加载 profiles（带缓存）
+
+    profiles.json 支持两种格式：
+      1. dict 格式（推荐）：{"profiles": {"name": {...}}}
+      2. list 格式（兼容）：{"profiles": [...]}
+    """
     if not os.path.exists(PROFILE_FILE):
         return {"profiles": {}}
     with open(PROFILE_FILE, "r") as f:
-        return json.load(f)
+        data = json.load(f)
+
+    raw = data.get("profiles", {})
+    # 兼容 list 格式：转换为 dict 格式
+    if isinstance(raw, list):
+        profiles = {}
+        for item in raw:
+            name = item.get("name")
+            if name:
+                profiles[name] = item
+        return {"profiles": profiles}
+    return {"profiles": raw}
 
 
 def _save(data: dict) -> None:
@@ -18,6 +36,7 @@ def _save(data: dict) -> None:
     os.makedirs(os.path.dirname(PROFILE_FILE), exist_ok=True)
     with open(PROFILE_FILE, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    _load.cache_clear()  # 清缓存
 
 
 def get_profile_for_model(model: str) -> Optional[dict]:

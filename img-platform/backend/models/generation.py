@@ -19,6 +19,6 @@ class Generation(BaseModel):
     voice_id = Column(String(50), nullable=True)  # voice
     video_model = Column(String(50), nullable=True)  # video
     video_duration = Column(String(10), nullable=True)  # video, e.g. "6s"
-    n_generated = Column(Integer, default=1)
+    n_generated = Column(Integer, nullable=True, default=1)
     mini_max_id = Column(String(100), nullable=True)  # MiniMax task ID
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)

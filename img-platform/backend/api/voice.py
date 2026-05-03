@@ -94,7 +94,7 @@ async def generate(
         image_urls=[],
         audio_url=gen.audio_url,
         video_url=None,
-        model=gen.voice_model or "",
+        model=gen.voice_model,
         aspect_ratio=None,
         voice_model=gen.voice_model,
         voice_id=gen.voice_id,
