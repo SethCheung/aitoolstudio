@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import sys, os, httpx
+import sys, os, logging, httpx
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.video import VideoGenerateRequest, VideoResponse
@@ -8,13 +8,20 @@ from schemas.generation import GenerationResponse
 from services.minimax import generate_video, query_video_task
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
+from models.user import User
 from models.generation import Generation
+from api.auth import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/video", tags=["视频生成"])
 
 
-@router.post("/generate")
-async def generate(req: VideoGenerateRequest, db: Session = Depends(get_db)):
+@router.post("/generate", response_model=GenerationResponse)
+async def generate(
+    req: VideoGenerateRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
     """文生视频 — 按模型路由到对应 profile，返回 task_id（需轮询 /api/video/status）"""
     profile = get_profile_for_model(req.model)
     if not profile:
@@ -22,7 +29,6 @@ async def generate(req: VideoGenerateRequest, db: Session = Depends(get_db)):
             status_code=400,
             detail=f"No enabled profile found for model '{req.model}'",
         )
-
     try:
         result = await generate_video(
             prompt=req.prompt,
@@ -32,8 +38,9 @@ async def generate(req: VideoGenerateRequest, db: Session = Depends(get_db)):
             api_key=profile["api_key"],
             base_url=profile.get("base_url", "https://api.minimaxi.com"),
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Video generation failed")
+        raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
 
     base_resp = result.get("base_resp", {})
     if base_resp.get("status_code", 0) != 0:

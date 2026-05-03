@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import sys, os, uuid, binascii
+import sys, os, uuid, binascii, logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.voice import VoiceGenerateRequest, VoiceResponse
@@ -8,8 +8,11 @@ from schemas.generation import GenerationResponse
 from services.minimax import generate_voice
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
+from models.user import User
 from models.generation import Generation
+from api.auth import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/voice", tags=["语音生成"])
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "voices")
@@ -31,7 +34,11 @@ def save_audio_hex(audio_hex: str, ext: str = "mp3") -> str:
 
 
 @router.post("/generate", response_model=GenerationResponse)
-async def generate(req: VoiceGenerateRequest, db: Session = Depends(get_db)):
+async def generate(
+    req: VoiceGenerateRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
     """文合成语音 — 按模型路由到对应 profile"""
     profile = get_profile_for_model(req.model)
     if not profile:
@@ -39,7 +46,6 @@ async def generate(req: VoiceGenerateRequest, db: Session = Depends(get_db)):
             status_code=400,
             detail=f"No enabled profile found for model '{req.model}'",
         )
-
     try:
         result = await generate_voice(
             text=req.text,
@@ -53,8 +59,9 @@ async def generate(req: VoiceGenerateRequest, db: Session = Depends(get_db)):
             api_key=profile["api_key"],
             base_url=profile.get("base_url", "https://api.minimaxi.com"),
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Voice generation failed")
+        raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
 
     base_resp = result.get("base_resp", {})
     if base_resp.get("status_code", 0) != 0:
