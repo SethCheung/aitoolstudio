@@ -474,59 +474,142 @@ function getConnectionPath(conn: Connection) {
   return `M ${fx} ${fy} C ${fx} ${fy + dx}, ${tx} ${ty - dx}, ${tx} ${ty}`
 }
 
-// ── Send Message ───────────────────────────────────────
+// ── Send Message (routed by selectedCategory) ───────────
 async function sendMessage() {
   if (!inputText.value.trim()) return
-  const promptId = `prompt-${Date.now()}`
-  const genId = `gen-${Date.now() + 1}`
-
+  const text = inputText.value.trim()
   const cx = (-pan.value.x + canvasRef.value!.clientWidth / 2) / zoom.value
   const cy = (-pan.value.y + canvasRef.value!.clientHeight / 2) / zoom.value
 
+  if (selectedCategory.value === 'image') {
+    await sendImageMessage(text, cx, cy)
+  } else if (selectedCategory.value === 'voice') {
+    await sendVoiceMessage(text, cx, cy)
+  } else if (selectedCategory.value === 'music') {
+    await sendMusicMessage(text, cx, cy)
+  } else if (selectedCategory.value === 'video') {
+    await sendVideoMessage(text, cx, cy)
+  }
+  inputText.value = ''
+}
+
+async function sendImageMessage(text: string, cx: number, cy: number) {
+  const promptId = `prompt-${Date.now()}`
+  const genId = `gen-${Date.now() + 1}`
   const promptNode: PromptNode = {
-    id: promptId,
-    type: 'prompt',
-    x: cx - 140,
-    y: cy + 100,
-    selected: false,
-    content: inputText.value,
-    refImage: '',
-    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    id: promptId, type: 'prompt',
+    x: cx - 140, y: cy + 100, selected: false,
+    content: text, refImage: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
   }
-
   const genNode: GenerationNode = {
-    id: genId,
-    type: 'generation',
-    x: cx - 160,
-    y: cy - 120,
-    selected: false,
+    id: genId, type: 'generation',
+    x: cx - 160, y: cy - 120, selected: false,
     images: ['', '', '', ''],
-    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
   }
-
   nodes.value.push(promptNode, genNode)
   connections.value.push({ id: `conn-${Date.now()}`, from: promptId, to: genId })
-
-  inputText.value = ''
   isGenerating.value = true
-
   try {
     const resp = await apiClient.post('/image/generate', {
-      prompt: promptNode.content,
-      model: selectedModel.value,  // 直接用 API 模型名
+      prompt: text,
+      model: selectedModel.value,
       aspect_ratio: selectedAspect.value,
       n: 4,
       response_format: 'url',
       prompt_optimizer: false,
     })
     const data = resp.data as { image_urls: string[] }
-    // Fill up to 4 image slots
     for (let i = 0; i < Math.min(data.image_urls.length, 4); i++) {
       genNode.images[i] = data.image_urls[i]
     }
   } catch (err: any) {
-    console.error('生成失败:', err)
     alert(`生成失败: ${err?.response?.data?.detail ?? err.message ?? '未知错误'}`)
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+async function sendVoiceMessage(text: string, cx: number, cy: number) {
+  const nodeId = `voice-${Date.now()}`
+  const voiceNode: VoiceNode = {
+    id: nodeId, type: 'voice',
+    x: cx - 100, y: cy, selected: false,
+    content: text,
+    voiceId: 'male-qn-qingse',   // default, can be changed in panel
+    voiceModel: selectedModel.value,
+    audioUrl: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+  }
+  nodes.value.push(voiceNode)
+  activeNode.value = voiceNode
+  nodes.value.forEach(n => n.selected = n.id === nodeId)
+  isGenerating.value = true
+  try {
+    const resp = await apiClient.post('/voice/generate', {
+      text,
+      voice_id: voiceNode.voiceId,
+      model: voiceNode.voiceModel,
+    })
+    const data = resp.data as { audio_url: string }
+    voiceNode.audioUrl = data.audio_url
+  } catch (err: any) {
+    alert(`语音生成失败: ${err?.response?.data?.detail ?? err.message}`)
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+async function sendMusicMessage(text: string, cx: number, cy: number) {
+  const nodeId = `music-${Date.now()}`
+  const musicNode: MusicNode = {
+    id: nodeId, type: 'music',
+    x: cx - 100, y: cy, selected: false,
+    content: text,
+    musicModel: selectedModel.value,
+    audioUrl: '',
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+  }
+  nodes.value.push(musicNode)
+  activeNode.value = musicNode
+  nodes.value.forEach(n => n.selected = n.id === nodeId)
+  isGenerating.value = true
+  try {
+    const resp = await apiClient.post('/music/generate', {
+      prompt: text,
+      model: musicNode.musicModel,
+    })
+    const data = resp.data as { audio_url: string }
+    musicNode.audioUrl = data.audio_url
+  } catch (err: any) {
+    alert(`音乐生成失败: ${err?.response?.data?.detail ?? err.message}`)
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+async function sendVideoMessage(text: string, cx: number, cy: number) {
+  const nodeId = `video-${Date.now()}`
+  const videoNode: BranchNode = {
+    id: nodeId, type: 'video',
+    x: cx - 100, y: cy, selected: false,
+    sourceGenId: '', sourceImgIndex: 0, image: '', content: text,
+    time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+  }
+  nodes.value.push(videoNode)
+  activeNode.value = videoNode
+  nodes.value.forEach(n => n.selected = n.id === nodeId)
+  isGenerating.value = true
+  try {
+    const resp = await apiClient.post('/video/generate', {
+      prompt: text,
+      model: selectedModel.value,
+    })
+    const data = resp.data as { video_url: string }
+    videoNode.image = data.video_url  // reuse image field for video URL
+  } catch (err: any) {
+    alert(`视频生成失败: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
