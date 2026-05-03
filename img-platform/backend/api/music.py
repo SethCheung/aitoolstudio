@@ -5,7 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.music import MusicGenerateRequest, MusicResponse
 from schemas.generation import GenerationResponse
-from services.minimax import generate_music
+from services.minimax import generate_music as http_generate_music
+from services.cli_runner import generate_music as cli_generate_music
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
 from models.user import User
@@ -30,13 +31,21 @@ async def generate(
             detail=f"No enabled profile found for model '{req.model}'",
         )
     try:
-        result = await generate_music(
-            prompt=req.prompt,
-            model=req.model,
-            lyrics=req.lyrics,
-            api_key=profile["api_key"],
-            base_url=profile.get("base_url", "https://api.minimaxi.com"),
-        )
+        auth_type = profile.get("auth_type", "http")
+        if auth_type == "cli":
+            result = await cli_generate_music(
+                prompt=req.prompt,
+                model=req.model,
+                lyrics=req.lyrics,
+            )
+        else:
+            result = await http_generate_music(
+                prompt=req.prompt,
+                model=req.model,
+                lyrics=req.lyrics,
+                api_key=profile["api_key"],
+                base_url=profile.get("base_url", "https://api.minimaxi.com"),
+            )
     except Exception:
         logger.exception("Music generation failed")
         raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
