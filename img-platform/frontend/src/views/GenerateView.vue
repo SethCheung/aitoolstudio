@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
@@ -138,6 +138,13 @@ interface AvailableModels {
 }
 const availableModels = ref<AvailableModels>({})
 const currentModelList = computed(() => (availableModels.value as Record<string, string[]>)[selectedCategory.value] ?? [])
+
+watch(selectedCategory, () => {
+  const models = currentModelList.value
+  if (models.length && !models.includes(selectedModel.value)) {
+    selectedModel.value = models[0]
+  }
+})
 
 const styles = ['Cinematic', 'Photorealistic', 'Anime', 'Abstract', 'Minimalist']
 const aspects = ['1:1', '16:9', '9:16', '4:3', '3:4']
@@ -1054,7 +1061,7 @@ const branchLabel: Record<string, string> = {
 
         <!-- BRANCH NODES (below generation, from single images) -->
         <div
-          v-for="node in nodes.filter(n => n.type !== 'prompt' && n.type !== 'generation')"
+          v-for="node in nodes.filter(n => n.type !== 'prompt' && n.type !== 'generation' && n.type !== 'voice' && n.type !== 'music')"
           :key="node.id"
           class="node branch-node"
           :class="['branch-' + node.type, { selected: node.selected, dragging: draggingNode === node.id }]"
@@ -1113,7 +1120,7 @@ const branchLabel: Record<string, string> = {
             <textarea
               class="voice-textarea"
               v-model="(node as VoiceNode).content"
-              placeholder="{{ t('generate.enterVoiceText') }}"
+              :placeholder="t('generate.enterVoiceText')"
               rows="3"
             ></textarea>
             <div class="voice-controls">
@@ -1159,7 +1166,7 @@ const branchLabel: Record<string, string> = {
             <textarea
               class="music-textarea"
               v-model="(node as MusicNode).content"
-              placeholder="{{ t('generate.enterMusicDesc') }}"
+              :placeholder="t('generate.enterMusicDesc')"
               rows="3"
             ></textarea>
             <audio v-if="(node as MusicNode).audioUrl" :src="(node as MusicNode).audioUrl" controls class="music-audio"></audio>
@@ -1291,7 +1298,7 @@ const branchLabel: Record<string, string> = {
           <textarea
             v-model="noteText"
             class="note-textarea"
-            placeholder="{{ t('generate.notesPlaceholder') }}"
+            :placeholder="t('generate.notesPlaceholder')"
           ></textarea>
         </div>
       </template>
@@ -1329,7 +1336,7 @@ const branchLabel: Record<string, string> = {
         <textarea
           v-model="inputText"
           class="prompt-textarea"
-          placeholder="{{ t('generate.inputPlaceholder') }}"
+          :placeholder="t('generate.inputPlaceholder')"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"
         ></textarea>
