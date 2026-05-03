@@ -5,7 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.video import VideoGenerateRequest, VideoResponse
 from schemas.generation import GenerationResponse
-from services.minimax import generate_video, query_video_task
+from services.minimax import generate_video as http_generate_video, query_video_task as http_query_video_task
+from services.cli_runner import generate_video as cli_generate_video
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
 from models.user import User
@@ -30,14 +31,22 @@ async def generate(
             detail=f"No enabled profile found for model '{req.model}'",
         )
     try:
-        result = await generate_video(
-            prompt=req.prompt,
-            model=req.model,
-            duration=req.duration,
-            resolution=req.resolution,
-            api_key=profile["api_key"],
-            base_url=profile.get("base_url", "https://api.minimaxi.com"),
-        )
+        auth_type = profile.get("auth_type", "http")
+        if auth_type == "cli":
+            result = await cli_generate_video(
+                prompt=req.prompt,
+                model=req.model,
+                duration=req.duration,
+            )
+        else:
+            result = await http_generate_video(
+                prompt=req.prompt,
+                model=req.model,
+                duration=req.duration,
+                resolution=req.resolution,
+                api_key=profile["api_key"],
+                base_url=profile.get("base_url", "https://api.minimaxi.com"),
+            )
     except Exception:
         logger.exception("Video generation failed")
         raise HTTPException(status_code=500, detail="生成失败，请稍后重试")

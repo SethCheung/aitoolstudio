@@ -5,7 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.image import ImageGenerateRequest
 from schemas.generation import GenerationResponse
-from services.minimax import generate_image
+from services.minimax import generate_image as http_generate_image
+from services.cli_runner import generate_image as cli_generate_image
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
 from models.user import User
@@ -31,16 +32,25 @@ async def generate(
         )
 
     try:
-        result = await generate_image(
-            prompt=req.prompt,
-            model=req.model,
-            aspect_ratio=req.aspect_ratio,
-            n=req.n,
-            response_format=req.response_format,
-            prompt_optimizer=req.prompt_optimizer,
-            api_key=profile["api_key"],
-            base_url=profile.get("base_url", "https://api.minimaxi.com"),
-        )
+        auth_type = profile.get("auth_type", "http")
+        if auth_type == "cli":
+            result = await cli_generate_image(
+                prompt=req.prompt,
+                model=req.model,
+                aspect_ratio=req.aspect_ratio,
+                n=req.n,
+            )
+        else:
+            result = await http_generate_image(
+                prompt=req.prompt,
+                model=req.model,
+                aspect_ratio=req.aspect_ratio,
+                n=req.n,
+                response_format=req.response_format,
+                prompt_optimizer=req.prompt_optimizer,
+                api_key=profile["api_key"],
+                base_url=profile.get("base_url", "https://api.minimaxi.com"),
+            )
     except Exception:
         logger.exception("Image generation failed")
         raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
