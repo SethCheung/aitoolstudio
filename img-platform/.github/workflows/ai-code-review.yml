@@ -1,0 +1,85 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR info
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            });
+            core.setOutput('title', pr.title);
+            core.setOutput('body', pr.body || '');
+            core.setOutput('head', pr.head.sha);
+
+      - name: Get diff
+        id: diff
+        run: |
+          git diff origin/main...${{ steps.pr.outputs.head }} > pr.diff
+          echo "diff_lines=$(wc -l < pr.diff)" >> $GITHUB_OUTPUT
+          echo "diff_file=pr.diff" >> $GITHUB_OUTPUT
+
+      - name: AI Review
+        id: review
+        run: |
+          DIFF=$(cat pr.diff)
+          RESPONSE=$(curl -s https://api.moonshot.cn/kimi-v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.KIMI_API_KEY }}" \
+            -d "{\"model\":\"kimi-pro\",\"messages\":[{\"role\":\"system\",\"content\":\"你是资深代码审查员。审查PR diff，输出JSON：{\"rating\":\"high/medium/low\",\"summary\":\"一句话总结\",\"issues\":[{\"file\":\"路径\",\"line\":\"行号\",\"severity\":\"critical/high/medium/low\",\"message\":\"问题\",\"suggestion\":\"修复建议\"}],\"praise\":[\"亮点\"]}。只返回JSON。\"},{\"role\":\"user\",\"content\":\"PR标题：${{ steps.pr.outputs.title }}\n\n代码变更：\n$DIFF\"}],\"max_tokens\":4000}")
+          echo "response=$RESPONSE" >> $GITHUB_OUTPUT
+
+      - name: Post review comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const raw = `${{ steps.review.outputs.response }}`.replace(/\\n/g, ' ').replace(/'/g, "''");
+            let resp;
+            try { resp = JSON.parse(raw); } catch(e) { resp = { rating: 'error', summary: raw.substring(0, 200) }; }
+            
+            const icon = {critical: '🔴', high: '🟠', medium: '🟡', low: '🔵'};
+            let body = `## AI Code Review\n\n`;
+            body += `**Rating**: ${resp.rating?.toUpperCase() || 'N/A'} | **Summary**: ${resp.summary || 'N/A'}\n\n`;
+            
+            if (resp.issues?.length > 0) {
+              body += `### Issues (${resp.issues.length})\n\n`;
+              resp.issues.slice(0, 10).forEach(i => {
+                body += `${icon[i.severity] || '⚪'} **${i.file || 'CODE'}** ${i.line ? '`'+i.line+'`' : ''}\n`;
+                body += `> ${i.message}\n`;
+                if (i.suggestion) body += '```suggestion\n' + i.suggestion + '\n```\n';
+                body += '\n';
+              });
+            }
+            
+            if (resp.praise?.length > 0) {
+              body += `### Praise\n\n`;
+              resp.praise.forEach(p => body += `✅ ${p}\n`);
+            }
+            
+            body += '\n---\n*🤖 AI review by Kimi (kimi-pro)*';
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: body
+            });
