@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -6,7 +7,9 @@ import jwt
 from pydantic import BaseModel
 
 # ─── 配置 ───────────────────────────────────────────────────────────────────
-SECRET_KEY = "your-secret-key-change-in-production"  # TODO: 改为环境变量
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY environment variable must be set")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 小时
 

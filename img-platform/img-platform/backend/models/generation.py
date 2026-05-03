@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, JSON, Text
+from sqlalchemy import Column, Integer, String, JSON, Text, ForeignKey
 from sqlalchemy.orm import relationship
 
 from .database import BaseModel
@@ -21,4 +21,4 @@ class Generation(BaseModel):
     video_duration = Column(String(10), nullable=True)  # video, e.g. "6s"
     n_generated = Column(Integer, default=1)
     mini_max_id = Column(String(100), nullable=True)  # MiniMax task ID
-    user_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)

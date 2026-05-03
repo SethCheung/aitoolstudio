@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
+
+const { t } = useI18n()
 
 const apiClient = axios.create({ baseURL: '/api', timeout: 60000 })
 
@@ -119,13 +123,13 @@ const contextMenu = ref<{ show: boolean; x: number; y: number; nodeId: string | 
 
 // Input
 const inputText = ref('')
-const selectedCategory = ref('image')  // 当前选中的模型类别
-const selectedModel = ref('image-01')  // 当前选中的模型名
+const selectedCategory = ref('image')  // current selected category
+const selectedModel = ref('image-01')  // current selected model
 const selectedStyle = ref('Cinematic')
 const selectedAspect = ref('16:9')
 const isGenerating = ref(false)
 
-// 从 /api/profiles/models 动态加载
+// dynamically load from /api/profiles/models
 interface AvailableModels {
   image?: string[]
   voice?: string[]
@@ -411,7 +415,7 @@ async function sendVoice(nodeId: string) {
     node.audioUrl = data.audio_url
   } catch (err: any) {
     console.error('Voice generation failed:', err)
-    alert(`Voice generation failed: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`Voice generation failed: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -431,7 +435,7 @@ async function sendMusic(nodeId: string) {
     node.audioUrl = data.audio_url
   } catch (err: any) {
     console.error('Music generation failed:', err)
-    alert(`Music generation failed: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`Music generation failed: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -525,7 +529,7 @@ async function sendImageMessage(text: string, cx: number, cy: number) {
       genNode.images[i] = data.image_urls[i]
     }
   } catch (err: any) {
-    alert(`生成失败: ${err?.response?.data?.detail ?? err.message ?? '未知错误'}`)
+    ElMessage.error(`${t('generate.genFailed')}: ${err?.response?.data?.detail ?? err.message ?? t('generate.unknownError')}`)
   } finally {
     isGenerating.value = false
   }
@@ -555,7 +559,7 @@ async function sendVoiceMessage(text: string, cx: number, cy: number) {
     const data = resp.data as { audio_url: string }
     voiceNode.audioUrl = data.audio_url
   } catch (err: any) {
-    alert(`语音生成失败: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`${t('generate.voiceFailed')}: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -583,7 +587,7 @@ async function sendMusicMessage(text: string, cx: number, cy: number) {
     const data = resp.data as { audio_url: string }
     musicNode.audioUrl = data.audio_url
   } catch (err: any) {
-    alert(`音乐生成失败: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`${t('generate.musicFailed')}: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -609,7 +613,7 @@ async function sendVideoMessage(text: string, cx: number, cy: number) {
     const data = resp.data as { video_url: string }
     videoNode.image = data.video_url  // reuse image field for video URL
   } catch (err: any) {
-    alert(`视频生成失败: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`${t('generate.videoFailed')}: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -677,15 +681,22 @@ onMounted(async () => {
   window.addEventListener('mouseup', globalMouseUp)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('click', closeContextMenu)
-  // 动态加载可用模型
+  // dynamically load available models
   try {
     const resp = await apiClient.get('/profiles/models')
     availableModels.value = resp.data as AvailableModels
-    // 默认选中第一个模型
-    const firstCat = 'image'
-    selectedCategory.value = firstCat
-    if (availableModels.value[firstCat]?.length) {
-      selectedModel.value = availableModels.value[firstCat][0]
+    // default select first model
+    // Pick the first category that actually has models. Prefer 'image' if it
+    // is non-empty so the default UX matches the most common deployment, but
+    // fall back to whichever category is configured in profiles.json.
+    const categories = Object.keys(availableModels.value) as Array<keyof AvailableModels>
+    const preferred: Array<keyof AvailableModels> = ['image', 'voice', 'music', 'video']
+    const firstCat =
+      preferred.find((c) => availableModels.value[c]?.length) ??
+      categories.find((c) => availableModels.value[c]?.length)
+    if (firstCat) {
+      selectedCategory.value = firstCat as string
+      selectedModel.value = availableModels.value[firstCat]![0]
     }
   } catch (e) {
     console.warn('Failed to load models from profiles:', e)
@@ -724,62 +735,62 @@ const branchLabel: Record<string, string> = {
           <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
           </svg>
-          <span class="brand-name">AI 图片生成器</span>
+          <span class="brand-name">{{ t('generate.brand') }}</span>
         </div>
         <button class="new-canvas-btn" @click="zoomReset">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
             <path d="M12 5v14M5 12h14"/>
           </svg>
-          新建画布
+          {{ t('generate.newCanvas') }}
         </button>
       </div>
 
       <div class="sidebar-section">
-        <span class="section-label">画布控制</span>
+        <span class="section-label">{{ t('generate.canvasControl') }}</span>
         <div class="sidebar-btns">
           <button class="sidebar-action-btn" @click="zoomIn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/>
             </svg>
-            放大
+            {{ t('generate.zoomIn') }}
           </button>
           <button class="sidebar-action-btn" @click="zoomOut">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M8 11h6"/>
             </svg>
-            缩小
+            {{ t('generate.zoomOut') }}
           </button>
           <button class="sidebar-action-btn" @click="zoomReset">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
               <path d="M3 3v5h5"/>
             </svg>
-            重置视图
+            {{ t('generate.resetView') }}
           </button>
         </div>
       </div>
 
       <div class="sidebar-section">
-        <span class="section-label">节点</span>
+        <span class="section-label">{{ t('generate.nodes') }}</span>
         <div class="sidebar-btns">
           <button class="sidebar-action-btn" @click="autoLayout">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
               <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
             </svg>
-            自动布局
+            {{ t('generate.autoLayout') }}
           </button>
           <button class="sidebar-action-btn" @click="() => { nodes = []; connections = []; activeNode = null }">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
             </svg>
-            清空全部
+            {{ t('generate.clearAll') }}
           </button>
         </div>
       </div>
 
       <div class="sidebar-section">
-        <span class="section-label">快捷操作</span>
+        <span class="section-label">{{ t('generate.quickActions') }}</span>
         <div class="sidebar-btns">
           <button
             class="sidebar-action-btn"
@@ -790,7 +801,7 @@ const branchLabel: Record<string, string> = {
               <path d="M1 4v6h6M23 20v-6h-6"/>
               <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
             </svg>
-            添加变体
+            {{ t('generate.addVariation') }}
           </button>
           <button
             class="sidebar-action-btn"
@@ -800,20 +811,20 @@ const branchLabel: Record<string, string> = {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
               <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
             </svg>
-            添加放大
+            {{ t('generate.addUpscale') }}
           </button>
         </div>
       </div>
 
       <div class="sidebar-section">
-        <span class="section-label">音频</span>
+        <span class="section-label">{{ t('generate.audio') }}</span>
         <div class="sidebar-btns">
           <button class="sidebar-action-btn" @click="addVoiceNode">
             <svg viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" width="13" height="13">
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
               <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
             </svg>
-            新建语音
+            {{ t('generate.newVoice') }}
           </button>
           <button class="sidebar-action-btn" @click="addMusicNode">
             <svg viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" width="13" height="13">
@@ -821,13 +832,13 @@ const branchLabel: Record<string, string> = {
               <circle cx="6" cy="18" r="3"/>
               <circle cx="18" cy="16" r="3"/>
             </svg>
-            新建音乐
+            {{ t('generate.newMusic') }}
           </button>
         </div>
       </div>
 
       <div class="sidebar-node-list">
-        <span class="section-label">节点 ({{ nodes.length }})</span>
+        <span class="section-label">{{ t('generate.nodeList') }} ({{ nodes.length }})</span>
         <div class="node-list-items">
           <button
             v-for="node in nodes"
@@ -850,7 +861,7 @@ const branchLabel: Record<string, string> = {
           <div class="user-avatar">A</div>
           <div class="user-details">
             <span class="user-name">admin</span>
-            <span class="user-plan">专业版</span>
+            <span class="user-plan">{{ t('generate.proPlan') }}</span>
           </div>
         </div>
       </div>
@@ -1010,8 +1021,8 @@ const branchLabel: Record<string, string> = {
                 </button>
               </div>
 
-              <!-- "引用此图" label below image -->
-              <div class="ref-img-label">↓ 引用此图</div>
+              <!-- "{{ t('generate.refImage') }}" label below image -->
+              <div class="ref-img-label">↓ {{ t('generate.refImage') }}</div>
             </div>
           </div>
 
@@ -1102,7 +1113,7 @@ const branchLabel: Record<string, string> = {
             <textarea
               class="voice-textarea"
               v-model="(node as VoiceNode).content"
-              placeholder="输入要合成的文本..."
+              placeholder="{{ t('generate.enterVoiceText') }}"
               rows="3"
             ></textarea>
             <div class="voice-controls">
@@ -1148,7 +1159,7 @@ const branchLabel: Record<string, string> = {
             <textarea
               class="music-textarea"
               v-model="(node as MusicNode).content"
-              placeholder="描述你想要的音乐..."
+              placeholder="{{ t('generate.enterMusicDesc') }}"
               rows="3"
             ></textarea>
             <audio v-if="(node as MusicNode).audioUrl" :src="(node as MusicNode).audioUrl" controls class="music-audio"></audio>
@@ -1178,7 +1189,7 @@ const branchLabel: Record<string, string> = {
       <!-- Generating overlay hint -->
       <div v-if="isGenerating" class="generating-hint">
         <div class="gen-orbs"><div class="orb"></div><div class="orb"></div><div class="orb"></div></div>
-        AI 正在创作你的图片...
+        {{ t('generate.generating') }}
       </div>
     </main>
 
@@ -1186,16 +1197,16 @@ const branchLabel: Record<string, string> = {
     <aside class="right-panel">
       <template v-if="activeNode">
         <div class="panel-section">
-          <h3 class="section-title">节点信息</h3>
+          <h3 class="section-title">{{ t('generate.nodeInfo') }}</h3>
           <div class="info-grid">
             <div class="info-row">
-              <span class="info-key">类型</span>
+              <span class="info-key">{{ t('generate.type') }}</span>
               <span class="info-val" :style="{ color: activeNode.type === 'prompt' ? '#a855f7' : activeNode.type === 'generation' ? '#00d9ff' : branchColor[activeNode.type] }">
                 {{ activeNode.type.toUpperCase() }}
               </span>
             </div>
             <div class="info-row">
-              <span class="info-key">位置</span>
+              <span class="info-key">{{ t('generate.position') }}</span>
               <span class="info-val">{{ Math.round(activeNode.x) }}, {{ Math.round(activeNode.y) }}</span>
             </div>
             <div class="info-row">
@@ -1207,44 +1218,44 @@ const branchLabel: Record<string, string> = {
 
         <template v-if="activeNode.type === 'prompt'">
           <div class="panel-section">
-            <h3 class="section-title">提示词</h3>
+            <h3 class="section-title">{{ t('generate.prompt') }}</h3>
             <div class="prompt-preview">{{ (activeNode as PromptNode).content }}</div>
           </div>
         </template>
 
         <template v-if="activeNode.type === 'generation'">
           <div class="panel-section">
-            <h3 class="section-title">图片 ({{ (activeNode as GenerationNode).images.length }})</h3>
-            <p class="panel-hint">点击图片开始分支连接</p>
+            <h3 class="section-title">{{ t('generate.images') }} ({{ (activeNode as GenerationNode).images.length }})</h3>
+            <p class="panel-hint">{{ t('generate.clickToBranch') }}</p>
           </div>
         </template>
 
         <div class="panel-section">
-          <h3 class="section-title">参数</h3>
+          <h3 class="section-title">{{ t('generate.params') }}</h3>
           <div class="param-list">
             <div class="param-item">
-              <span class="param-key">类别</span>
+              <span class="param-key">{{ t('generate.category') }}</span>
               <select v-model="selectedCategory" class="param-val-select">
-                <option value="image">图片</option>
-                <option value="voice">语音</option>
-                <option value="video">视频</option>
-                <option value="music">音乐</option>
+                <option value="image">{{ t('generate.categoryImage') }}</option>
+                <option value="voice">{{ t('generate.categoryVoice') }}</option>
+                <option value="video">{{ t('generate.categoryVideo') }}</option>
+                <option value="music">{{ t('generate.categoryMusic') }}</option>
               </select>
             </div>
             <div class="param-item">
-              <span class="param-key">模型</span>
+              <span class="param-key">{{ t('generate.model') }}</span>
               <select v-model="selectedModel" class="param-val-select">
                 <option v-for="m in currentModelList" :key="m" :value="m">{{ m }}</option>
               </select>
             </div>
             <div class="param-item">
-              <span class="param-key">风格</span>
+              <span class="param-key">{{ t('generate.style') }}</span>
               <select v-model="selectedStyle" class="param-val-select">
                 <option v-for="s in styles" :key="s" :value="s">{{ s }}</option>
               </select>
             </div>
             <div class="param-item">
-              <span class="param-key">比例</span>
+              <span class="param-key">{{ t('generate.aspectRatio') }}</span>
               <select v-model="selectedAspect" class="param-val-select">
                 <option v-for="a in aspects" :key="a" :value="a">{{ a }}</option>
               </select>
@@ -1255,12 +1266,12 @@ const branchLabel: Record<string, string> = {
               <path d="M23 4v6h-6M1 20v-6h6"/>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
-            重新生成
+            {{ t('common.regenerate') }}
           </button>
         </div>
 
         <div class="panel-section">
-          <h3 class="section-title">分支操作</h3>
+          <h3 class="section-title">{{ t('generate.branchActions') }}</h3>
           <div class="branch-btns">
             <button
               v-for="bt in (['upscale', 'img2img', 'video'] as const)"
@@ -1276,11 +1287,11 @@ const branchLabel: Record<string, string> = {
         </div>
 
         <div class="panel-section">
-          <h3 class="section-title">备注</h3>
+          <h3 class="section-title">{{ t('generate.notes') }}</h3>
           <textarea
             v-model="noteText"
             class="note-textarea"
-            placeholder="添加关于此节点的备注..."
+            placeholder="{{ t('generate.notesPlaceholder') }}"
           ></textarea>
         </div>
       </template>
@@ -1290,7 +1301,7 @@ const branchLabel: Record<string, string> = {
           <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32" style="color: rgba(0,217,255,0.25)">
             <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
           </svg>
-          <p>选择节点查看详情</p>
+          <p>{{ t('generate.selectNode') }}</p>
         </div>
       </template>
     </aside>
@@ -1299,10 +1310,10 @@ const branchLabel: Record<string, string> = {
     <div class="bottom-input-bar">
       <div class="input-row">
         <select v-model="selectedCategory" class="param-select">
-          <option value="image">图片</option>
-          <option value="voice">语音</option>
-          <option value="video">视频</option>
-          <option value="music">音乐</option>
+          <option value="image">{{ t('generate.categoryImage') }}</option>
+          <option value="voice">{{ t('generate.categoryVoice') }}</option>
+          <option value="video">{{ t('generate.categoryVideo') }}</option>
+          <option value="music">{{ t('generate.categoryMusic') }}</option>
         </select>
         <select v-model="selectedModel" class="param-select">
           <option v-for="m in currentModelList" :key="m" :value="m">{{ m }}</option>
@@ -1318,7 +1329,7 @@ const branchLabel: Record<string, string> = {
         <textarea
           v-model="inputText"
           class="prompt-textarea"
-          placeholder="描述你想创作的内容... (Enter 发送)"
+          placeholder="{{ t('generate.inputPlaceholder') }}"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"
         ></textarea>
@@ -1338,12 +1349,12 @@ const branchLabel: Record<string, string> = {
         :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
         @click.stop
       >
-        <div class="ctx-title">添加分支节点</div>
+        <div class="ctx-title">{{ t('generate.addBranch') }}</div>
         <button class="ctx-branch-btn upscale" @click="addBranch('upscale')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#00d9ff" stroke-width="2" width="13" height="13">
             <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
           </svg>
-          放大 (超分辨率)
+          {{ t('generate.upscale') }}
         </button>
         <button class="ctx-branch-btn img2img" @click="addBranch('img2img')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" width="13" height="13">
@@ -1351,17 +1362,17 @@ const branchLabel: Record<string, string> = {
             <circle cx="8.5" cy="8.5" r="1.5"/>
             <path d="M21 15l-5-5L5 21"/>
           </svg>
-          图生图
+          {{ t('generate.img2img') }}
         </button>
         <button class="ctx-branch-btn video" @click="addBranch('video')">
           <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" width="13" height="13">
             <polygon points="23 7 16 12 23 17 23 7"/>
             <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
           </svg>
-          视频生成
+          {{ t('generate.videoGen') }}
         </button>
         <div class="ctx-divider"></div>
-        <button class="ctx-item" @click="contextMenu.show = false">取消</button>
+        <button class="ctx-item" @click="contextMenu.show = false">{{ t('common.cancel') }}</button>
       </div>
 
       <div
@@ -1375,14 +1386,14 @@ const branchLabel: Record<string, string> = {
             <rect x="9" y="9" width="13" height="13" rx="2"/>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
-          复制
+          {{ t('common.copy') }}
         </button>
         <div class="ctx-divider"></div>
         <button class="ctx-item danger" @click="deleteNode(contextMenu.nodeId!)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
             <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
           </svg>
-          删除
+          {{ t('common.delete') }}
         </button>
       </div>
     </Teleport>
@@ -1770,7 +1781,7 @@ const branchLabel: Record<string, string> = {
 .img-tool-btn:hover { background: rgba(0, 217, 255, 0.2); border-color: rgba(0, 217, 255, 0.4); color: #00d9ff; }
 .img-tool-btn.danger:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #ef4444; }
 
-/* "引用此图" label */
+/* "{{ t('generate.refImage') }}" label */
 .ref-img-label {
   position: absolute;
   bottom: 0;

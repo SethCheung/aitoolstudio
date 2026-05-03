@@ -1,9 +1,14 @@
 import json
 import os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from api.auth import get_current_user
+from models.user import User
 
 router = APIRouter(prefix="/api/profiles", tags=["Profile 管理"])
 
@@ -57,8 +62,8 @@ def _mask_key(key: str) -> str:
 
 
 @router.get("")
-def list_profiles():
-    """列出所有 profiles，api_key 脱敏"""
+def list_profiles(current_user: User = Depends(get_current_user)):
+    """列出所有 profiles，api_key 脱敏（需登录）"""
     profiles = _load()
     return [
         ProfileOut(
@@ -74,7 +79,7 @@ def list_profiles():
 
 @router.get("/models")
 def list_models():
-    """聚合所有启用 profile 的模型，按 category 返回"""
+    """聚合所有启用 profile 的模型，按 category 返回（公开，供前端选择模型）"""
     profiles = _load()
     models_by_category = {}
     for p in profiles:
@@ -90,7 +95,7 @@ def list_models():
 
 
 @router.post("")
-def create_profile(prof: ProfileModel):
+def create_profile(prof: ProfileModel, current_user: User = Depends(get_current_user)):
     profiles = _load()
     for p in profiles:
         if p["name"] == prof.name:
@@ -101,7 +106,7 @@ def create_profile(prof: ProfileModel):
 
 
 @router.put("/{name}")
-def update_profile(name: str, prof: ProfileModel):
+def update_profile(name: str, prof: ProfileModel, current_user: User = Depends(get_current_user)):
     profiles = _load()
     for i, p in enumerate(profiles):
         if p["name"] == name:
@@ -112,7 +117,7 @@ def update_profile(name: str, prof: ProfileModel):
 
 
 @router.delete("/{name}")
-def delete_profile(name: str):
+def delete_profile(name: str, current_user: User = Depends(get_current_user)):
     profiles = _load()
     new_profiles = [p for p in profiles if p["name"] != name]
     if len(new_profiles) == len(profiles):
@@ -122,7 +127,7 @@ def delete_profile(name: str):
 
 
 @router.post("/{name}/enable")
-def enable_profile(name: str):
+def enable_profile(name: str, current_user: User = Depends(get_current_user)):
     profiles = _load()
     for p in profiles:
         if p["name"] == name:
@@ -133,7 +138,7 @@ def enable_profile(name: str):
 
 
 @router.post("/{name}/disable")
-def disable_profile(name: str):
+def disable_profile(name: str, current_user: User = Depends(get_current_user)):
     profiles = _load()
     for p in profiles:
         if p["name"] == name:
