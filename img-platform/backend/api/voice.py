@@ -5,7 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.voice import VoiceGenerateRequest, VoiceResponse
 from schemas.generation import GenerationResponse
-from services.minimax import generate_voice
+from services.minimax import generate_voice as http_generate_voice
+from services.cli_runner import generate_voice as cli_generate_voice
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
 from models.user import User
