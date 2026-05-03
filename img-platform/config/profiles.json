@@ -10,14 +10,13 @@
           "image-01"
         ],
         "voice": [
-          "speech-02-hd"
+          "speech-2.8-hd"
         ],
         "video": [
-          "hailuo-video-01"
+          "MiniMax-Hailuo-2.3"
         ],
         "music": [
-          "music-01",
-          "music-02"
+          "music-2.6"
         ]
       }
     }

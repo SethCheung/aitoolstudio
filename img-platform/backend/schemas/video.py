@@ -5,7 +5,7 @@ from typing import Optional
 
 class VideoGenerateRequest(BaseModel):
     prompt: str
-    model: str = "hailuo-video-01"
+    model: str = "MiniMax-Hailuo-2.3"
     duration: str = "6s"
     resolution: str = "720p"
     fps: int = 30

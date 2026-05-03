@@ -6,7 +6,7 @@ from typing import Optional
 class VoiceGenerateRequest(BaseModel):
     text: str
     voice_id: str = "male-qn-qingse"
-    model: str = "speech-02-hd"
+    model: str = "speech-2.8-hd"
     speed: float = 1.0
     vol: float = 1.0
     pitch: float = 0.0

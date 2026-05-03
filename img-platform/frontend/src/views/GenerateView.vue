@@ -367,7 +367,7 @@ function addVoiceNode() {
     selected: false,
     content: '',
     voiceId: 'male-qn-qingse',
-    voiceModel: 'speech-02-hd',
+    voiceModel: 'speech-2.8-hd',
     audioUrl: '',
     time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   }
@@ -387,7 +387,7 @@ function addMusicNode() {
     y: cy,
     selected: false,
     content: '',
-    musicModel: 'music-01',
+    musicModel: 'music-2.6',
     audioUrl: '',
     time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
   }

@@ -171,7 +171,7 @@ async def generate_image(
 async def generate_voice(
     text: str,
     voice_id: str = "male-qn-qingse",
-    model: str = "speech-02-hd",
+    model: str = "speech-2.8-hd",
     speed: float = 1.0,
     vol: float = 1.0,
     pitch: float = 0.0,
@@ -191,12 +191,21 @@ async def generate_voice(
             json={
                 "model": model,
                 "text": text,
-                "voice_id": voice_id,
-                "speed": speed,
-                "vol": vol,
-                "pitch": pitch,
-                "emotion": emotion,
-                "response_format": response_format,
+                "stream": False,
+                "voice_setting": {
+                    "voice_id": voice_id,
+                    "speed": speed,
+                    "vol": vol,
+                    "pitch": pitch,
+                    "emotion": emotion,
+                },
+                "audio_setting": {
+                    "sample_rate": 32000,
+                    "bitrate": "128000",
+                    "format": response_format,
+                    "channel": 1,
+                },
+                "subtitle_enable": False,
             },
         )
         resp.raise_for_status()
@@ -205,7 +214,7 @@ async def generate_voice(
 
 async def generate_video(
     prompt: str,
-    model: str = "hailuo-video-01",
+    model: str = "MiniMax-Hailuo-2.3",
     duration: str = "6s",
     resolution: str = "720p",
     fps: int = 30,
@@ -239,7 +248,7 @@ async def generate_video(
 
 async def generate_music(
     prompt: str,
-    model: str = "music-01",
+    model: str = "music-2.6",
 ) -> dict:
     """MiniMax Music API，按 model 路由到对应 profile"""
     api_key = _get_api_key_for_model(model)
