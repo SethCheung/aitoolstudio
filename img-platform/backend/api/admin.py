@@ -166,6 +166,9 @@ ADMIN_HTML = """<!doctype html>
     .model-box h3 { margin: 0 0 10px; font-size: 14px; text-transform: capitalize; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: #4b5563; font-weight: 700; }
     .check input { width: 16px; height: 16px; }
+    .custom-model-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px; gap: 8px; margin-top: 12px; }
+    .custom-model-row input { height: 34px; padding: 0 10px; font-size: 13px; }
+    .mini-add { height: 34px; border-radius: 9px; background: var(--blue); color: #fff; font-weight: 900; }
     .form-error { color: #dc2626; font-weight: 800; min-height: 20px; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
     .secondary, .save { height: 40px; padding: 0 18px; border-radius: 10px; font-weight: 850; }
@@ -266,6 +269,7 @@ ADMIN_HTML = """<!doctype html>
       video: ['hailuo-video-01'],
       music: ['music-01'],
     };
+    let currentModelOptions = structuredClone(modelCategories);
     let profiles = [];
     let users = [];
     let active = 'all';
@@ -280,6 +284,11 @@ ADMIN_HTML = """<!doctype html>
     }
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function friendlyError(error) {
+      return error.message === 'Failed to fetch'
+        ? '后端服务未连接，请确认 uvicorn 正在 8001 端口运行'
+        : error.message;
     }
     function renderTabs() {
       $('tabs').innerHTML = categories.map((cat) => `
@@ -302,7 +311,7 @@ ADMIN_HTML = """<!doctype html>
         if (!selected && profiles.length) selected = profiles[0].name;
         $('status').textContent = 'Connected';
       } catch (error) {
-        $('status').textContent = 'Failed: ' + error.message.slice(0, 80);
+        $('status').textContent = 'Failed: ' + friendlyError(error).slice(0, 80);
       }
       renderTabs();
       renderList();
@@ -385,15 +394,42 @@ ADMIN_HTML = """<!doctype html>
       `).join('');
     }
     function renderModelGrid() {
-      $('modelGrid').innerHTML = Object.entries(modelCategories).map(([category, models]) => `
+      $('modelGrid').innerHTML = Object.entries(currentModelOptions).map(([category, models]) => `
         <div class="model-box">
           <h3>${category}</h3>
           ${models.map((model) => `<label class="check"><input type="checkbox" data-category="${category}" value="${model}" />${model}</label>`).join('')}
+          <div class="custom-model-row">
+            <input id="custom_${category}" placeholder="自定义模型名" onkeydown="if(event.key === 'Enter'){event.preventDefault();addCustomModel('${category}')}" />
+            <button class="mini-add" type="button" onclick="addCustomModel('${category}')">+</button>
+          </div>
         </div>`).join('');
     }
-    function openForm(name = '') {
+    function addModelOption(category, model, checked = true) {
+      const value = String(model || '').trim();
+      if (!value) return;
+      if (!currentModelOptions[category].includes(value)) {
+        currentModelOptions[category].push(value);
+      }
       renderModelGrid();
+      const selector = `#modelGrid input[data-category="${category}"][value="${CSS.escape(value)}"]`;
+      const box = document.querySelector(selector);
+      if (box) box.checked = checked;
+    }
+    function addCustomModel(category) {
+      const input = $(`custom_${category}`);
+      addModelOption(category, input.value, true);
+      input.value = '';
+    }
+    function openForm(name = '') {
       editing = profiles.find((p) => p.name === name) || null;
+      currentModelOptions = structuredClone(modelCategories);
+      Object.entries(editing?.models || {}).forEach(([category, models]) => {
+        if (!currentModelOptions[category]) currentModelOptions[category] = [];
+        models.forEach((model) => {
+          if (!currentModelOptions[category].includes(model)) currentModelOptions[category].push(model);
+        });
+      });
+      renderModelGrid();
       $('formTitle').textContent = editing ? 'Edit API' : 'Add API';
       $('name').disabled = !!editing;
       $('name').value = editing?.name || '';
@@ -444,7 +480,7 @@ ADMIN_HTML = """<!doctype html>
         closeForm();
         await loadProfiles();
       } catch (error) {
-        $('formError').textContent = error.message;
+        $('formError').textContent = friendlyError(error);
       }
     }
     async function toggleProfile(name, enabled) {
@@ -487,7 +523,7 @@ ADMIN_HTML = """<!doctype html>
         closeUserForm();
         await loadAll();
       } catch (error) {
-        $('userFormError').textContent = error.message;
+        $('userFormError').textContent = friendlyError(error);
       }
     }
     async function toggleAdmin(id, isAdmin) {
