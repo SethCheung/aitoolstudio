@@ -5,7 +5,8 @@ from typing import Optional
 
 class MusicGenerateRequest(BaseModel):
     prompt: str
-    model: str = "music-01"
+    model: str = "music-2.6"
+    lyrics: str = ""
 
 
 class MusicResponse(BaseModel):

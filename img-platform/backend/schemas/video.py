@@ -5,19 +5,20 @@ from typing import Optional
 
 class VideoGenerateRequest(BaseModel):
     prompt: str
-    model: str = "hailuo-video-01"
-    duration: str = "6s"
-    resolution: str = "720p"
-    fps: int = 30
+    model: str = "MiniMax-Hailuo-2.3"
+    duration: int = 6
+    resolution: str = "768P"
+    fps: Optional[int] = None
     seed: Optional[int] = None
 
 
 class VideoResponse(BaseModel):
     id: int
     prompt: str
-    video_url: str
+    task_id: str
+    video_url: Optional[str] = None
     video_model: str
-    duration: str
+    duration: int
     created_at: datetime
 
     class Config:

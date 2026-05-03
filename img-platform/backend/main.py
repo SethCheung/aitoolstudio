@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 import sys
-import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from api.auth import router as auth_router
+from api.profiles import router as profiles_router
 from api.image import router as image_router
 from api.voice import router as voice_router
 from api.video import router as video_router
@@ -40,11 +42,17 @@ def on_startup():
 
 # 注册路由
 app.include_router(auth_router)
+app.include_router(profiles_router)
 app.include_router(image_router)
 app.include_router(voice_router)
 app.include_router(video_router)
 app.include_router(music_router)
 app.include_router(generation_router)
+
+# 挂载静态文件（语音文件等）
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 
 @app.get("/")
