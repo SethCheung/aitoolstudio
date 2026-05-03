@@ -23,6 +23,9 @@ class ProfileCreateRequest(BaseModel):
     base_url: str = "https://api.minimaxi.com"
     enabled: bool = True
     priority: int = 99
+    daily_quota: Optional[int] = None
+    monthly_quota: Optional[int] = None
+    notes: str = ""
     models: dict = {}  # {"image": ["image-01"], "voice": ["speech-02-hd"]}
 
 
@@ -32,6 +35,9 @@ class ProfileUpdateRequest(BaseModel):
     base_url: Optional[str] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None
+    daily_quota: Optional[int] = None
+    monthly_quota: Optional[int] = None
+    notes: Optional[str] = None
     models: Optional[dict] = None
 
 
@@ -75,6 +81,9 @@ async def create(req: ProfileCreateRequest):
             "base_url": req.base_url,
             "enabled": req.enabled,
             "priority": req.priority,
+            "daily_quota": req.daily_quota,
+            "monthly_quota": req.monthly_quota,
+            "notes": req.notes,
             "models": req.models,
         })
         return profile

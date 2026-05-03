@@ -1,845 +1,772 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 
-const { t } = useI18n()
-
-// ── Tab ──────────────────────────────────────────────
-const sidebarItems = [t('admin.overview'), t('admin.users'), t('admin.workflow'), t('admin.gpuMonitor'), t('admin.models'), t('admin.logs'), t('admin.billing'), t('admin.settings')]
-
-const users = [
-  ['Alex Chen', 'alex@example.com', t('admin.roleAdmin'), t('admin.statusActive')],
-  ['Sarah Kim', 'sarah@example.com', t('generate.proPlan'), t('admin.statusActive')],
-  ['Mike Ross', 'mike@example.com', t('admin.roleUser'), t('admin.statusInactive')],
-  ['Emma Watson', 'emma@example.com', t('generate.proPlan'), t('admin.statusActive')],
-  ['John Doe', 'john@example.com', t('admin.roleUser'), t('admin.statusActive')],
-]
-const workflows = ['Text-to-Image', 'Image Enhancement', 'Batch Processing']
-
-const totalGens = ref(0)
-
-// ── Profiles ─────────────────────────────────────────
 interface Profile {
   name: string
-  api_key_masked: string
+  api_key_masked?: string
+  base_url?: string
   enabled: boolean
   priority: number
   models: Record<string, string[]>
 }
-const profiles = ref<Profile[]>([])
-const modelCategories: Record<string, string[]> = {
+
+type Category = 'all' | 'image' | 'voice' | 'video' | 'music'
+
+const categories: Array<{ key: Category; label: string; icon: string }> = [
+  { key: 'all', label: 'All', icon: 'A' },
+  { key: 'image', label: 'Image', icon: 'I' },
+  { key: 'voice', label: 'Voice', icon: 'V' },
+  { key: 'video', label: 'Video', icon: '▶' },
+  { key: 'music', label: 'Music', icon: '♪' },
+]
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, '')}/docs`
+
+const modelCategories: Record<Exclude<Category, 'all'>, string[]> = {
   image: ['image-01', 'image-01-turbo'],
   voice: ['speech-02-hd', 'speech-02'],
   video: ['hailuo-video-01'],
   music: ['music-01'],
 }
 
-const showAddForm = ref(false)
+const profiles = ref<Profile[]>([])
+const activeCategory = ref<Category>('all')
+const selectedName = ref('')
+const isLoading = ref(false)
+const loadError = ref('')
+const showForm = ref(false)
 const editingProfile = ref<Profile | null>(null)
-const form = ref({ name: '', api_key: '', enabled: true, priority: 1, models: {} as Record<string, string[]> })
 const formError = ref('')
+const form = ref({
+  name: '',
+  api_key: '',
+  base_url: 'https://api.minimaxi.com',
+  enabled: true,
+  priority: 1,
+  models: {
+    image: ['image-01'],
+    voice: [] as string[],
+    video: [] as string[],
+    music: [] as string[],
+  } as Record<string, string[]>,
+})
+
+const normalizedProfiles = computed(() => {
+  if (Array.isArray(profiles.value)) return profiles.value
+  return Object.values(profiles.value || {}) as Profile[]
+})
+
+const filteredProfiles = computed(() => {
+  if (activeCategory.value === 'all') return normalizedProfiles.value
+  return normalizedProfiles.value.filter((profile) => profile.models?.[activeCategory.value]?.length)
+})
+
+const enabledCount = computed(() => normalizedProfiles.value.filter((profile) => profile.enabled).length)
+const modelCount = computed(() => {
+  const names = new Set<string>()
+  normalizedProfiles.value.forEach((profile) => {
+    Object.values(profile.models || {}).forEach((models) => models.forEach((model) => names.add(model)))
+  })
+  return names.size
+})
 
 async function fetchProfiles() {
+  isLoading.value = true
+  loadError.value = ''
   try {
-    profiles.value = (await axios.get('/api/profiles')).data
-  } catch (e) {
-    console.error('Failed to load profiles', e)
+    const response = await axios.get('/api/profiles')
+    const data = response.data
+    profiles.value = Array.isArray(data) ? data : Object.values(data || {})
+    if (!selectedName.value && profiles.value.length) selectedName.value = profiles.value[0].name
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to load profiles'
+  } finally {
+    isLoading.value = false
   }
+}
+
+function emptyModels() {
+  return { image: [], voice: [], video: [], music: [] } as Record<string, string[]>
 }
 
 function openAdd() {
   editingProfile.value = null
-  form.value = { name: '', api_key: '', enabled: true, priority: 1, models: { image: ['image-01'], voice: [], video: [], music: [] } }
+  form.value = {
+    name: '',
+    api_key: '',
+    base_url: 'https://api.minimaxi.com',
+    enabled: true,
+    priority: Math.max(1, normalizedProfiles.value.length + 1),
+    models: { ...emptyModels(), image: ['image-01'] },
+  }
   formError.value = ''
-  showAddForm.value = true
+  showForm.value = true
 }
 
-function openEdit(p: Profile) {
-  editingProfile.value = p
-  form.value = { name: p.name, api_key: '', enabled: p.enabled, priority: p.priority, models: { ...p.models } }
+function openEdit(profile: Profile) {
+  editingProfile.value = profile
+  form.value = {
+    name: profile.name,
+    api_key: '',
+    base_url: profile.base_url || 'https://api.minimaxi.com',
+    enabled: profile.enabled,
+    priority: profile.priority,
+    models: { ...emptyModels(), ...(profile.models || {}) },
+  }
   formError.value = ''
-  showAddForm.value = true
+  showForm.value = true
 }
 
 async function saveProfile() {
-  if (!form.value.name || !form.value.api_key) {
-    formError.value = t('common.error')
+  if (!form.value.name.trim()) {
+    formError.value = 'Name is required'
     return
   }
+  if (!editingProfile.value && !form.value.api_key.trim()) {
+    formError.value = 'API key is required for new profiles'
+    return
+  }
+
+  const payload = {
+    ...form.value,
+    name: form.value.name.trim(),
+    api_key: form.value.api_key.trim() || undefined,
+  }
+
   try {
     if (editingProfile.value) {
-      await axios.put(`/api/profiles/${editingProfile.value.name}`, form.value)
+      await axios.put(`/api/profiles/${editingProfile.value.name}`, payload)
     } else {
-      await axios.post('/api/profiles', form.value)
+      await axios.post('/api/profiles', payload)
     }
-    showAddForm.value = false
-    fetchProfiles()
-  } catch (e: any) {
-    formError.value = e?.response?.data?.detail || t('common.error')
+    showForm.value = false
+    await fetchProfiles()
+    selectedName.value = payload.name
+  } catch (error: any) {
+    formError.value = error?.response?.data?.detail || error.message || 'Failed to save profile'
   }
 }
 
-async function toggleProfile(name: string, enabled: boolean) {
-  const action = enabled ? 'enable' : 'disable'
-  await axios.post(`/api/profiles/${name}/${action}`)
-  fetchProfiles()
+async function toggleProfile(profile: Profile) {
+  const action = profile.enabled ? 'disable' : 'enable'
+  await axios.post(`/api/profiles/${profile.name}/${action}`)
+  await fetchProfiles()
 }
 
-async function deleteProfile(name: string) {
-  if (!confirm(`Confirm delete profile "${name}"？`)) return
-  await axios.delete(`/api/profiles/${name}`)
-  fetchProfiles()
+async function deleteProfile(profile: Profile) {
+  if (!confirm(`Delete profile "${profile.name}"?`)) return
+  await axios.delete(`/api/profiles/${profile.name}`)
+  if (selectedName.value === profile.name) selectedName.value = ''
+  await fetchProfiles()
 }
 
-// ── Init ─────────────────────────────────────────────
-async function fetchStats() {
-  try {
-    const resp = await axios.get('/api/generations/stats')
-    totalGens.value = resp.data.total_generations
-  } catch (e) {
-    console.error('Failed to load stats', e)
-  }
+function categoryModels(profile: Profile) {
+  return Object.entries(profile.models || {}).filter(([, models]) => models.length)
 }
 
-onMounted(() => { fetchProfiles(); fetchStats() })
+onMounted(fetchProfiles)
 </script>
 
 <template>
-  <div class="admin-page">
-    <!-- Top Header -->
-    <header class="top-header">
-      <div class="header-logo">
-        <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
-          <path d="M5 3L5.75 6L8 6.75L5.75 7.5L5 10.5L4.25 7.5L2 6.75L4.25 6L5 3Z" opacity="0.6"/>
-          <path d="M19 3L19.75 6L22 6.75L19.75 7.5L19 10.5L18.25 7.5L16 6.75L18.25 6L19 3Z" opacity="0.6"/>
-          <path d="M5 14L5.75 17L8 17.75L5.75 18.5L5 21.5L4.25 18.5L2 17.75L4.25 17L5 14Z" opacity="0.6"/>
-          <path d="M19 14L19.75 17L22 17.75L19.75 18.5L19 21.5L18.25 18.5L16 17.75L18.25 17L19 14Z" opacity="0.6"/>
-        </svg>
-        <span class="logo-text">{{ t('generate.brand') }}</span>
-      </div>
-      <div class="header-right">
-        <div class="search-box">
-          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="11" cy="11" r="8"/>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          Search...
+  <main class="profiles-page">
+    <header class="app-header">
+      <div class="brand-group">
+        <div class="brand-mark">AI</div>
+        <div>
+          <h1>AI Tool Studio</h1>
+          <p>Provider profile routing</p>
         </div>
-        <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-        </svg>
-        <div class="user-avatar">AC</div>
+      </div>
+
+      <nav class="category-tabs" aria-label="Profile categories">
+        <button
+          v-for="category in categories"
+          :key="category.key"
+          class="category-tab"
+          :class="{ active: activeCategory === category.key }"
+          @click="activeCategory = category.key"
+        >
+          <span class="tab-icon">{{ category.icon }}</span>
+          {{ category.label }}
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <a class="icon-button" :href="apiDocsUrl" target="_blank" title="Open API docs">⌘</a>
+        <button class="icon-button" title="Refresh profiles" @click="fetchProfiles">↻</button>
+        <button class="add-button" title="Add profile" @click="openAdd">+</button>
       </div>
     </header>
 
-    <!-- Body: Sidebar + Main -->
-    <div class="admin-body">
-      <!-- Left Sidebar -->
-      <aside class="sidebar">
-        <div class="sidebar-nav">
-          <div
-            v-for="(item, i) in sidebarItems"
-            :key="item"
-            class="sidebar-item"
-            :class="{ active: i === 0 }"
-          >
-            <!-- Grid3x3 for first item -->
-            <svg v-if="i === 0" class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-              <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-            </svg>
-            <!-- Settings for others -->
-            <svg v-else class="item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-            {{ item }}
+    <section class="summary-strip">
+      <div class="summary-item">
+        <span>{{ normalizedProfiles.length }}</span>
+        <p>Total profiles</p>
+      </div>
+      <div class="summary-item">
+        <span>{{ enabledCount }}</span>
+        <p>Enabled</p>
+      </div>
+      <div class="summary-item">
+        <span>{{ modelCount }}</span>
+        <p>Routed models</p>
+      </div>
+      <div class="summary-item grow">
+        <span>{{ loadError || 'Backend target: /api' }}</span>
+        <p>{{ loadError ? 'Connection issue' : 'Ready' }}</p>
+      </div>
+    </section>
+
+    <section class="profile-list" aria-label="Profiles">
+      <div v-if="isLoading" class="empty-state">Loading profiles...</div>
+      <div v-else-if="filteredProfiles.length === 0" class="empty-state">
+        No profiles in this category.
+        <button @click="openAdd">Add Profile</button>
+      </div>
+
+      <article
+        v-for="profile in filteredProfiles"
+        :key="profile.name"
+        class="profile-card"
+        :class="{ selected: selectedName === profile.name, disabled: !profile.enabled }"
+        @click="selectedName = profile.name"
+      >
+        <div class="drag-handle">⋮⋮</div>
+        <div class="profile-avatar">{{ profile.name.slice(0, 2).toUpperCase() }}</div>
+
+        <div class="profile-main">
+          <div class="profile-title-row">
+            <h2>{{ profile.name }}</h2>
+            <span class="status-pill" :class="{ on: profile.enabled }">
+              {{ profile.enabled ? 'Enabled' : 'Disabled' }}
+            </span>
+          </div>
+          <a class="base-url" :href="profile.base_url || '#'" target="_blank" @click.stop>
+            {{ profile.base_url || 'No base URL configured' }}
+          </a>
+          <div class="model-row">
+            <span v-for="[category, models] in categoryModels(profile)" :key="category" class="model-chip">
+              {{ category }} · {{ models.join(', ') }}
+            </span>
           </div>
         </div>
 
-        <!-- System Status -->
-        <div class="system-status surface-card">
-          <div class="status-row">
-            <div class="status-dot"></div>
-            <span class="status-text">All systems operational</span>
-          </div>
-          <p class="status-meta">Last checked: 2 min ago</p>
+        <div class="profile-meta">
+          <span>Priority {{ profile.priority }}</span>
+          <span>{{ profile.api_key_masked || '****' }}</span>
         </div>
 
-        <!-- User -->
-        <div class="sidebar-user">
-          <div class="user-avatar-lg">AC</div>
-          <div class="user-info">
-            <div class="user-name">Alex Chen</div>
-            <div class="user-role">Super Admin</div>
-          </div>
+        <div class="profile-actions" @click.stop>
+          <button class="primary-action" @click="toggleProfile(profile)">
+            {{ profile.enabled ? 'Disable' : 'Enable' }}
+          </button>
+          <button class="tool-button" title="Edit" @click="openEdit(profile)">✎</button>
+          <button class="tool-button danger" title="Delete" @click="deleteProfile(profile)">⌫</button>
         </div>
-      </aside>
+      </article>
+    </section>
 
-      <!-- Main -->
-      <main class="admin-main">
-        <!-- Page Header -->
-        <div class="page-header">
+    <div v-if="showForm" class="modal-overlay" @click.self="showForm = false">
+      <form class="modal-card" @submit.prevent="saveProfile">
+        <div class="modal-header">
           <div>
-            <h1 class="page-title">{{ t('admin.overview') }}</h1>
-            <p class="page-sub">{{ t('generate.brand') }} Admin Panel</p>
+            <h2>{{ editingProfile ? 'Edit Profile' : 'Add Profile' }}</h2>
+            <p>{{ editingProfile ? 'Leave API key blank to keep the existing key.' : 'Create a routed provider endpoint.' }}</p>
           </div>
-          <div class="header-pills">
-            <div class="toolbar-pill">May 1, 2026</div>
-            <div class="toolbar-pill">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="pill-icon">
-                <polyline points="23 4 23 10 17 10"/>
-                <polyline points="1 20 1 14 7 14"/>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-              </svg>
-              Refresh
-            </div>
-          </div>
+          <button type="button" class="tool-button" @click="showForm = false">×</button>
         </div>
 
-        <!-- KPI Cards -->
-        <div class="kpi-grid">
-          <div class="kpi-card surface-card">
-            <div class="kpi-label">{{ t('admin.totalUsers') }}</div>
-            <div class="kpi-value">1,248</div>
-            <div class="kpi-meta">+12.5%</div>
-          </div>
-          <div class="kpi-card surface-card">
-            <div class="kpi-label">Total Generations</div>
-            <div class="kpi-value">{{ totalGens > 0 ? totalGens.toLocaleString() : "—" }}</div>
-            <div class="kpi-meta">+18.7%</div>
-          </div>
-          <div class="kpi-card surface-card">
-            <div class="kpi-label">{{ t('admin.activeGpu') }}</div>
-            <div class="kpi-value">12/16</div>
-            <div class="kpi-bar"><div class="kpi-bar-fill"></div></div>
-          </div>
-          <div class="kpi-card surface-card green-kpi">
-            <div class="kpi-label">Uptime</div>
-            <div class="kpi-value green-val">99.9%</div>
-          </div>
-        </div>
-
-        <!-- Charts -->
-        <div class="charts-grid">
-          <div class="chart-card surface-card">
-            <h2 class="chart-title">{{ t('admin.gpuTemp') }}</h2>
-            <div class="chart-area">
-              <div class="chart-line cyan-line"></div>
-              <div class="chart-line purple-line"></div>
-              <div class="chart-line green-line"></div>
-              <div class="chart-line amber-line"></div>
-            </div>
-          </div>
-          <div class="chart-card surface-card">
-            <h2 class="chart-title">{{ t('admin.gpuMemory') }}</h2>
-            <div class="chart-area">
-              <div class="chart-line cyan-line"></div>
-              <div class="chart-line purple-line"></div>
-              <div class="chart-line green-line"></div>
-              <div class="chart-line amber-line"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Bottom Section -->
-        <div class="bottom-grid">
-          <!-- Users Table -->
-          <div class="table-card surface-card">
-            <div class="table-header">
-              <div class="col">User</div>
-              <div class="col">Email</div>
-              <div class="col">Role</div>
-              <div class="col">Status</div>
-            </div>
-            <div v-for="row in users" :key="row[0]" class="table-row">
-              <div class="cell">{{ row[0] }}</div>
-              <div class="cell">{{ row[1] }}</div>
-              <div class="cell">{{ row[2] }}</div>
-              <div class="cell">
-                <span class="status-badge" :class="row[3] === 'Active' ? 'badge-green' : 'badge-gray'">{{ row[3] }}</span>
-              </div>
-            </div>
-            <div class="pagination">
-              <button class="page-btn">Prev</button>
-              <button class="page-btn active-page">1 / 10</button>
-              <button class="page-btn">Next</button>
-            </div>
-          </div>
-
-          <!-- Workflow Configs -->
-          <div class="workflow-card surface-card">
-            <h2 class="wf-title">{{ t('admin.workflowConfig') }}</h2>
-            <div v-for="(wf, i) in workflows" :key="wf" class="wf-item">
-              <div class="wf-name">
-                <svg class="wf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <line x1="6" y1="3" x2="6" y2="15"/>
-                  <circle cx="18" cy="6" r="3"/>
-                  <circle cx="6" cy="18" r="3"/>
-                  <path d="M18 9a9 9 0 0 1-9 9"/>
-                </svg>
-                {{ wf }}
-              </div>
-              <span class="wf-status" :class="i === 2 ? 'status-amber' : 'status-green'">
-                {{ i === 2 ? 'Paused' : 'Running' }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Profile Management (Settings tab) -->
-        <div class="section-card surface-card" style="margin-top:24px">
-          <div class="section-header">
-            <h2 class="section-title">API Profile Config</h2>
-            <button class="btn-primary" @click="openAdd">+ Add Profile</button>
-          </div>
-
-          <!-- Profile List -->
-          <div class="profile-list">
-            <div v-for="p in profiles" :key="p.name" class="profile-row">
-              <div class="profile-info">
-                <div class="profile-name">{{ p.name }}</div>
-                <div class="profile-meta">
-                  <span class="badge" :class="p.enabled ? 'badge-green' : 'badge-gray'">{{ p.enabled ? 'Enabled' : 'Disabled' }}</span>
-                  <span class="meta-tag">Priority {{ p.priority }}</span>
-                  <span class="meta-tag">{{ p.api_key_masked }}</span>
-                </div>
-                <div class="profile-models">
-                  <template v-for="(models, cat) in (p.models || {})" :key="cat">
-                    <span v-if="models && models.length" class="model-chip">
-                      {{ cat }}: {{ models.join(', ') }}
-                    </span>
-                  </template>
-                </div>
-              </div>
-              <div class="profile-actions">
-                <button class="btn-sm" @click="toggleProfile(p.name, !p.enabled)">{{ p.enabled ? 'Disable' : 'Enable' }}</button>
-                <button class="btn-sm" @click="openEdit(p)">Edit</button>
-                <button class="btn-sm btn-danger" @click="deleteProfile(p.name)">Delete</button>
-              </div>
-            </div>
-            <div v-if="profiles.length === 0" class="empty-state">No profiles. Click above to add.</div>
-          </div>
-        </div>
-      </main>
-    </div>
-  </div>
-
-  <!-- Add/Edit Profile Modal -->
-  <div v-if="showAddForm" class="modal-overlay" @click.self="showAddForm = false">
-    <div class="modal-box surface-card">
-      <div class="modal-header">
-        <h3>{{ editingProfile ? 'Edit' : 'Add' }} Profile</h3>
-        <button class="modal-close" @click="showAddForm = false">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Name</label>
-          <input v-model="form.name" placeholder="e.g. MiniMax-Pro" :disabled="!!editingProfile" />
-        </div>
-        <div class="form-group">
-          <label>API Key <span style="color:#888;font-weight:400">({{ editingProfile ? 'Leave blank to keep unchanged' : 'Required' }})</span></label>
+        <label>
+          Name
+          <input v-model="form.name" :disabled="!!editingProfile" placeholder="MiniMax" />
+        </label>
+        <label>
+          Base URL
+          <input v-model="form.base_url" placeholder="https://api.minimaxi.com" />
+        </label>
+        <label>
+          API Key
           <input v-model="form.api_key" type="password" placeholder="sk-..." />
-        </div>
+        </label>
+
         <div class="form-row">
-          <div class="form-group">
-            <label>Priority</label>
-            <input v-model.number="form.priority" type="number" min="1" />
-          </div>
-          <div class="form-group">
-            <label>Status</label>
+          <label>
+            Priority
+            <input v-model.number="form.priority" min="1" type="number" />
+          </label>
+          <label>
+            Status
             <select v-model="form.enabled">
-              <option :value="true">Enable</option>
-              <option :value="false">Disable</option>
+              <option :value="true">Enabled</option>
+              <option :value="false">Disabled</option>
             </select>
+          </label>
+        </div>
+
+        <div class="model-picker">
+          <div v-for="(models, category) in modelCategories" :key="category" class="model-group">
+            <h3>{{ category }}</h3>
+            <label v-for="model in models" :key="model" class="check-row">
+              <input v-model="form.models[category]" :value="model" type="checkbox" />
+              {{ model }}
+            </label>
           </div>
         </div>
-        <div class="form-group">
-          <label>Supported Models</label>
-          <div class="model-grid">
-            <div v-for="(models, cat) in modelCategories" :key="cat" class="model-cat">
-              <div class="cat-label">{{ cat }}</div>
-              <label v-for="m in models" :key="m" class="model-check">
-                <input type="checkbox" :value="m" v-model="form.models[cat]" />
-                {{ m }}
-              </label>
-            </div>
-          </div>
+
+        <p v-if="formError" class="form-error">{{ formError }}</p>
+        <div class="modal-actions">
+          <button type="button" class="secondary-button" @click="showForm = false">Cancel</button>
+          <button type="submit" class="save-button">Save</button>
         </div>
-        <div v-if="formError" class="form-error">{{ formError }}</div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-ghost" @click="showAddForm = false">Cancel</button>
-        <button class="btn-primary" @click="saveProfile">Save</button>
-      </div>
+      </form>
     </div>
-  </div>
+  </main>
 </template>
 
 <style scoped>
-.admin-page {
+.profiles-page {
   min-height: 100vh;
-  background: #05070a;
-  color: white;
-  font-family: 'Inter', -apple-system, sans-serif;
+  padding: 28px 38px 64px;
+  background: #fbfbfc;
+  color: #111827;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* Top Header */
-.top-header {
-  height: 64px;
+.app-header {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(190px, 1fr);
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.brand-group,
+.header-actions,
+.category-tabs,
+.profile-title-row,
+.profile-actions,
+.model-row,
+.modal-header,
+.modal-actions,
+.form-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  background: #0d1117;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
-.header-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+
+.brand-group { gap: 12px; }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #eef6ff;
+  color: #1677ff;
+  font-weight: 800;
 }
-.logo-icon {
-  width: 24px;
-  height: 24px;
-  color: #00d2ff;
+.brand-group h1 {
+  margin: 0;
+  color: #1677ff;
+  font-size: 24px;
+  line-height: 1.1;
 }
-.logo-text {
-  font-size: 15px;
-  font-weight: 600;
-  color: white;
+.brand-group p {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 13px;
 }
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 20px;
+
+.category-tabs {
+  justify-self: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 16px;
+  background: #f0f0f3;
 }
-.search-box {
-  display: flex;
+.category-tab {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  width: 200px;
-  height: 40px;
-  padding: 0 12px;
-  background: #151821;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #484f58;
+  height: 38px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
 }
-.search-icon { width: 16px; height: 16px; }
-.bell-icon {
-  width: 20px;
-  height: 20px;
-  color: #9ca3af;
+.category-tab.active {
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
 }
-.user-avatar {
+.tab-icon {
+  color: #1677ff;
+  font-weight: 800;
+}
+
+.header-actions {
+  justify-self: end;
+  gap: 10px;
+}
+.icon-button,
+.tool-button,
+.add-button,
+.primary-action,
+.secondary-button,
+.save-button,
+.empty-state button {
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+.icon-button,
+.tool-button {
+  display: grid;
+  place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  background: #00d2ff;
-  color: #05070a;
+  border-radius: 10px;
+  background: #f0f0f3;
+  color: #6b7280;
+  text-decoration: none;
+  font-size: 17px;
+}
+.add-button {
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: #ff7a1a;
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+  box-shadow: 0 10px 22px rgba(255, 122, 26, 0.28);
+}
+
+.summary-strip {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.summary-item {
+  min-width: 160px;
+  padding: 12px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+}
+.summary-item.grow { flex: 1; }
+.summary-item span {
+  display: block;
+  overflow: hidden;
+  color: #111827;
+  font-size: 18px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.summary-item p {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.profile-card {
+  display: grid;
+  grid-template-columns: 22px 44px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 116px;
+  padding: 24px 30px;
+  border: 1px solid #e1e4e8;
+  border-radius: 18px;
+  background: #fff;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.profile-card.selected {
+  border-color: #1677ff;
+  background: linear-gradient(90deg, #eef6ff 0%, #fff 54%);
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.08);
+}
+.profile-card.disabled {
+  opacity: 0.64;
+}
+.drag-handle {
+  color: #b7bcc5;
+  font-size: 18px;
+  letter-spacing: -3px;
+}
+.profile-avatar {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #e1e4e8;
+  border-radius: 14px;
+  background: #f7f8fa;
+  color: #6b7280;
+  font-weight: 800;
+}
+.profile-main {
+  min-width: 0;
+}
+.profile-title-row {
+  gap: 10px;
+}
+.profile-title-row h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 21px;
+  line-height: 1.2;
+}
+.status-pill {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 800;
+}
+.status-pill.on {
+  background: #e8f7ee;
+  color: #168a45;
+}
+.base-url {
+  display: block;
+  margin-top: 9px;
+  overflow: hidden;
+  color: #1677ff;
+  font-size: 18px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-row {
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+.model-chip {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #f5f7fb;
+  color: #596273;
   font-size: 12px;
   font-weight: 700;
+}
+.profile-meta {
+  display: grid;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
+}
+.profile-actions {
+  gap: 10px;
+}
+.primary-action {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  background: #1677ff;
+  color: #fff;
+}
+.tool-button.danger {
+  color: #dc2626;
+}
+
+.empty-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-}
-
-/* Admin Body */
-.admin-body {
-  display: flex;
-  height: calc(100vh - 64px);
-}
-
-/* Sidebar */
-.sidebar {
-  width: 260px;
-  flex-shrink: 0;
-  background: #0a0d12;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.sidebar-item {
-  display: flex;
-  align-items: center;
   gap: 12px;
-  height: 44px;
+  min-height: 180px;
+  border: 1px dashed #d1d5db;
+  border-radius: 18px;
+  background: #fff;
+  color: #6b7280;
+}
+.empty-state button {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #1677ff;
+  color: #fff;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.34);
+}
+.modal-card {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+.modal-header {
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.modal-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+.modal-header p {
+  margin: 5px 0 0;
+  color: #6b7280;
+}
+.modal-card label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 800;
+}
+.modal-card input,
+.modal-card select {
+  width: 100%;
+  height: 42px;
   padding: 0 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+}
+.modal-card input:disabled {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.form-row {
+  gap: 14px;
+}
+.form-row label {
+  flex: 1;
+}
+.model-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.model-group {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fafafa;
+}
+.model-group h3 {
+  margin: 0 0 10px;
+  color: #111827;
   font-size: 14px;
-  font-weight: 500;
-  border-radius: 8px;
-  color: #9ca3af;
-  cursor: pointer;
-  transition: all 0.15s;
+  text-transform: capitalize;
 }
-.sidebar-item:hover {
-  background: #151821;
-  color: white;
+.check-row {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  gap: 8px !important;
+  margin: 8px 0 !important;
+  color: #4b5563 !important;
+  font-weight: 650 !important;
 }
-.sidebar-item.active {
-  background: #00d2ff;
-  color: #05070a;
-}
-.sidebar-item.active .item-icon { stroke: #05070a; }
-.item-icon {
+.check-row input {
   width: 16px;
   height: 16px;
 }
-
-/* System Status */
-.system-status {
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px solid #1f2937;
-  background: #0d1117;
-}
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-.status-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #22c55e;
-}
-.status-text { color: white; }
-.status-meta {
-  font-size: 12px;
-  color: #6b7280;
-  margin: 16px 0 0;
-}
-
-/* Sidebar User */
-.sidebar-user {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  background: #151821;
-  border-radius: 12px;
-}
-.user-avatar-lg {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #00d2ff;
-  color: #05070a;
-  font-size: 12px;
+.form-error {
+  margin: 10px 0 0;
+  color: #dc2626;
   font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
-.user-name {
-  font-size: 14px;
-  font-weight: 700;
-  color: white;
-}
-.user-role {
-  font-size: 12px;
-  color: #6b7280;
-}
-
-/* Main */
-.admin-main {
-  flex: 1;
-  padding: 32px;
-  overflow-y: auto;
-}
-
-/* Page Header */
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: white;
-  margin: 0;
-}
-.page-sub {
-  font-size: 14px;
-  color: #9ca3af;
-  margin: 4px 0 0;
-}
-.header-pills {
-  display: flex;
-  gap: 12px;
-}
-.toolbar-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 16px;
-  background: #151821;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #d1d5db;
-  cursor: pointer;
-}
-.pill-icon { width: 14px; height: 14px; }
-
-/* KPI Grid */
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-top: 56px;
-}
-.kpi-card {
-  height: 120px;
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #1f2937;
-  background: #0d1117;
-}
-.kpi-label {
-  font-size: 14px;
-  color: #9ca3af;
-}
-.kpi-value {
-  font-size: 30px;
-  font-weight: 700;
-  color: white;
-  margin-top: 8px;
-}
-.kpi-meta {
-  font-size: 14px;
-  color: #22c55e;
-  margin-top: 8px;
-}
-.kpi-bar {
-  height: 4px;
-  background: #243044;
-  border-radius: 99px;
-  margin-top: 16px;
-  overflow: hidden;
-}
-.kpi-bar-fill {
-  height: 100%;
-  width: 75%;
-  background: #00d2ff;
-  border-radius: 99px;
-}
-.green-kpi .kpi-value { color: #22c55e; }
-
-/* Charts */
-.charts-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  margin-top: 16px;
-}
-.chart-card {
-  height: 240px;
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #1f2937;
-  background: #0d1117;
-}
-.chart-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: white;
-  margin: 0;
-}
-.chart-area {
-  height: 150px;
-  background: #080b10;
-  border-radius: 8px;
-  margin-top: 12px;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-.chart-line {
-  height: 2px;
-  border-radius: 99px;
-}
-.cyan-line { background: #00d2ff; }
-.purple-line { background: #7c3aed; }
-.green-line { background: #22c55e; }
-.amber-line { background: #f59e0b; }
-
-/* Bottom Grid */
-.bottom-grid {
-  display: grid;
-  grid-template-columns: 1.5fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-/* Table */
-.table-card {
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #1f2937;
-  background: #0d1117;
-}
-.table-header {
-  display: grid;
-  grid-template-columns: 1.1fr 1.4fr 0.8fr 0.8fr;
-  gap: 12px;
-  font-size: 12px;
-  color: #9ca3af;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-.table-row {
-  display: grid;
-  grid-template-columns: 1.1fr 1.4fr 0.8fr 0.8fr;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-}
-.cell {
-  font-size: 14px;
-  color: #d1d5db;
-}
-.status-badge {
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-}
-.badge-green {
-  background: #22c55e;
-  color: white;
-}
-.badge-gray {
-  background: #6b7280;
-  color: white;
-}
-.pagination {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.modal-actions {
+  justify-content: flex-end;
+  gap: 10px;
   margin-top: 20px;
-  font-size: 12px;
 }
-.page-btn {
-  padding: 8px 16px;
-  background: #151821;
-  border: none;
-  border-radius: 6px;
-  color: #9ca3af;
-  cursor: pointer;
-  font-size: 12px;
-  font-family: inherit;
+.secondary-button,
+.save-button {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
 }
-.page-btn:hover { color: white; }
-.active-page {
-  background: #00d2ff;
-  color: #05070a;
-  font-weight: 600;
+.secondary-button {
+  background: #f3f4f6;
+  color: #374151;
+}
+.save-button {
+  background: #1677ff;
+  color: #fff;
 }
 
-/* Workflows */
-.workflow-card {
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #1f2937;
-  background: #0d1117;
+@media (max-width: 960px) {
+  .profiles-page {
+    padding: 20px 16px 56px;
+  }
+  .app-header {
+    grid-template-columns: 1fr;
+  }
+  .category-tabs,
+  .header-actions {
+    justify-self: stretch;
+  }
+  .category-tabs {
+    overflow-x: auto;
+  }
+  .header-actions {
+    justify-content: flex-end;
+  }
+  .summary-strip {
+    flex-wrap: wrap;
+  }
+  .summary-item {
+    min-width: calc(50% - 6px);
+  }
+  .profile-card {
+    grid-template-columns: 22px 44px minmax(0, 1fr);
+  }
+  .profile-meta,
+  .profile-actions {
+    grid-column: 3;
+    justify-self: start;
+  }
+  .profile-actions {
+    flex-wrap: wrap;
+  }
+  .model-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
-.wf-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: white;
-  margin: 0 0 16px;
-}
-.wf-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 48px;
-  padding: 0 16px;
-  background: #151821;
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-.wf-name {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  color: white;
-}
-.wf-icon {
-  width: 20px;
-  height: 20px;
-}
-.wf-name .wf-icon { color: #00d2ff; }
-.wf-status {
-  font-size: 12px;
-}
-.status-green { color: #22c55e; }
-.status-amber { color: #f59e0b; }
 
-/* Profile Management */
-.section-card { padding: 24px; border-radius: 12px; border: 1px solid #1f2937; background: #0d1117; }
-.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-.section-title { font-size: 16px; font-weight: 600; color: white; margin: 0; }
-.profile-list { display: flex; flex-direction: column; gap: 12px; }
-.profile-row { display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #151821; border-radius: 8px; gap: 16px; }
-.profile-info { flex: 1; min-width: 0; }
-.profile-name { font-weight: 600; color: white; margin-bottom: 4px; }
-.profile-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-.meta-tag { font-size: 12px; color: #9ca3af; background: #1f2937; padding: 2px 8px; border-radius: 4px; }
-.profile-models { display: flex; flex-wrap: wrap; gap: 6px; }
-.model-chip { font-size: 11px; background: #1a2a3a; color: #60a5fa; padding: 2px 8px; border-radius: 4px; }
-.profile-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.empty-state { text-align: center; color: #6b7280; padding: 32px; font-size: 14px; }
-
-/* Buttons */
-.btn-primary { background: #00d2ff; color: #05070a; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
-.btn-primary:hover { opacity: 0.85; }
-.btn-ghost { background: transparent; color: #9ca3af; border: 1px solid #374151; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-.btn-ghost:hover { color: white; border-color: #6b7280; }
-.btn-sm { background: #1f2937; color: #d1d5db; border: none; padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; }
-.btn-sm:hover { background: #374151; color: white; }
-.btn-danger { color: #f87171 !important; border: 1px solid #7f1d1d !important; }
-.btn-danger:hover { background: #7f1d1d !important; }
-
-/* Modal */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal-box { width: 520px; max-width: 95vw; border-radius: 12px; border: 1px solid #374151; overflow: hidden; }
-.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #1f2937; }
-.modal-header h3 { margin: 0; font-size: 15px; color: white; }
-.modal-close { background: none; border: none; color: #6b7280; cursor: pointer; font-size: 16px; padding: 4px; }
-.modal-close:hover { color: white; }
-.modal-body { padding: 20px; max-height: 70vh; overflow-y: auto; }
-.modal-footer { padding: 16px 20px; border-top: 1px solid #1f2937; display: flex; justify-content: flex-end; gap: 10px; }
-.form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 13px; color: #9ca3af; margin-bottom: 6px; font-weight: 500; }
-.form-group input, .form-group select { width: 100%; background: #151821; border: 1px solid #374151; color: white; padding: 8px 12px; border-radius: 6px; font-size: 13px; box-sizing: border-box; }
-.form-group input:focus, .form-group select:focus { outline: none; border-color: #00d2ff; }
-.form-group input:disabled { opacity: 0.5; cursor: not-allowed; }
-.form-row { display: flex; gap: 12px; }
-.form-row .form-group { flex: 1; }
-.form-error { color: #f87171; font-size: 13px; margin-top: 8px; }
-.model-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.model-cat { background: #151821; border-radius: 8px; padding: 10px; }
-.cat-label { font-size: 12px; color: #60a5fa; text-transform: uppercase; font-weight: 600; margin-bottom: 8px; }
-.model-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #d1d5db; cursor: pointer; margin-bottom: 4px; }
-.model-check input { accent-color: #00d2ff; }
+@media (max-width: 560px) {
+  .summary-item {
+    min-width: 100%;
+  }
+  .profile-card {
+    padding: 18px;
+  }
+  .model-picker {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

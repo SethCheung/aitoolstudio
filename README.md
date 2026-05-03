@@ -38,10 +38,21 @@ cd img-platform/backend
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+export JWT_SECRET_KEY="$(openssl rand -hex 32)"
 uvicorn main:app --reload
 ```
 
-访问 http://localhost:8000/docs 查看 Swagger UI
+访问 http://localhost:8000/admin 打开 API 配置面板，访问 http://localhost:8000/docs 查看 Swagger UI
+
+如果本机 8000 端口已被其他服务占用，可以换端口启动后端，并让前端指向新端口：
+
+```bash
+# backend
+uvicorn main:app --reload --port 8001
+
+# frontend
+VITE_API_BASE_URL=http://localhost:8001 npm run dev
+```
 
 ### Docker Compose 部署
 
@@ -85,6 +96,7 @@ img-platform/
 ## API 文档
 
 后端启动后访问：
+- API 配置面板: http://localhost:8000/admin
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 

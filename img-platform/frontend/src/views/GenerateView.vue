@@ -131,13 +131,20 @@ const isGenerating = ref(false)
 
 // dynamically load from /api/profiles/models
 interface AvailableModels {
-  image?: string[]
-  voice?: string[]
-  video?: string[]
-  music?: string[]
+  image?: string[] | Record<string, string[]>
+  voice?: string[] | Record<string, string[]>
+  video?: string[] | Record<string, string[]>
+  music?: string[] | Record<string, string[]>
 }
 const availableModels = ref<AvailableModels>({})
-const currentModelList = computed(() => (availableModels.value as Record<string, string[]>)[selectedCategory.value] ?? [])
+function modelNamesFor(category: keyof AvailableModels): string[] {
+  const models = availableModels.value[category]
+  if (!models) return []
+  return Array.isArray(models) ? models : Object.keys(models)
+}
+const currentModelList = computed(() => {
+  return modelNamesFor(selectedCategory.value as keyof AvailableModels)
+})
 
 watch(selectedCategory, () => {
   const models = currentModelList.value
@@ -699,11 +706,11 @@ onMounted(async () => {
     const categories = Object.keys(availableModels.value) as Array<keyof AvailableModels>
     const preferred: Array<keyof AvailableModels> = ['image', 'voice', 'music', 'video']
     const firstCat =
-      preferred.find((c) => availableModels.value[c]?.length) ??
-      categories.find((c) => availableModels.value[c]?.length)
+      preferred.find((c) => modelNamesFor(c).length) ??
+      categories.find((c) => modelNamesFor(c).length)
     if (firstCat) {
       selectedCategory.value = firstCat as string
-      selectedModel.value = availableModels.value[firstCat]![0]
+      selectedModel.value = modelNamesFor(firstCat)[0]
     }
   } catch (e) {
     console.warn('Failed to load models from profiles:', e)

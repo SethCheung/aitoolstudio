@@ -19,6 +19,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setToken(newToken: string) {
     token.value = newToken
+    localStorage.setItem('token', newToken)
   }
 
   function setUser(newUser: User) {
@@ -53,6 +54,7 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     user.value = null
     error.value = null
+    localStorage.removeItem('token')
   }
 
   // Rehydrate from localStorage on init (supports page refresh within same tab)

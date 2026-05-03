@@ -2,20 +2,22 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+from dotenv import load_dotenv
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from api.auth import router as auth_router
+from api.admin import router as admin_router
 from api.profiles import router as profiles_router
 from api.image import router as image_router
 from api.voice import router as voice_router
 from api.video import router as video_router
 from api.music import router as music_router
 from api.generation import router as generation_router
-from api.profiles import router as profiles_router
 from models.database import init_db
 
 from limiter import limiter
@@ -37,6 +39,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -50,8 +53,8 @@ def on_startup():
 
 
 # 注册路由
+app.include_router(admin_router)
 app.include_router(auth_router)
-app.include_router(profiles_router)
 app.include_router(image_router)
 app.include_router(voice_router)
 app.include_router(video_router)

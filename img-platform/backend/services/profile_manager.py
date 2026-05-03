@@ -65,14 +65,17 @@ def get_profile_for_model(model: str) -> Optional[dict]:
     return {"name": name, **profile}
 
 
-def list_profiles() -> dict:
-    """列出所有 profiles（不含 api_key）"""
+def list_profiles() -> list[dict]:
+    """列出所有 profiles（不含 api_key，补充脱敏字段）"""
     data = _load()
-    profiles = {}
+    profiles = []
     for name, profile in data.get("profiles", {}).items():
-        # 隐藏 api_key
+        api_key = profile.get("api_key", "")
         safe_profile = {k: v for k, v in profile.items() if k != "api_key"}
-        profiles[name] = safe_profile
+        safe_profile["name"] = name
+        safe_profile["api_key_masked"] = "****" + api_key[-4:] if len(api_key) > 4 else "****"
+        profiles.append(safe_profile)
+    profiles.sort(key=lambda p: (p.get("priority", 999), p.get("name", "")))
     return profiles
 
 

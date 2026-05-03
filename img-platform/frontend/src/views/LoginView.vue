@@ -16,8 +16,8 @@ async function handleLogin() {
   if (!username.value || !password.value) return
   isLoading.value = true
   try {
-    await auth.login(username.value, password.value)
-    router.push('/')
+    const ok = await auth.login(username.value, password.value)
+    if (ok) router.push('/')
   } finally {
     isLoading.value = false
   }
