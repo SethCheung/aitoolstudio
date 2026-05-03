@@ -1,143 +1,126 @@
-import json
-import os
-from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from services.profile_manager import (
+    list_profiles,
+    get_profile,
+    add_profile,
+    update_profile,
+    delete_profile,
+    set_enabled,
+    get_all_models,
+)
 
 router = APIRouter(prefix="/api/profiles", tags=["Profile 管理"])
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "profiles.json"
-CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-
-class ProfileModel(BaseModel):
+class ProfileCreateRequest(BaseModel):
     name: str
     api_key: str
+    base_url: str = "https://api.minimaxi.com"
     enabled: bool = True
-    priority: int = 1
-    models: dict = {}
+    priority: int = 99
+    models: dict = {}  # {"image": ["image-01"], "voice": ["speech-02-hd"]}
 
 
-class ProfileOut(BaseModel):
-    name: str
-    api_key_masked: str  # 只返回后4位
-    enabled: bool
-    priority: int
-    models: dict
-
-
-def _load() -> list:
-    """返回 profiles 列表"""
-    if not CONFIG_PATH.exists():
-        return []
-    with open(CONFIG_PATH) as f:
-        raw = json.load(f)
-    # 支持 { "token-plan": {...} } 或 { "profiles": [...] } 两种格式
-    if isinstance(raw, dict):
-        if "profiles" in raw:
-            return raw["profiles"]
-        # flat dict with profile name as key → 转成 list
-        return [
-            {"name": k, **v} for k, v in raw.items()
-        ]
-    return []
-
-
-def _save(profiles: list):
-    data = {"profiles": profiles}
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+class ProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    enabled: Optional[bool] = None
+    priority: Optional[int] = None
+    models: Optional[dict] = None
 
 
 def _mask_key(key: str) -> str:
+    """只返回 api_key 后4位，隐私保护"""
     if len(key) <= 4:
         return "****"
     return "****" + key[-4:]
 
 
 @router.get("")
-def list_profiles():
-    """列出所有 profiles，api_key 脱敏"""
-    profiles = _load()
-    return [
-        ProfileOut(
-            name=p["name"],
-            api_key_masked=_mask_key(p.get("api_key", "")),
-            enabled=p.get("enabled", True),
-            priority=p.get("priority", 1),
-            models=p.get("models", {}),
-        )
-        for p in profiles
-    ]
+async def list_all():
+    """列出所有 profiles（api_key 脱敏）"""
+    raw = list_profiles()
+    # list_profiles already strips api_key, so we just return raw
+    return raw
 
 
 @router.get("/models")
-def list_models():
-    """聚合所有启用 profile 的模型，按 category 返回"""
-    profiles = _load()
-    models_by_category = {}
-    for p in profiles:
-        if not p.get("enabled", True):
-            continue
-        for cat, model_list in p.get("models", {}).items():
-            if cat not in models_by_category:
-                models_by_category[cat] = []
-            for m in model_list:
-                if m not in models_by_category[cat]:
-                    models_by_category[cat].append(m)
-    return models_by_category
+async def available_models():
+    """获取所有可用模型（按 category 分组，带来源标签）"""
+    return get_all_models()
+
+
+@router.get("/{name}")
+async def get(name: str):
+    """获取指定 profile（含 api_key）"""
+    profile = get_profile(name)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+    return profile
 
 
 @router.post("")
-def create_profile(prof: ProfileModel):
-    profiles = _load()
-    for p in profiles:
-        if p["name"] == prof.name:
-            raise HTTPException(status_code=400, detail=f"Profile '{prof.name}' 已存在")
-    profiles.append(prof.model_dump())
-    _save(profiles)
-    return {"ok": True, "name": prof.name}
+async def create(req: ProfileCreateRequest):
+    """添加新 profile"""
+    try:
+        profile = add_profile(req.name, {
+            "name": req.name,
+            "api_key": req.api_key,
+            "base_url": req.base_url,
+            "enabled": req.enabled,
+            "priority": req.priority,
+            "models": req.models,
+        })
+        return profile
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.put("/{name}")
-def update_profile(name: str, prof: ProfileModel):
-    profiles = _load()
-    for i, p in enumerate(profiles):
-        if p["name"] == name:
-            profiles[i] = prof.model_dump()
-            _save(profiles)
-            return {"ok": True}
-    raise HTTPException(status_code=404, detail=f"Profile '{name}' 不存在")
+async def update(name: str, req: ProfileUpdateRequest):
+    """更新 profile"""
+    current = get_profile(name)
+    if not current:
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+
+    update_data = {k: v for k, v in req.model_dump().items() if v is not None}
+    if "name" in update_data:
+        del update_data["name"]  # 不允许改 name
+
+    merged = {**current, **update_data}
+    try:
+        return update_profile(name, merged)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.delete("/{name}")
-def delete_profile(name: str):
-    profiles = _load()
-    new_profiles = [p for p in profiles if p["name"] != name]
-    if len(new_profiles) == len(profiles):
-        raise HTTPException(status_code=404, detail=f"Profile '{name}' 不存在")
-    _save(new_profiles)
+async def remove(name: str):
+    """删除 profile"""
+    if not delete_profile(name):
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
     return {"ok": True}
 
 
 @router.post("/{name}/enable")
-def enable_profile(name: str):
-    profiles = _load()
-    for p in profiles:
-        if p["name"] == name:
-            p["enabled"] = True
-            _save(profiles)
-            return {"ok": True}
-    raise HTTPException(status_code=404, detail=f"Profile '{name}' 不存在")
+async def enable(name: str):
+    """启用 profile"""
+    profile = set_enabled(name, True)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+    return profile
 
 
 @router.post("/{name}/disable")
-def disable_profile(name: str):
-    profiles = _load()
-    for p in profiles:
-        if p["name"] == name:
-            p["enabled"] = False
-            _save(profiles)
-            return {"ok": True}
-    raise HTTPException(status_code=404, detail=f"Profile '{name}' 不存在")
+async def disable(name: str):
+    """禁用 profile"""
+    profile = set_enabled(name, False)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+    return profile

@@ -1,20 +1,35 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import sys, os
+import sys, os, logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from schemas.image import ImageGenerateRequest
 from schemas.generation import GenerationResponse
 from services.minimax import generate_image
+from services.profile_manager import get_profile_for_model
 from models.database import get_db
+from models.user import User
 from models.generation import Generation
+from api.auth import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/image", tags=["图像生成"])
 
 
 @router.post("/generate", response_model=GenerationResponse)
-async def generate(req: ImageGenerateRequest, db: Session = Depends(get_db)):
-    """文生图 — 代理 MiniMax API，生成后入库"""
+async def generate(
+    req: ImageGenerateRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """文生图 — 按模型自动路由到对应 profile"""
+    profile = get_profile_for_model(req.model)
+    if not profile:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No enabled profile found for model '{req.model}'",
+        )
+
     try:
         result = await generate_image(
             prompt=req.prompt,
@@ -23,9 +38,12 @@ async def generate(req: ImageGenerateRequest, db: Session = Depends(get_db)):
             n=req.n,
             response_format=req.response_format,
             prompt_optimizer=req.prompt_optimizer,
+            api_key=profile["api_key"],
+            base_url=profile.get("base_url", "https://api.minimaxi.com"),
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Image generation failed")
+        raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
 
     base_resp = result.get("base_resp", {})
     if base_resp.get("status_code", 0) != 0:
@@ -39,7 +57,6 @@ async def generate(req: ImageGenerateRequest, db: Session = Depends(get_db)):
 
     image_urls = data.get("image_urls", []) if req.response_format == "url" else data.get("image_base64", [])
 
-    # 保存到数据库
     gen = Generation(
         prompt=req.prompt,
         image_urls=image_urls,
@@ -54,10 +71,17 @@ async def generate(req: ImageGenerateRequest, db: Session = Depends(get_db)):
 
     return GenerationResponse(
         id=gen.id,
+        type="image",
         prompt=gen.prompt,
-        image_urls=image_urls,
-        model=gen.model,
+        image_urls=gen.image_urls or [],
+        audio_url=None,
+        video_url=None,
+        model=gen.model or "",
         aspect_ratio=gen.aspect_ratio,
+        voice_model=None,
+        voice_id=None,
+        video_model=None,
+        video_duration=None,
         n_generated=gen.n_generated,
         created_at=gen.created_at,
     )
