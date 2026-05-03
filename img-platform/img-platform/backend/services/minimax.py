@@ -1,6 +1,8 @@
+import json as _json
 import logging
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -13,8 +15,10 @@ logger = logging.getLogger(__name__)
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com"
 
-# Profile config path (project-root/config/profiles.json)
-PROFILE_CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "profiles.json"
+# Profile config path. Override with env PROFILES_PATH; default falls back to
+# <repo>/config/profiles.json relative to this file (../../config/profiles.json).
+_DEFAULT_PROFILE_CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "profiles.json"
+PROFILE_CONFIG = Path(os.environ.get("PROFILES_PATH") or _DEFAULT_PROFILE_CONFIG)
 
 # Valid model name format: alphanumeric, dash, underscore
 _VALID_MODEL_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
@@ -36,20 +40,34 @@ def _resolve_api_key(raw_key: str) -> str:
     raw = raw_key.strip()
     if raw.startswith("${") and raw.endswith("}"):
         env_var = raw[2:-1]
-        return os.environ.get(env_var, "")
+        val = os.environ.get(env_var, "")
+        if not val:
+            logger.warning(
+                "Profile references unset env var %s — treating as missing key", env_var
+            )
+        return val
     return raw
 
 
+@lru_cache(maxsize=4)
+def _load_profiles_cached(path_str: str, mtime: float) -> tuple:
+    """Read and parse profiles.json. Cached on (path, mtime) so edits are picked up
+    automatically without a restart, while avoiding disk I/O on every request.
+    Returns a tuple so the cached value is hashable/immutable."""
+    path = Path(path_str)
+    try:
+        with open(path) as f:
+            raw = _json.load(f)
+    except Exception as exc:
+        logger.warning("Failed to read profiles.json at %s: %s", path, exc)
+        return tuple()
+    if isinstance(raw, dict):
+        return tuple(raw.get("profiles", []))
+    return tuple()
+
+
 def _load_profiles() -> list:
-    """
-    Load and validate profiles from profiles.json.
-
-    Logs a warning once at startup if the file is missing.
-    Returns [] for other read errors so the server still boots
-    (the actual routing call will fail with a clear error at request time).
-    """
-    import json as _json
-
+    """Load profiles, refreshing the cache automatically when the file's mtime changes."""
     if not PROFILE_CONFIG.exists():
         logger.warning(
             "profiles.json not found at %s — model routing will fail until resolved. "
@@ -58,15 +76,10 @@ def _load_profiles() -> list:
         )
         return []
     try:
-        with open(PROFILE_CONFIG) as f:
-            raw = _json.load(f)
-    except Exception as exc:
-        logger.warning("Failed to read profiles.json: %s", exc)
-        return []
-
-    if isinstance(raw, dict):
-        return raw.get("profiles", [])
-    return []
+        mtime = PROFILE_CONFIG.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return list(_load_profiles_cached(str(PROFILE_CONFIG), mtime))
 
 
 def _validate_model_name(model_name: str) -> str:
@@ -114,15 +127,17 @@ def _get_api_key_for_model(model_name: str) -> str:
                 break
 
     if not matching:
+        # Log full profile listing server-side for debugging, but do NOT leak
+        # profile names / configured models in the user-facing error message.
         available = [
             (p.get("name", ""), list(p.get("models", {}).values()))
             for p in profiles
             if p.get("enabled", True)
         ]
-        raise ValueError(
-            f"No enabled profile found for model: {model_name!r}. "
-            f"Available profiles: {available}"
+        logger.warning(
+            "No enabled profile found for model=%s. Available: %s", model_name, available
         )
+        raise ValueError(f"No profile available for model: {model_name}")
 
     # Stable sort: primary key=priority, secondary key=profile name (lexicographic)
     matching.sort(key=lambda x: (x[0], x[1]))

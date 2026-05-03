@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
 const apiClient = axios.create({ baseURL: '/api', timeout: 60000 })
@@ -411,7 +412,7 @@ async function sendVoice(nodeId: string) {
     node.audioUrl = data.audio_url
   } catch (err: any) {
     console.error('Voice generation failed:', err)
-    alert(`Voice generation failed: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`Voice generation failed: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -431,7 +432,7 @@ async function sendMusic(nodeId: string) {
     node.audioUrl = data.audio_url
   } catch (err: any) {
     console.error('Music generation failed:', err)
-    alert(`Music generation failed: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`Music generation failed: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -525,7 +526,7 @@ async function sendImageMessage(text: string, cx: number, cy: number) {
       genNode.images[i] = data.image_urls[i]
     }
   } catch (err: any) {
-    alert(`生成失败: ${err?.response?.data?.detail ?? err.message ?? '未知错误'}`)
+    ElMessage.error(`生成失败: ${err?.response?.data?.detail ?? err.message ?? '未知错误'}`)
   } finally {
     isGenerating.value = false
   }
@@ -555,7 +556,7 @@ async function sendVoiceMessage(text: string, cx: number, cy: number) {
     const data = resp.data as { audio_url: string }
     voiceNode.audioUrl = data.audio_url
   } catch (err: any) {
-    alert(`语音生成失败: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`语音生成失败: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -583,7 +584,7 @@ async function sendMusicMessage(text: string, cx: number, cy: number) {
     const data = resp.data as { audio_url: string }
     musicNode.audioUrl = data.audio_url
   } catch (err: any) {
-    alert(`音乐生成失败: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`音乐生成失败: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -609,7 +610,7 @@ async function sendVideoMessage(text: string, cx: number, cy: number) {
     const data = resp.data as { video_url: string }
     videoNode.image = data.video_url  // reuse image field for video URL
   } catch (err: any) {
-    alert(`视频生成失败: ${err?.response?.data?.detail ?? err.message}`)
+    ElMessage.error(`视频生成失败: ${err?.response?.data?.detail ?? err.message}`)
   } finally {
     isGenerating.value = false
   }
@@ -682,10 +683,17 @@ onMounted(async () => {
     const resp = await apiClient.get('/profiles/models')
     availableModels.value = resp.data as AvailableModels
     // 默认选中第一个模型
-    const firstCat = 'image'
-    selectedCategory.value = firstCat
-    if (availableModels.value[firstCat]?.length) {
-      selectedModel.value = availableModels.value[firstCat][0]
+    // Pick the first category that actually has models. Prefer 'image' if it
+    // is non-empty so the default UX matches the most common deployment, but
+    // fall back to whichever category is configured in profiles.json.
+    const categories = Object.keys(availableModels.value) as Array<keyof AvailableModels>
+    const preferred: Array<keyof AvailableModels> = ['image', 'voice', 'music', 'video']
+    const firstCat =
+      preferred.find((c) => availableModels.value[c]?.length) ??
+      categories.find((c) => availableModels.value[c]?.length)
+    if (firstCat) {
+      selectedCategory.value = firstCat as string
+      selectedModel.value = availableModels.value[firstCat]![0]
     }
   } catch (e) {
     console.warn('Failed to load models from profiles:', e)
