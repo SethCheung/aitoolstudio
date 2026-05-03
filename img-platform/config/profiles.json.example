@@ -1,0 +1,17 @@
+{
+  "$comment": "API key supports two forms: plain text or env-var reference. DO NOT commit real keys to Git.",
+  "profiles": [
+    {
+      "name": "MiniMax-Production",
+      "api_key": "${MINIMAX_API_KEY}",
+      "enabled": true,
+      "priority": 1,
+      "models": {
+        "image": ["image-01"],
+        "voice": ["speech-02-hd"],
+        "video": ["hailuo-video-01"],
+        "music": ["music-01"]
+      }
+    }
+  ]
+}

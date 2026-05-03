@@ -25,6 +25,10 @@ dist/
 # Environment
 .env
 .env.local
+.env.*.local
+
+# API keys and secrets (use profiles.json.example as template)
+config/profiles.json
 
 # Logs
 *.log
