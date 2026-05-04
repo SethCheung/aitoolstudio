@@ -22,6 +22,11 @@ export default defineConfig(() => {
           target: apiBaseUrl,
           changeOrigin: true,
         },
+        '/minimax-output': {
+          target: apiBaseUrl,
+          changeOrigin: true,
+          rewrite: (path) => path,
+        },
       },
     },
   }

@@ -2,10 +2,11 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import api from '@/services/api'
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
 
 // ── Types ───────────────────────────────────────────────
@@ -76,7 +77,7 @@ const history = ref<HistoryItem[]>([])
 
 async function loadHistory() {
   try {
-    const resp = await api.get('/conversations')
+    const resp = await api.get('/api/conversations')
     const data = Array.isArray(resp.data) ? resp.data : []
     history.value = data.map((item: any) => ({
       id: item.id,
@@ -91,11 +92,36 @@ async function loadHistory() {
   }
 }
 
+// ── State ────────────────────────────────────────────────
+const conversationTitle = ref('')
+const isEditingTitle = ref(false)
+
+function startEditTitle() {
+  isEditingTitle.value = true
+}
+
+async function saveTitleOnBlur() {
+  isEditingTitle.value = false
+  if (!conversationTitle.value.trim()) {
+    conversationTitle.value = '未命名项目'
+    return
+  }
+  try {
+    await ensureConversation()
+    await api.patch(`/api/conversations/${convId.value}`, {
+      title: conversationTitle.value.trim()
+    })
+  } catch (e) {
+    console.error('Title save failed', e)
+  }
+}
+
 // ── Send ───────────────────────────────────────────────
 async function ensureConversation() {
   if (!convId.value) {
-    const resp = await api.post('/conversations', { title: 'New Conversation' })
+    const resp = await api.post('/api/conversations', { title: 'New Conversation' })
     convId.value = resp.data.id
+    conversationTitle.value = 'New Conversation'
   }
   return convId.value
 }
@@ -110,8 +136,8 @@ async function saveMessages() {
     model: messages.value[messages.value.length - 1].model,
   }
   try {
-    await api.post(`/conversations/${convId.value}/messages`, payload)
-    await api.patch(`/conversations/${convId.value}`, { title: messages.value[0]?.content.slice(0, 50) || 'New Conversation' })
+    await api.post(`/api/conversations/${convId.value}/messages`, payload)
+    await api.patch(`/api/conversations/${convId.value}`, { title: messages.value[0]?.content.slice(0, 50) || 'New Conversation' })
   } catch (e) {
     console.warn('Failed to save messages', e)
   }
@@ -153,7 +179,7 @@ async function sendImage(prompt: string) {
   scrollToBottom()
 
   try {
-    const resp = await api.post('/image/generate', {
+    const resp = await api.post('/api/image/generate', {
       prompt,
       model: selectedModel.value,
       aspect_ratio: selectedAspect.value,
@@ -162,6 +188,8 @@ async function sendImage(prompt: string) {
     })
     const data = resp.data as { image_urls: string[] }
     placeholders.msg.loading = false
+    console.log('[sendImage] image_urls:', JSON.stringify(data.image_urls))
+    console.log('[sendImage] results count:', (data.image_urls || []).length)
     placeholders.msg.results = data.image_urls || []
     placeholders.msg.type = 'image'
     placeholders.msg.model = selectedModel.value
@@ -183,7 +211,7 @@ async function sendVoice(text: string) {
   scrollToBottom()
 
   try {
-    const resp = await api.post('/voice/generate', {
+    const resp = await api.post('/api/voice/generate', {
       text,
       voice_id: 'male-qn-qingse',
       model: selectedModel.value,
@@ -211,7 +239,7 @@ async function sendMusic(text: string) {
   scrollToBottom()
 
   try {
-    const resp = await api.post('/music/generate', {
+    const resp = await api.post('/api/music/generate', {
       prompt: text,
       model: selectedModel.value,
     })
@@ -238,7 +266,7 @@ async function sendVideo(text: string) {
   scrollToBottom()
 
   try {
-    const resp = await api.post('/video/generate', {
+    const resp = await api.post('/api/video/generate', {
       prompt: text,
       model: selectedModel.value,
     })
@@ -263,7 +291,7 @@ async function pollVideoStatus(msg: Message, taskId: string) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 3000))
     try {
-      const resp = await api.get(`/video/status/${taskId}`)
+      const resp = await api.get(`/api/video/status/${taskId}`)
       const data = resp.data as { status: string; video_url?: string }
       if (data.video_url) {
         msg.loading = false
@@ -305,9 +333,11 @@ function scrollToBottom() {
 // ── History click ──────────────────────────────────────
 async function loadFromHistory(item: HistoryItem) {
   try {
-    const resp = await api.get(`/conversations/${item.id}`)
+    const resp = await api.get(`/api/conversations/${item.id}`)
     const data = resp.data
     convId.value = data.id
+    conversationTitle.value = data.title || ''
+    isEditingTitle.value = false
     messages.value = data.messages.map((m: any) => ({
       id: String(m.id),
       role: m.role,
@@ -326,6 +356,12 @@ async function loadFromHistory(item: HistoryItem) {
 async function newConversation() {
   messages.value = []
   convId.value = null
+  conversationTitle.value = ''
+  isEditingTitle.value = false
+}
+
+async function goHome() {
+  await router.push('/')
 }
 
 async function saveAssistantResponse(msg: Message) {
@@ -339,8 +375,8 @@ async function saveAssistantResponse(msg: Message) {
     task_id: msg.taskId,
   }
   try {
-    await api.post(`/conversations/${convId.value}/messages`, payload)
-    await api.patch(`/conversations/${convId.value}`, { title: messages.value[0]?.content.slice(0, 50) || 'New Conversation' })
+    await api.post(`/api/conversations/${convId.value}/messages`, payload)
+    await api.patch(`/api/conversations/${convId.value}`, { title: messages.value[0]?.content.slice(0, 50) || 'New Conversation' })
     await loadHistory()
   } catch (e) {
     console.warn('Failed to save assistant response', e)
@@ -352,7 +388,7 @@ onMounted(async () => {
   // Load models
   try {
     console.log('[GenerateView] fetching /profiles/models...')
-    const resp = await api.get('/profiles/models')
+    const resp = await api.get('/api/profiles/models')
     console.log('[GenerateView] models raw resp:', resp)
     console.log('[GenerateView] models resp.data:', resp.data)
     availableModels.value = resp.data as AvailableModels
@@ -388,11 +424,45 @@ onMounted(async () => {
     <!-- Left Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-top">
-        <div class="brand">
+        <!-- Brand + Editable Title -->
+        <div class="brand-row">
           <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
           </svg>
-          <span class="brand-name">{{ t('generate.brand') }}</span>
+          <div class="brand-title-group">
+            <span class="brand-name">{{ t('generate.brand') }}</span>
+            <div class="project-name-row">
+              <input
+                v-if="isEditingTitle"
+                v-model="conversationTitle"
+                class="title-edit-input"
+                placeholder="项目名称..."
+                @blur="saveTitleOnBlur"
+                @keydown.enter.prevent="saveTitleOnBlur"
+                autofocus
+              />
+              <span
+                v-else
+                class="project-name-display"
+                @click="startEditTitle"
+                :title="conversationTitle || '点击编辑项目名称'"
+              >
+                {{ conversationTitle || '未命名项目' }}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="edit-icon">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </span>
+            </div>
+          </div>
+          <div class="brand-actions">
+            <button class="action-btn home-btn" @click.stop="goHome" title="返回主页">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -498,14 +568,21 @@ onMounted(async () => {
               <!-- Image results -->
               <div v-else-if="msg.type === 'image' && msg.results?.length" class="msg-images">
                 <div class="images-grid" :class="msg.results.length === 1 ? 'single' : 'multi'">
-                  <img
+                  <div
                     v-for="(url, i) in msg.results"
-                    :key="i"
-                    :src="url"
-                    class="result-image"
-                    alt="Generated image"
-                    loading="lazy"
-                  />
+                    :key="url"
+                    style="position:relative"
+                  >
+                    <img
+                      :src="url + '?cache=' + Date.now()"
+                      class="result-image"
+                      :alt="'Generated image ' + (i+1)"
+                      loading="lazy"
+                    />
+                    <span style="position:absolute;top:4px;left:4px;font-size:10px;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px">
+                      {{ i+1 }}. {{ url.split('/').pop()?.split('?')[0] }}
+                    </span>
+                  </div>
                 </div>
                 <span class="result-model">{{ msg.model }}</span>
               </div>
@@ -609,7 +686,7 @@ onMounted(async () => {
   padding: 14px 14px 10px;
 }
 
-.brand {
+.brand-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -620,12 +697,100 @@ onMounted(async () => {
   height: 22px;
   color: #00d9ff;
   filter: drop-shadow(0 0 5px rgba(0,217,255,0.5));
+  flex-shrink: 0;
+}
+
+.brand-title-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .brand-name {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.35);
+}
+
+.project-name-row {
+  display: flex;
+  align-items: center;
+}
+
+.project-name-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13px;
   font-weight: 600;
   color: #fff;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.project-name-display:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.edit-icon {
+  width: 12px;
+  height: 12px;
+  color: rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+
+.title-edit-input {
+  width: 100%;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(0,210,255,0.35);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-family: 'Inter', sans-serif;
+  padding: 4px 8px;
+  outline: none;
+}
+
+.brand-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.5);
+}
+
+.action-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  border-color: rgba(255,255,255,0.2);
+}
+
+.home-btn:hover {
+  background: rgba(0,217,255,0.1);
+  color: #00d9ff;
+  border-color: rgba(0,217,255,0.25);
 }
 
 .sidebar-section {

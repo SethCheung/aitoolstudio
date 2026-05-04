@@ -25,7 +25,7 @@ body { margin: 0; background: #05070a; color: white; font-family: 'Inter', -appl
 
 .locale-switch {
   position: fixed;
-  bottom: 16px;
+  top: 16px;
   right: 16px;
   z-index: 9999;
   cursor: pointer;

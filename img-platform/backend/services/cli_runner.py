@@ -39,32 +39,49 @@ async def generate_image(
     aspect_ratio: str = "16:9",
     n: int = 1,
 ) -> dict:
-    """mmx image "prompt" [--model image-01] [--aspect-ratio 16:9]"""
-    cmd = ["mmx", "image", prompt]
+    """mmx image generate --prompt "..." [--model image-01] [--aspect-ratio 16:9] [--n 2]"""
+    import time, re, uuid
+    # 每次生成用唯一ID做前缀，彻底避免任何覆盖
+    unique_id = uuid.uuid4().hex[:8]
+    safe_prompt = re.sub(r'[^a-zA-Z0-9]', '_', prompt[:12])
+    out_prefix = f"img_{unique_id}_{safe_prompt}"
+    cmd = ["mmx", "image", "generate", "--prompt", prompt]
     if model:
         cmd.extend(["--model", model])
     if aspect_ratio:
         cmd.extend(["--aspect-ratio", aspect_ratio])
     if n and n > 1:
         cmd.extend(["--n", str(n)])
+    cmd.extend(["--out-prefix", out_prefix])
 
+    print(f"[cli_runner] running: {' '.join(cmd)}", flush=True)
     out = await asyncio.get_event_loop().run_in_executor(None, _run_sync, cmd, 120)
+    print(f"[cli_runner] raw output: {out[:300]}", flush=True)
     # mmx 输出格式：[Model: image-01]\n{ "saved": ["file.jpg"] }
     # 找 JSON 块，提取 saved 文件列表，转为 /minimax-output/ URL
     image_urls = []
     import re
     json_match = re.search(r'\{[\s\S]*"saved"[\s\S]*\}', out)
+    print(f"[cli_runner] json_match: {json_match.group() if json_match else None}", flush=True)
     if json_match:
         try:
             data = json.loads(json_match.group())
             saved = data.get("saved", [])
+            print(f"[cli_runner] saved files: {saved}", flush=True)
             for fname in saved:
-                image_urls.append(f"/minimax-output/{fname}")
+                # 构建完整 URL：/minimax-output/ + 文件名
+                abs_path = str(MINIMAX_OUTPUT / fname)
+                if os.path.exists(abs_path):
+                    image_urls.append(f"/minimax-output/{fname}")
+                else:
+                    print(f"[cli_runner] file not found: {abs_path}", flush=True)
         except Exception:
             pass
 
     if not image_urls:
         raise RuntimeError(f"mmx image returned no output: {out[:200]}")
+
+    print(f"[cli_runner] final image_urls: {image_urls}", flush=True)
 
     return {
         "id": str(uuid.uuid4()),

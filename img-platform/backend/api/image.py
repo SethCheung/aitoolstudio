@@ -67,6 +67,9 @@ async def generate(
 
     image_urls = data.get("image_urls", []) if req.response_format == "url" else data.get("image_base64", [])
 
+    logger.warning(f"[image/generate] image_urls from mmx: {image_urls}")
+    logger.warning(f"[image/generate] type: {type(image_urls)}")
+
     gen = Generation(
         prompt=req.prompt,
         image_urls=image_urls,

@@ -2,12 +2,13 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/services/api'
 
 const { t } = useI18n()
 const router = useRouter()
 
-interface Generation {
+interface ProjectItem {
   id: number
   title: string
   type: string
@@ -16,27 +17,30 @@ interface Generation {
   created_at: string
 }
 
-const recentGens = ref<Generation[]>([])
-const totalCount = ref(0)
+const projects = ref<ProjectItem[]>([])
+const loading = ref(false)
 
-async function fetchData() {
+// Rename modal
+const renameVisible = ref(false)
+const renameId = ref<number | null>(null)
+const renameTitle = ref('')
+
+async function fetchProjects() {
+  loading.value = true
   try {
-    const [convsRes, statsRes] = await Promise.all([
-      api.get('/conversations?limit=3'),
-      api.get('/generations/stats'),
-    ])
-    const convs = Array.isArray(convsRes.data) ? convsRes.data : []
-    recentGens.value = convs.map((c: any) => ({
+    const resp = await api.get('/api/conversations')
+    projects.value = (Array.isArray(resp.data) ? resp.data : []).map((c: any) => ({
       id: c.id,
-      title: c.title || '',
+      title: c.title || 'New Project',
       type: c.type || 'image',
       thumb: c.thumb || '',
       prompt: c.prompt || '',
       created_at: c.created_at,
     }))
-    totalCount.value = statsRes.data?.total_generations || 0
   } catch (e) {
-    console.error('Failed to load home data', e)
+    console.error('Failed to load projects', e)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -45,19 +49,59 @@ function timeAgo(dateStr: string): string {
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
   if (diff < 60) return diff + 's ago'
   if (diff < 3600) return Math.floor(diff / 60) + ' min ago'
-  if (diff < 86400) return Math.floor(diff / 3600) + ' hour' + (Math.floor(diff / 3600) > 1 ? 's' : '') + ' ago'
-  return Math.floor(diff / 86400) + ' day' + (Math.floor(diff / 86400) > 1 ? 's' : '') + ' ago'
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'
+  return Math.floor(diff / 86400) + 'd ago'
 }
 
-function goGenerate() {
+function openProject(id: number) {
+  router.push({ path: '/generate', query: { convId: String(id) } })
+}
+
+function newProject() {
   router.push('/generate')
 }
 
-function goToConversation(gen: Generation) {
-  router.push({ path: '/generate', query: { convId: String(gen.id) } })
+// Rename
+function startRename(p: ProjectItem, e: Event) {
+  e.stopPropagation()
+  renameId.value = p.id
+  renameTitle.value = p.title
+  renameVisible.value = true
 }
 
-onMounted(fetchData)
+async function confirmRename() {
+  if (!renameId.value || !renameTitle.value.trim()) return
+  try {
+    await api.patch(`/api/conversations/${renameId.value}`, {
+      title: renameTitle.value.trim()
+    })
+    const p = projects.value.find(x => x.id === renameId.value)
+    if (p) p.title = renameTitle.value.trim()
+    renameVisible.value = false
+    ElMessage.success('已重命名')
+  } catch {
+    ElMessage.error('重命名失败')
+  }
+}
+
+// Delete
+async function deleteProject(p: ProjectItem, e: Event) {
+  e.stopPropagation()
+  try {
+    await ElMessageBox.confirm(`删除项目「${p.title}」？此操作不可恢复。`, '确认删除', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await api.delete(`/api/conversations/${p.id}`)
+    projects.value = projects.value.filter(x => x.id !== p.id)
+    ElMessage.success('已删除')
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error('删除失败')
+  }
+}
+
+onMounted(fetchProjects)
 </script>
 
 <template>
@@ -67,429 +111,281 @@ onMounted(fetchData)
       <div class="header-logo">
         <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
-          <path d="M5 3L5.75 6L8 6.75L5.75 7.5L5 10.5L4.25 7.5L2 6.75L4.25 6L5 3Z" opacity="0.6"/>
-          <path d="M19 3L19.75 6L22 6.75L19.75 7.5L19 10.5L18.25 7.5L16 6.75L18.25 6L19 3Z" opacity="0.6"/>
-          <path d="M5 14L5.75 17L8 17.75L5.75 18.5L5 21.5L4.25 18.5L2 17.75L4.25 17L5 14Z" opacity="0.6"/>
-          <path d="M19 14L19.75 17L22 17.75L19.75 18.5L19 21.5L18.25 18.5L16 17.75L18.25 17L19 14Z" opacity="0.6"/>
         </svg>
         <span class="logo-text">{{ t('generate.brand') }}</span>
       </div>
-      <nav class="header-nav">
-        <span class="nav-item active">Home</span>
-        <span class="nav-item">Studio</span>
-        <span class="nav-item">Workflow</span>
-        <span class="nav-item">Models</span>
-        <span class="nav-item">Community</span>
-      </nav>
-      <div class="header-right">
-        <!-- Bell icon -->
-        <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-        </svg>
-        <div class="user-badge">
-          <div class="user-avatar">AC</div>
-          <span class="user-name">AC</span>
-          <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </div>
-      </div>
     </header>
 
-    <!-- Hero Section -->
-    <section class="hero-section">
-      <h1 class="hero-title">AI Creative Studio</h1>
-      <p class="hero-sub">
-  <span v-if="totalCount > 0">{{ totalCount }} images generated</span>
-  <span v-else>Generate, edit and manage AI images in one place</span>
-</p>
-    </section>
+    <!-- Projects Grid -->
+    <main class="projects-main">
+      <div v-if="loading" class="loading-state">
+        <span>{{ t('common.loading') }}</span>
+      </div>
 
-    <!-- Feature Cards -->
-    <section class="feature-grid">
-      <!-- Image Generation -->
-      <div class="feature-card surface-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-            <circle cx="8.5" cy="8.5" r="1.5"/>
-            <polyline points="21 15 16 10 5 21"/>
-          </svg>
-        </div>
-        <h3 class="feature-title">Image Generation</h3>
-        <p class="feature-desc">Create stunning AI images from text or reference images.</p>
-        <svg class="feature-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 12h14M12 5l7 7-7 7"/>
+      <div v-else-if="projects.length === 0" class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
         </svg>
+        <p class="empty-title">No projects yet</p>
+        <p class="empty-sub">Click the + button below to create your first project.</p>
       </div>
-      <!-- Workflow Canvas -->
-      <div class="feature-card surface-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <line x1="6" y1="3" x2="6" y2="15"/>
-            <circle cx="18" cy="6" r="3"/>
-            <circle cx="6" cy="18" r="3"/>
-            <path d="M18 9a9 9 0 0 1-9 9"/>
-          </svg>
-        </div>
-        <h3 class="feature-title">Workflow Canvas</h3>
-        <p class="feature-desc">Visually build and connect powerful AI workflows.</p>
-        <svg class="feature-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 12h14M12 5l7 7-7 7"/>
-        </svg>
-      </div>
-      <!-- History & Library -->
-      <div class="feature-card surface-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-        </div>
-        <h3 class="feature-title">History & Gallery</h3>
-        <p class="feature-desc">Access past creations and manage your assets.</p>
-        <svg class="feature-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 12h14M12 5l7 7-7 7"/>
-        </svg>
-      </div>
-    </section>
 
-    <!-- Recent Projects -->
-    <section class="recent-section">
-      <div class="recent-header">
-        <div class="recent-title-row">
-          <svg class="clock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
-          <h2 class="recent-title">Recent Projects</h2>
-          <svg class="chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </div>
-          <span class="view-all">View All</span>
-      </div>
-      <div v-if="recentGens.length > 0" class="project-grid">
+      <div v-else class="projects-grid">
         <div
-          v-for="(gen, i) in recentGens"
-          :key="gen.id"
+          v-for="p in projects"
+          :key="p.id"
           class="project-card"
-          :class="{ selected: i === 0 }"
-          style="cursor: pointer"
-          @click="goToConversation(gen)"
         >
-          <div
-            class="project-thumb"
-            :class="{ 'selected-thumb': i === 0 }"
-            :style="gen.thumb ? 'background-image: url(' + gen.thumb + '); background-size: cover; background-position: center;' : 'background: #111827;'"
-          ></div>
-          <h3 class="project-name">{{ (gen.title || gen.prompt || '').slice(0, 30) }}{{ (gen.title || gen.prompt || '').length > 30 ? '...' : '' }}</h3>
-          <div class="project-meta">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="meta-icon">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            <span>{{ timeAgo(gen.created_at) }}</span>
+          <!-- Click area -->
+          <div class="card-main" @click="openProject(p.id)">
+            <div
+              class="card-thumb"
+              :style="p.thumb
+                ? 'background-image: url(' + p.thumb + '); background-size: cover; background-position: center;'
+                : 'background: #1a1a2e;'"
+            >
+              <div v-if="!p.thumb" class="thumb-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+              </div>
+            </div>
+            <div class="card-body">
+              <p class="card-title">{{ p.title }}</p>
+              <p class="card-meta">{{ timeAgo(p.created_at) }} · {{ p.type }}</p>
+            </div>
           </div>
-        </div>
-      </div>
-      <div v-else class="project-grid">
-        <div v-for="i in 3" :key="i" class="project-card">
-          <div class="project-thumb" style="background: #111827; opacity: 0.4;"></div>
-          <h3 class="project-name" style="opacity: 0.3;">No generations yet</h3>
-          <div class="project-meta">
-            <span>—</span>
-          </div>
-        </div>
-      </div>
-    </section>
 
-    <!-- CTA -->
-    <section class="cta-section">
-      <button class="btn-primary" @click="goGenerate">
-        Start Creating
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
-          <path d="M5 12h14M12 5l7 7-7 7"/>
-        </svg>
-      </button>
-      <router-link to="/history" class="btn-ghost">
-        View History
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
-          <circle cx="12" cy="12" r="10"/>
-          <polyline points="12 6 12 12 16 14"/>
-        </svg>
-      </router-link>
-    </section>
+          <!-- Hover Actions -->
+          <div class="card-actions">
+            <button class="card-action-btn" @click="startRename(p, $event)" title="重命名">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button class="card-action-btn danger" @click="deleteProject(p, $event)" title="删除">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Floating Add Button -->
+    <button class="fab" @click="newProject" title="New Project">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+    </button>
+
+    <!-- Rename Modal -->
+    <Teleport to="body">
+      <div v-if="renameVisible" class="modal-overlay" @click.self="renameVisible = false">
+        <div class="modal">
+          <h3 class="modal-title">重命名项目</h3>
+          <input
+            v-model="renameTitle"
+            class="modal-input"
+            placeholder="输入项目名称..."
+            @keydown.enter="confirmRename"
+            autofocus
+          />
+          <div class="modal-actions">
+            <button class="modal-btn cancel" @click="renameVisible = false">取消</button>
+            <button class="modal-btn confirm" @click="confirmRename">保存</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .home-page {
   min-height: 100vh;
-  background: #05070a;
+  background: #0a0a0f;
   color: white;
   font-family: 'Inter', -apple-system, sans-serif;
-}
-
-/* Header */
-.top-header {
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 40px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-.header-logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.logo-icon {
-  width: 24px;
-  height: 24px;
-  color: #00d2ff;
-}
-.logo-text {
-  font-size: 15px;
-  font-weight: 600;
-  color: white;
-}
-.header-nav {
-  display: flex;
-  gap: 32px;
-  font-size: 14px;
-  color: #9ca3af;
-}
-.nav-item {
-  cursor: pointer;
-  transition: color 0.15s;
-}
-.nav-item:hover { color: white; }
-.nav-item.active { color: #00d2ff; }
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.bell-icon {
-  width: 20px;
-  height: 20px;
-  color: #9ca3af;
-}
-.user-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-.user-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #00d2ff;
-  color: #05070a;
-  font-size: 13px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.user-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: white;
-}
-.chevron-icon {
-  width: 16px;
-  height: 16px;
-  color: #9ca3af;
-}
-
-/* Hero */
-.hero-section {
-  text-align: center;
-  padding: 80px 20px 0;
-}
-.hero-title {
-  font-size: 48px;
-  font-weight: 700;
-  color: white;
-  letter-spacing: -0.5px;
-  margin: 0;
-}
-.hero-sub {
-  margin: 16px 0 0;
-  font-size: 18px;
-  color: #9ca3af;
-}
-
-/* Feature Grid */
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  max-width: 1250px;
-  margin: 40px auto 0;
-  padding: 0 40px;
-}
-.feature-card {
-  height: 220px;
-  padding: 24px;
-  border-radius: 12px;
-  border: 1px solid #1f2937;
-  background: #0d1117;
   display: flex;
   flex-direction: column;
-  cursor: pointer;
-  transition: all 0.15s;
 }
-.feature-card:hover {
-  border-color: rgba(0, 210, 255, 0.3);
+.top-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
 }
-.feature-icon {
-  width: 24px;
-  height: 24px;
-  color: #00d2ff;
-  margin-bottom: 16px;
-}
-.feature-icon svg { width: 24px; height: 24px; }
-.feature-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: white;
-  margin: 0 0 12px;
-}
-.feature-desc {
-  font-size: 14px;
-  color: #9ca3af;
-  margin: 0;
+.header-logo { display: flex; align-items: center; gap: 10px; }
+.logo-icon { width: 22px; height: 22px; color: #00d2ff; }
+.logo-text { font-size: 15px; font-weight: 600; color: white; }
+
+.projects-main {
   flex: 1;
+  padding: 32px 24px 100px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
 }
-.feature-arrow {
-  width: 16px;
-  height: 16px;
-  color: rgba(0,0,0,0.4);
-  margin-top: 16px;
-}
-
-/* Recent Projects */
-.recent-section {
-  max-width: 1250px;
-  margin: 40px auto 0;
-  padding: 0 40px;
-}
-.recent-header {
+.empty-state, .loading-state {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-.recent-title-row {
-  display: flex;
-  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
   gap: 12px;
-}
-.clock-icon {
-  width: 16px;
-  height: 16px;
-  color: #00d2ff;
-}
-.recent-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: white;
-  margin: 0;
-}
-.chevron-down {
-  width: 16px;
-  height: 16px;
   color: #9ca3af;
-  transform: rotate(180deg);
 }
-.view-all {
-  font-size: 14px;
-  color: #9ca3af;
-  cursor: pointer;
-}
-.project-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-.project-card { cursor: pointer; }
-.project-thumb {
-  height: 200px;
-  border-radius: 12px;
-  border: 1px solid transparent;
-  transition: border-color 0.15s;
-}
-.selected-thumb { border: 2px solid #00d2ff; }
-.project-name {
-  font-size: 14px;
-  font-weight: 700;
-  color: white;
-  margin: 8px 0 4px;
-}
-.project-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #6b7280;
-}
-.meta-icon {
-  width: 12px;
-  height: 12px;
-}
+.empty-icon { width: 56px; height: 56px; color: rgba(0,210,255,0.3); }
+.empty-title { font-size: 18px; font-weight: 600; color: white; margin: 0; }
+.empty-sub { font-size: 14px; color: #6b7280; margin: 0; text-align: center; max-width: 320px; }
 
-/* CTA */
-.cta-section {
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+}
+.project-card {
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: #111827;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+.card-main { cursor: pointer; }
+.card-main:hover { opacity: 0.85; }
+
+.card-thumb {
+  height: 160px;
+  background: #1a1a2e;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 40px 20px 60px;
 }
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 13px 24px;
+.thumb-placeholder { width: 48px; height: 48px; color: rgba(255,255,255,0.15); }
+.thumb-placeholder svg { width: 48px; height: 48px; }
+.card-body { padding: 14px 16px; }
+.card-title {
   font-size: 14px;
-  font-weight: 700;
-  font-family: 'Inter', sans-serif;
-  background: #00d2ff;
-  color: #05070a;
+  font-weight: 600;
+  color: white;
+  margin: 0 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-meta { font-size: 12px; color: #6b7280; margin: 0; }
+
+/* Hover Actions */
+.card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.project-card:hover .card-actions { opacity: 1; }
+.card-action-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
   border: none;
-  border-radius: 10px;
+  background: rgba(0,0,0,0.65);
+  color: rgba(255,255,255,0.8);
   cursor: pointer;
-  text-decoration: none;
-  transition: all 0.15s;
-}
-.btn-primary:hover {
-  box-shadow: 0 0 28px rgba(0, 210, 255, 0.5);
-  transform: translateY(-2px);
-}
-.btn-icon { width: 18px; height: 18px; }
-.btn-ghost {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 13px 24px;
+  justify-content: center;
+  transition: all 0.15s;
+  backdrop-filter: blur(4px);
+}
+.card-action-btn:hover { background: rgba(0,0,0,0.85); color: white; }
+.card-action-btn.danger:hover { background: rgba(220,38,38,0.8); color: white; }
+
+/* FAB */
+.fab {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00d9ff, #0080ff);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 24px rgba(0, 130, 255, 0.45);
+  transition: all 0.2s;
+  z-index: 100;
+}
+.fab:hover {
+  transform: translateX(-50%) scale(1.08);
+  box-shadow: 0 6px 32px rgba(0, 130, 255, 0.6);
+}
+.fab svg { width: 24px; height: 24px; color: white; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+.modal {
+  background: #1a1a2e;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  padding: 28px 32px;
+  width: min(420px, 90vw);
+}
+.modal-title { font-size: 18px; font-weight: 700; color: white; margin: 0 0 20px; }
+.modal-input {
+  width: 100%;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  color: white;
+  font-size: 15px;
+  font-family: 'Inter', sans-serif;
+  padding: 12px 14px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+.modal-input:focus { border-color: rgba(0,210,255,0.5); }
+.modal-input::placeholder { color: rgba(255,255,255,0.3); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.modal-btn {
+  padding: 9px 22px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
   font-family: 'Inter', sans-serif;
-  background: rgba(255, 255, 255, 0.05);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
-  text-decoration: none;
   cursor: pointer;
+  border: none;
   transition: all 0.15s;
 }
-.btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.25);
-}
+.modal-btn.cancel { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.6); }
+.modal-btn.cancel:hover { background: rgba(255,255,255,0.12); color: white; }
+.modal-btn.confirm { background: #00d2ff; color: #05070a; }
+.modal-btn.confirm:hover { background: #00b4d8; }
 </style>
