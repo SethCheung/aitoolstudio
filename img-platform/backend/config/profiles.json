@@ -1,21 +1,29 @@
 {
   "profiles": {
-    "MiniMax": {
-      "name": "MiniMax",
-      "api_key": "sk-cp-1MHL0OWtVmjBoUyEoBhBhqEYyVKn7JliB_AOhfhOBTJEwyLEAMPzH6Koh8Ya8v3XcddI5bK5_HkFopEAEtkcEdHjwYkwjkrHzr0HRlVehXy-zt8_963rPLY",
+    "MiniMax-CLI": {
+      "name": "MiniMax-CLI",
+      "auth_type": "cli",
       "base_url": "https://api.minimaxi.com",
       "enabled": true,
       "priority": 1,
       "daily_quota": null,
       "monthly_quota": null,
-      "notes": "",
+      "notes": "Token Plan - mmx CLI 调用",
       "models": {
         "image": [
-          "image-01"
+          "image-01",
+          "image-01-turbo"
         ],
-        "voice": [],
-        "video": [],
-        "music": []
+        "voice": [
+          "speech-02-hd",
+          "speech-02"
+        ],
+        "video": [
+          "hailuo-video-01"
+        ],
+        "music": [
+          "music-01"
+        ]
       }
     }
   }

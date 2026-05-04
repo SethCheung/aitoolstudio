@@ -49,23 +49,22 @@ async def generate_image(
         cmd.extend(["--n", str(n)])
 
     out = await asyncio.get_event_loop().run_in_executor(None, _run_sync, cmd, 120)
-    # mmx image 输出为一行 JSON 或纯文本路径
+    # mmx 输出格式：[Model: image-01]\n{ "saved": ["file.jpg"] }
+    # 找 JSON 块，提取 saved 文件列表，转为 /minimax-output/ URL
     image_urls = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("{"):
-            try:
-                data = json.loads(line)
-                image_urls.append(data.get("url") or data.get("path", ""))
-            except Exception:
-                image_urls.append(line)
-        else:
-            image_urls.append(line)
+    import re
+    json_match = re.search(r'\{[\s\S]*"saved"[\s\S]*\}', out)
+    if json_match:
+        try:
+            data = json.loads(json_match.group())
+            saved = data.get("saved", [])
+            for fname in saved:
+                image_urls.append(f"/minimax-output/{fname}")
+        except Exception:
+            pass
 
     if not image_urls:
-        raise RuntimeError("mmx image returned no output")
+        raise RuntimeError(f"mmx image returned no output: {out[:200]}")
 
     return {
         "id": str(uuid.uuid4()),

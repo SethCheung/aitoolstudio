@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-const { t } = useI18n()
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import api from '@/services/api'
 
+const { t } = useI18n()
 const router = useRouter()
 
 interface Generation {
   id: number
+  title: string
+  type: string
+  thumb: string
   prompt: string
-  image_urls: string[]
-  model: string
   created_at: string
 }
 
@@ -20,18 +21,27 @@ const totalCount = ref(0)
 
 async function fetchData() {
   try {
-    const [statsRes, gensRes] = await Promise.all([
-      axios.get('/api/generations/stats'),
-      axios.get('/api/generations?limit=3'),
+    const [convsRes, statsRes] = await Promise.all([
+      api.get('/conversations?limit=3'),
+      api.get('/generations/stats'),
     ])
-    totalCount.value = statsRes.data.total_generations
-    recentGens.value = gensRes.data.items
+    const convs = Array.isArray(convsRes.data) ? convsRes.data : []
+    recentGens.value = convs.map((c: any) => ({
+      id: c.id,
+      title: c.title || '',
+      type: c.type || 'image',
+      thumb: c.thumb || '',
+      prompt: c.prompt || '',
+      created_at: c.created_at,
+    }))
+    totalCount.value = statsRes.data?.total_generations || 0
   } catch (e) {
     console.error('Failed to load home data', e)
   }
 }
 
 function timeAgo(dateStr: string): string {
+  if (!dateStr) return ''
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
   if (diff < 60) return diff + 's ago'
   if (diff < 3600) return Math.floor(diff / 60) + ' min ago'
@@ -41,6 +51,10 @@ function timeAgo(dateStr: string): string {
 
 function goGenerate() {
   router.push('/generate')
+}
+
+function goToConversation(gen: Generation) {
+  router.push({ path: '/generate', query: { convId: String(gen.id) } })
 }
 
 onMounted(fetchData)
@@ -161,13 +175,15 @@ onMounted(fetchData)
           :key="gen.id"
           class="project-card"
           :class="{ selected: i === 0 }"
+          style="cursor: pointer"
+          @click="goToConversation(gen)"
         >
           <div
             class="project-thumb"
             :class="{ 'selected-thumb': i === 0 }"
-            :style="gen.image_urls[0] ? 'background-image: url(' + gen.image_urls[0] + '); background-size: cover; background-position: center;' : 'background: #111827;'"
+            :style="gen.thumb ? 'background-image: url(' + gen.thumb + '); background-size: cover; background-position: center;' : 'background: #111827;'"
           ></div>
-          <h3 class="project-name">{{ gen.prompt.slice(0, 30) }}{{ gen.prompt.length > 30 ? '...' : '' }}</h3>
+          <h3 class="project-name">{{ (gen.title || gen.prompt || '').slice(0, 30) }}{{ (gen.title || gen.prompt || '').length > 30 ? '...' : '' }}</h3>
           <div class="project-meta">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="meta-icon">
               <circle cx="12" cy="12" r="10"/>

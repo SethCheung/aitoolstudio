@@ -18,6 +18,7 @@ from api.voice import router as voice_router
 from api.video import router as video_router
 from api.music import router as music_router
 from api.generation import router as generation_router
+from api.conversation import router as conversation_router
 from models.database import init_db
 
 from limiter import limiter
@@ -55,6 +56,7 @@ def on_startup():
 # 注册路由
 app.include_router(admin_router)
 app.include_router(auth_router)
+app.include_router(conversation_router)
 app.include_router(image_router)
 app.include_router(voice_router)
 app.include_router(video_router)
@@ -68,7 +70,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # 挂载 MiniMax CLI 输出目录（Token Plan 用户生成的文件）
-MINIMAX_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "minimax-output")
+from pathlib import Path
+MINIMAX_OUTPUT_DIR = str(Path.home() / "minimax-output")
 if os.path.exists(MINIMAX_OUTPUT_DIR):
     app.mount("/minimax-output", StaticFiles(directory=MINIMAX_OUTPUT_DIR, html=True), name="minimax-output")
 

@@ -154,4 +154,10 @@ def get_all_models() -> dict:
                     result[category][model] = []
                 result[category][model].append(pname)
 
-    return result
+    # Flatten: { category: [model_names] }
+    # e.g. { "image": ["image-01", "image-01-turbo"], "voice": ["speech-02-hd", "speech-02"] }
+    flattened = {}
+    for cat, models in result.items():
+        flattened[cat] = list(models.keys())
+
+    return flattened
