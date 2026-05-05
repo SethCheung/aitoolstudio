@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -27,7 +27,7 @@ interface HistoryItem {
   title: string
   type: string
   thumb?: string
-  prompt?: string
+  prompt: string
   createdAt: Date
 }
 
@@ -41,7 +41,9 @@ const messages = ref<Message[]>([])
 const inputText = ref('')
 const messagesContainer = ref<HTMLDivElement | null>(null)
 const isGenerating = ref(false)
+const isOptimizingPrompt = ref(false)
 const convId = ref<number | null>(null)
+const previewImageUrl = ref('')
 
 const styles = ['Cinematic', 'Photorealistic', 'Anime', 'Abstract', 'Minimalist']
 const aspects = ['1:1', '16:9', '9:16', '4:3', '3:4']
@@ -74,6 +76,25 @@ watch(selectedCategory, () => {
 
 // ── History ─────────────────────────────────────────────
 const history = ref<HistoryItem[]>([])
+
+const previewImageName = computed(() => {
+  if (!previewImageUrl.value) return ''
+  return previewImageUrl.value.split('/').pop()?.split('?')[0] || 'image'
+})
+
+function openImagePreview(url: string) {
+  previewImageUrl.value = url
+}
+
+function closeImagePreview() {
+  previewImageUrl.value = ''
+}
+
+function handlePreviewKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    closeImagePreview()
+  }
+}
 
 async function loadHistory() {
   try {
@@ -201,6 +222,30 @@ async function sendImage(prompt: string) {
   } finally {
     isGenerating.value = false
     scrollToBottom()
+  }
+}
+
+async function optimizePrompt() {
+  const prompt = inputText.value.trim()
+  if (!prompt || isGenerating.value || isOptimizingPrompt.value) return
+
+  isOptimizingPrompt.value = true
+  try {
+    const resp = await api.post('/api/prompt/optimize', {
+      prompt,
+      model: 'MiniMax-M2.7',
+      target: selectedCategory.value,
+    })
+    const data = resp.data as { optimized_prompt: string }
+    if (data.optimized_prompt?.trim()) {
+      inputText.value = data.optimized_prompt.trim()
+      ElMessage.success('提示词已优化，可继续编辑或直接发送')
+      await nextTick()
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.detail || err.message || '提示词优化失败')
+  } finally {
+    isOptimizingPrompt.value = false
   }
 }
 
@@ -353,13 +398,6 @@ async function loadFromHistory(item: HistoryItem) {
   }
 }
 
-async function newConversation() {
-  messages.value = []
-  convId.value = null
-  conversationTitle.value = ''
-  isEditingTitle.value = false
-}
-
 async function goHome() {
   await router.push('/')
 }
@@ -385,6 +423,8 @@ async function saveAssistantResponse(msg: Message) {
 
 // ── Init ──────────────────────────────────────────────
 onMounted(async () => {
+  window.addEventListener('keydown', handlePreviewKeydown)
+
   // Load models
   try {
     console.log('[GenerateView] fetching /profiles/models...')
@@ -416,6 +456,10 @@ onMounted(async () => {
       await loadFromHistory(item)
     }
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handlePreviewKeydown)
 })
 </script>
 
@@ -568,10 +612,13 @@ onMounted(async () => {
               <!-- Image results -->
               <div v-else-if="msg.type === 'image' && msg.results?.length" class="msg-images">
                 <div class="images-grid" :class="msg.results.length === 1 ? 'single' : 'multi'">
-                  <div
+                  <button
                     v-for="(url, i) in msg.results"
                     :key="url"
-                    style="position:relative"
+                    class="image-thumb-button"
+                    type="button"
+                    :title="'查看原图 ' + (i + 1)"
+                    @click="openImagePreview(url)"
                   >
                     <img
                       :src="url + '?cache=' + Date.now()"
@@ -582,7 +629,7 @@ onMounted(async () => {
                     <span style="position:absolute;top:4px;left:4px;font-size:10px;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px">
                       {{ i+1 }}. {{ url.split('/').pop()?.split('?')[0] }}
                     </span>
-                  </div>
+                  </button>
                 </div>
                 <span class="result-model">{{ msg.model }}</span>
               </div>
@@ -638,6 +685,16 @@ onMounted(async () => {
           </select>
         </div>
         <div class="input-box">
+          <button
+            class="optimize-btn"
+            type="button"
+            title="AI 优化提示词"
+            @click="optimizePrompt"
+            :disabled="!inputText.trim() || isGenerating || isOptimizingPrompt"
+          >
+            <span v-if="isOptimizingPrompt" class="mini-spinner"></span>
+            <span v-else>AI</span>
+          </button>
           <textarea
             v-model="inputText"
             class="prompt-textarea"
@@ -648,7 +705,7 @@ onMounted(async () => {
           <button
             class="send-btn"
             @click="sendMessage"
-            :disabled="!inputText.trim() || isGenerating"
+            :disabled="!inputText.trim() || isGenerating || isOptimizingPrompt"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
               <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
@@ -657,6 +714,20 @@ onMounted(async () => {
         </div>
       </div>
     </main>
+
+    <Teleport to="body">
+      <div v-if="previewImageUrl" class="image-preview-overlay" @click.self="closeImagePreview">
+        <div class="image-preview-toolbar">
+          <span class="image-preview-title">{{ previewImageName }}</span>
+          <button class="image-preview-close" type="button" title="关闭预览" @click="closeImagePreview">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <img :src="previewImageUrl" :alt="previewImageName" class="image-preview-full" />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1140,22 +1211,108 @@ onMounted(async () => {
   max-width: 500px;
 }
 
+.image-thumb-button {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  text-align: left;
+}
+
 .result-image {
   width: 100%;
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.08);
   object-fit: cover;
-  cursor: pointer;
   transition: transform 0.15s;
+  display: block;
 }
 
-.result-image:hover {
+.image-thumb-button:hover .result-image {
   transform: scale(1.02);
+}
+
+.image-thumb-button:focus-visible {
+  outline: 2px solid rgba(0,217,255,0.75);
+  outline-offset: 3px;
+  border-radius: 12px;
 }
 
 .result-model {
   font-size: 11px;
   color: rgba(0,217,255,0.5);
+}
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 28px 32px;
+  background: rgba(3, 6, 12, 0.88);
+  backdrop-filter: blur(12px);
+}
+
+.image-preview-toolbar {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(760px, calc(100vw - 32px));
+  min-height: 40px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  background: rgba(10,10,15,0.82);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+}
+
+.image-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: rgba(255,255,255,0.78);
+}
+
+.image-preview-close {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.72);
+  cursor: pointer;
+}
+
+.image-preview-close:hover {
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+}
+
+.image-preview-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.image-preview-full {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 20px 80px rgba(0,0,0,0.48);
 }
 
 /* Audio */
@@ -1243,6 +1400,47 @@ onMounted(async () => {
 
 .prompt-textarea::placeholder {
   color: rgba(255,255,255,0.3);
+}
+
+.optimize-btn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0,217,255,0.24);
+  border-radius: 9px;
+  background: rgba(0,217,255,0.08);
+  color: #00d9ff;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.optimize-btn:hover:not(:disabled) {
+  background: rgba(0,217,255,0.14);
+  border-color: rgba(0,217,255,0.4);
+  box-shadow: 0 0 14px rgba(0,217,255,0.18);
+}
+
+.optimize-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.mini-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0,217,255,0.24);
+  border-top-color: #00d9ff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .send-btn {

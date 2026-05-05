@@ -140,12 +140,8 @@ onMounted(fetchProjects)
         >
           <!-- Click area -->
           <div class="card-main" @click="openProject(p.id)">
-            <div
-              class="card-thumb"
-              :style="p.thumb
-                ? 'background-image: url(' + p.thumb + '); background-size: cover; background-position: center;'
-                : 'background: #1a1a2e;'"
-            >
+            <div class="card-thumb" :class="{ empty: !p.thumb }">
+              <img v-if="p.thumb" :src="p.thumb" :alt="p.title" class="thumb-image" loading="lazy" />
               <div v-if="!p.thumb" class="thumb-placeholder">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                   <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -271,6 +267,14 @@ onMounted(fetchProjects)
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+.card-thumb.empty { background: #1a1a2e; }
+.thumb-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .thumb-placeholder { width: 48px; height: 48px; color: rgba(255,255,255,0.15); }
 .thumb-placeholder svg { width: 48px; height: 48px; }

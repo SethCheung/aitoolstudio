@@ -27,6 +27,8 @@ services:
     environment:
       - DATABASE_URL=sqlite:///./data/img_platform.db
       - IMAGES_DIR=/app/data/images
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
     restart: unless-stopped
 
   # Phase 3 添加 Redis 用于 Celery 任务队列

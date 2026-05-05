@@ -33,6 +33,56 @@ def _run_sync(cmd: list[str], timeout: int = 120) -> str:
     return result.stdout.strip()
 
 
+async def optimize_prompt(
+    prompt: str,
+    model: str = "MiniMax-M2.7",
+    target: str = "image",
+) -> dict:
+    """mmx text chat --message "..."; returns an OpenAI-like text payload."""
+    message = (
+        "Rewrite this user request into one polished prompt for AI generation. "
+        "Preserve the user's intent. Return only the optimized prompt, no markdown or explanation.\n\n"
+        f"Target: {target}\n"
+        f"User request: {prompt}"
+    )
+    system_prompt = (
+        "You are a prompt engineer. Return only the optimized generation prompt, "
+        "with no markdown, quotes, or explanation."
+    )
+    cmd = ["mmx", "text", "chat", "--system", system_prompt, "--message", message]
+    if model:
+        cmd.extend(["--model", model])
+
+    out = await asyncio.get_event_loop().run_in_executor(None, _run_sync, cmd, 120)
+    optimized = out.strip()
+    try:
+        data = json.loads(optimized)
+        content = data.get("content", "")
+        if isinstance(content, list):
+            text_parts = [
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            optimized = "\n".join(part for part in text_parts if part).strip()
+        elif isinstance(content, str):
+            optimized = content.strip()
+    except json.JSONDecodeError:
+        pass
+
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": optimized,
+                    "role": "assistant",
+                }
+            }
+        ],
+        "base_resp": {"status_code": 0, "status_msg": "success"},
+    }
+
+
 async def generate_image(
     prompt: str,
     model: str = "image-01",

@@ -78,7 +78,7 @@ async def generate(
                 emotion=req.emotion,
                 response_format=req.response_format,
                 api_key=profile["api_key"],
-                base_url=profile.get("base_url", "https://api.minimaxi.com"),
+                base_url=profile.get("base_url", "https://api.minimax.io"),
             )
     except Exception:
         logger.exception("Voice generation failed")

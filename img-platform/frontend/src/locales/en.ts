@@ -21,7 +21,7 @@ export default {
     userMessage: 'You',
     noHistory: 'No history yet',
     send: 'Send',
-    generating: 'Generating...',
+    generatingShort: 'Generating...',
     imageResult: 'Image',
     voiceResult: 'Voice',
     videoResult: 'Video',

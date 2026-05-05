@@ -44,7 +44,7 @@ async def generate(
                 model=req.model,
                 lyrics=req.lyrics,
                 api_key=profile["api_key"],
-                base_url=profile.get("base_url", "https://api.minimaxi.com"),
+                base_url=profile.get("base_url", "https://api.minimax.io"),
             )
     except Exception:
         logger.exception("Music generation failed")

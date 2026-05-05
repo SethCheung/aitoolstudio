@@ -7,7 +7,52 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_API_KEY = os.getenv("MINIMAX_API_KEY", "")
-DEFAULT_BASE_URL = "https://api.minimaxi.com"
+DEFAULT_BASE_URL = "https://api.minimax.io"
+
+
+async def optimize_prompt(
+    prompt: str,
+    model: str = "MiniMax-M2.7",
+    target: str = "image",
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> dict:
+    """调用 MiniMax 文本模型，将用户输入扩写为更适合生成的 prompt"""
+    key = api_key or DEFAULT_API_KEY
+    url = base_url or DEFAULT_BASE_URL
+    if not key:
+        raise ValueError("MINIMAX_API_KEY not configured")
+
+    system_prompt = (
+        "You are a prompt engineer for an internal creative AI platform. "
+        "Rewrite the user's short request into one polished prompt for the target generation model. "
+        "Preserve the user's intent and concrete details. Do not add unsafe, branded, or unrelated content. "
+        "Return only the optimized prompt, with no headings, quotes, markdown, or explanations."
+    )
+    user_prompt = (
+        f"Target generation type: {target}\n"
+        f"User request: {prompt}\n\n"
+        "Write a concise but vivid generation prompt. Include subject, composition, style, lighting, "
+        "color palette, mood, and useful production details when they fit the request."
+    )
+
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        resp = await client.post(
+            f"{url}/v1/text/chatcompletion_v2",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "name": "prompt_engineer", "content": system_prompt},
+                    {"role": "user", "name": "user", "content": user_prompt},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
 async def generate_image(

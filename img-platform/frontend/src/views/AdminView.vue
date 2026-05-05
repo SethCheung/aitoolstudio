@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import axios from 'axios'
+import api from '@/services/api'
 
 interface Profile {
   name: string
@@ -11,7 +11,7 @@ interface Profile {
   models: Record<string, string[]>
 }
 
-type Category = 'all' | 'image' | 'voice' | 'video' | 'music'
+type Category = 'all' | 'image' | 'voice' | 'video' | 'music' | 'text'
 
 const categories: Array<{ key: Category; label: string; icon: string }> = [
   { key: 'all', label: 'All', icon: 'A' },
@@ -19,6 +19,7 @@ const categories: Array<{ key: Category; label: string; icon: string }> = [
   { key: 'voice', label: 'Voice', icon: 'V' },
   { key: 'video', label: 'Video', icon: '▶' },
   { key: 'music', label: 'Music', icon: '♪' },
+  { key: 'text', label: 'Text', icon: 'T' },
 ]
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -29,6 +30,7 @@ const modelCategories: Record<Exclude<Category, 'all'>, string[]> = {
   voice: ['speech-02-hd', 'speech-02'],
   video: ['hailuo-video-01'],
   music: ['music-01'],
+  text: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
 }
 
 const profiles = ref<Profile[]>([])
@@ -42,7 +44,7 @@ const formError = ref('')
 const form = ref({
   name: '',
   api_key: '',
-  base_url: 'https://api.minimaxi.com',
+  base_url: 'https://api.minimax.io',
   enabled: true,
   priority: 1,
   models: {
@@ -50,6 +52,7 @@ const form = ref({
     voice: [] as string[],
     video: [] as string[],
     music: [] as string[],
+    text: ['MiniMax-M2.7'],
   } as Record<string, string[]>,
 })
 
@@ -76,7 +79,7 @@ async function fetchProfiles() {
   isLoading.value = true
   loadError.value = ''
   try {
-    const response = await axios.get('/api/profiles')
+    const response = await api.get('/api/profiles')
     const data = response.data
     profiles.value = Array.isArray(data) ? data : Object.values(data || {})
     if (!selectedName.value && profiles.value.length) selectedName.value = profiles.value[0].name
@@ -88,7 +91,7 @@ async function fetchProfiles() {
 }
 
 function emptyModels() {
-  return { image: [], voice: [], video: [], music: [] } as Record<string, string[]>
+  return { image: [], voice: [], video: [], music: [], text: [] } as Record<string, string[]>
 }
 
 function openAdd() {
@@ -96,10 +99,10 @@ function openAdd() {
   form.value = {
     name: '',
     api_key: '',
-    base_url: 'https://api.minimaxi.com',
+    base_url: 'https://api.minimax.io',
     enabled: true,
     priority: Math.max(1, normalizedProfiles.value.length + 1),
-    models: { ...emptyModels(), image: ['image-01'] },
+    models: { ...emptyModels(), image: ['image-01'], text: ['MiniMax-M2.7'] },
   }
   formError.value = ''
   showForm.value = true
@@ -110,7 +113,7 @@ function openEdit(profile: Profile) {
   form.value = {
     name: profile.name,
     api_key: '',
-    base_url: profile.base_url || 'https://api.minimaxi.com',
+    base_url: profile.base_url || 'https://api.minimax.io',
     enabled: profile.enabled,
     priority: profile.priority,
     models: { ...emptyModels(), ...(profile.models || {}) },
@@ -137,9 +140,9 @@ async function saveProfile() {
 
   try {
     if (editingProfile.value) {
-      await axios.put(`/api/profiles/${editingProfile.value.name}`, payload)
+      await api.put(`/api/profiles/${editingProfile.value.name}`, payload)
     } else {
-      await axios.post('/api/profiles', payload)
+      await api.post('/api/profiles', payload)
     }
     showForm.value = false
     await fetchProfiles()
@@ -151,13 +154,13 @@ async function saveProfile() {
 
 async function toggleProfile(profile: Profile) {
   const action = profile.enabled ? 'disable' : 'enable'
-  await axios.post(`/api/profiles/${profile.name}/${action}`)
+  await api.post(`/api/profiles/${profile.name}/${action}`)
   await fetchProfiles()
 }
 
 async function deleteProfile(profile: Profile) {
   if (!confirm(`Delete profile "${profile.name}"?`)) return
-  await axios.delete(`/api/profiles/${profile.name}`)
+  await api.delete(`/api/profiles/${profile.name}`)
   if (selectedName.value === profile.name) selectedName.value = ''
   await fetchProfiles()
 }
@@ -284,7 +287,7 @@ onMounted(fetchProfiles)
         </label>
         <label>
           Base URL
-          <input v-model="form.base_url" placeholder="https://api.minimaxi.com" />
+          <input v-model="form.base_url" placeholder="https://api.minimax.io" />
         </label>
         <label>
           API Key

@@ -17,6 +17,7 @@ from api.image import router as image_router
 from api.voice import router as voice_router
 from api.video import router as video_router
 from api.music import router as music_router
+from api.prompt import router as prompt_router
 from api.generation import router as generation_router
 from api.conversation import router as conversation_router
 from models.database import init_db
@@ -61,6 +62,7 @@ app.include_router(image_router)
 app.include_router(voice_router)
 app.include_router(video_router)
 app.include_router(music_router)
+app.include_router(prompt_router)
 app.include_router(generation_router)
 app.include_router(profiles_router)
 

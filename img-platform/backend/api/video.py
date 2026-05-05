@@ -45,7 +45,7 @@ async def generate(
                 duration=req.duration,
                 resolution=req.resolution,
                 api_key=profile["api_key"],
-                base_url=profile.get("base_url", "https://api.minimaxi.com"),
+                base_url=profile.get("base_url", "https://api.minimax.io"),
             )
     except Exception:
         logger.exception("Video generation failed")

@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from api.auth import get_current_user, require_admin
+from models.user import User
 from services.profile_manager import (
     list_profiles,
     get_profile,
@@ -20,7 +22,7 @@ router = APIRouter(prefix="/api/profiles", tags=["Profile 管理"])
 class ProfileCreateRequest(BaseModel):
     name: str
     api_key: str
-    base_url: str = "https://api.minimaxi.com"
+    base_url: str = "https://api.minimax.io"
     enabled: bool = True
     priority: int = 99
     daily_quota: Optional[int] = None
@@ -49,7 +51,7 @@ def _mask_key(key: str) -> str:
 
 
 @router.get("")
-async def list_all():
+async def list_all(_: User = Depends(require_admin)):
     """列出所有 profiles（api_key 脱敏）"""
     raw = list_profiles()
     # list_profiles already strips api_key, so we just return raw
@@ -57,13 +59,13 @@ async def list_all():
 
 
 @router.get("/models")
-async def available_models():
+async def available_models(_: User = Depends(get_current_user)):
     """获取所有可用模型（按 category 分组，带来源标签）"""
     return get_all_models()
 
 
 @router.get("/{name}")
-async def get(name: str):
+async def get(name: str, _: User = Depends(require_admin)):
     """获取指定 profile（含 api_key）"""
     profile = get_profile(name)
     if not profile:
@@ -72,7 +74,7 @@ async def get(name: str):
 
 
 @router.post("")
-async def create(req: ProfileCreateRequest):
+async def create(req: ProfileCreateRequest, _: User = Depends(require_admin)):
     """添加新 profile"""
     try:
         profile = add_profile(req.name, {
@@ -92,7 +94,7 @@ async def create(req: ProfileCreateRequest):
 
 
 @router.put("/{name}")
-async def update(name: str, req: ProfileUpdateRequest):
+async def update(name: str, req: ProfileUpdateRequest, _: User = Depends(require_admin)):
     """更新 profile"""
     current = get_profile(name)
     if not current:
@@ -110,7 +112,7 @@ async def update(name: str, req: ProfileUpdateRequest):
 
 
 @router.delete("/{name}")
-async def remove(name: str):
+async def remove(name: str, _: User = Depends(require_admin)):
     """删除 profile"""
     if not delete_profile(name):
         raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
@@ -118,7 +120,7 @@ async def remove(name: str):
 
 
 @router.post("/{name}/enable")
-async def enable(name: str):
+async def enable(name: str, _: User = Depends(require_admin)):
     """启用 profile"""
     profile = set_enabled(name, True)
     if not profile:
@@ -127,7 +129,7 @@ async def enable(name: str):
 
 
 @router.post("/{name}/disable")
-async def disable(name: str):
+async def disable(name: str, _: User = Depends(require_admin)):
     """禁用 profile"""
     profile = set_enabled(name, False)
     if not profile:

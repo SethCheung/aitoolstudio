@@ -51,6 +51,18 @@ class AddMessageRequest(BaseModel):
     task_id: str | None = None
 
 
+def _parse_results(results_json: str | None) -> list[str]:
+    if not results_json:
+        return []
+    try:
+        results = json.loads(results_json)
+    except Exception:
+        return []
+    if not isinstance(results, list):
+        return []
+    return [item for item in results if isinstance(item, str) and item]
+
+
 @router.get("", response_model=list[ConversationListItem])
 async def list_conversations(
     db: Session = Depends(get_db),
@@ -67,18 +79,21 @@ async def list_conversations(
     for c in convs:
         first_msg = c.messages[0] if c.messages else None
         thumb = None
-        conv_type = "text"
+        conv_type = "image"
         prompt = c.title
         if first_msg:
             prompt = first_msg.content[:60]
-            if first_msg.type in ("image", "voice", "video", "music") and first_msg.results:
-                try:
-                    results = json.loads(first_msg.results)
-                    if isinstance(results, list) and results:
-                        thumb = results[0]
-                except Exception:
-                    pass
             conv_type = first_msg.type if first_msg.type != "text" else "image"
+
+        for message in c.messages:
+            if message.type != "image":
+                continue
+            image_results = _parse_results(message.results)
+            if image_results:
+                thumb = image_results[0]
+                conv_type = "image"
+                break
+
         result.append(
             ConversationListItem(
                 id=c.id,

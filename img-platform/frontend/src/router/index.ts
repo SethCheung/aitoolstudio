@@ -31,15 +31,27 @@ const router = createRouter({
       path: '/admin',
       name: 'admin',
       component: () => import('../views/AdminView.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
   ],
 })
+
+function tokenPayload(token: string): { is_admin?: boolean } | null {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+  } catch {
+    return null
+  }
+}
 
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('token')
   if (to.meta.requiresAuth && !token) {
     next('/login')
+  } else if (to.meta.requiresAdmin && (!token || !tokenPayload(token)?.is_admin)) {
+    next('/')
   } else {
     next()
   }

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.security import hash_password
+from api.auth import require_admin
 from models.database import get_db
 from models.user import User
 
@@ -20,12 +21,12 @@ class AdminUserRequest(BaseModel):
 
 @router.get("/admin", response_class=HTMLResponse)
 @router.get("/admin/", response_class=HTMLResponse)
-async def admin_page():
+async def admin_page(_: User = Depends(require_admin)):
     return HTMLResponse(ADMIN_HTML)
 
 
 @router.get("/api/admin/users")
-async def list_users(db: Session = Depends(get_db)):
+async def list_users(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     users = db.query(User).order_by(User.id.asc()).all()
     return [
         {
@@ -40,7 +41,11 @@ async def list_users(db: Session = Depends(get_db)):
 
 
 @router.post("/api/admin/users")
-async def create_user(req: AdminUserRequest, db: Session = Depends(get_db)):
+async def create_user(
+    req: AdminUserRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     username = req.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username is required")
@@ -57,7 +62,12 @@ async def create_user(req: AdminUserRequest, db: Session = Depends(get_db)):
 
 
 @router.put("/api/admin/users/{user_id}")
-async def update_user(user_id: int, req: AdminUserRequest, db: Session = Depends(get_db)):
+async def update_user(
+    user_id: int,
+    req: AdminUserRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -81,7 +91,11 @@ async def update_user(user_id: int, req: AdminUserRequest, db: Session = Depends
 
 
 @router.delete("/api/admin/users/{user_id}")
-async def delete_user(user_id: int, db: Session = Depends(get_db)):
+async def delete_user(
+    user_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -218,7 +232,7 @@ ADMIN_HTML = """<!doctype html>
       </div>
       <div class="grid2">
         <label>Name<input id="name" required placeholder="MiniMax" /></label>
-        <label>Base URL<input id="base_url" required placeholder="https://api.minimaxi.com" /></label>
+        <label>Base URL<input id="base_url" required placeholder="https://api.minimax.io" /></label>
       </div>
       <div class="grid2">
         <label>Daily Quota<input id="daily_quota" type="number" min="0" placeholder="1000" /></label>
@@ -435,7 +449,7 @@ ADMIN_HTML = """<!doctype html>
       $('formTitle').textContent = editing ? 'Edit API' : 'Add API';
       $('name').disabled = !!editing;
       $('name').value = editing?.name || '';
-      $('base_url').value = editing?.base_url || 'https://api.minimaxi.com';
+      $('base_url').value = editing?.base_url || 'https://api.minimax.io';
       $('api_key').value = '';
       $('api_key').placeholder = editing ? 'Leave blank to keep current key' : 'sk-...';
       $('daily_quota').value = editing?.daily_quota ?? '';

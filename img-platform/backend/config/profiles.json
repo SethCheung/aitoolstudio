@@ -3,7 +3,7 @@
     "MiniMax-CLI": {
       "name": "MiniMax-CLI",
       "auth_type": "cli",
-      "base_url": "https://api.minimaxi.com",
+      "base_url": "https://api.minimax.io",
       "enabled": true,
       "priority": 1,
       "daily_quota": null,
@@ -23,6 +23,10 @@
         ],
         "music": [
           "music-01"
+        ],
+        "text": [
+          "MiniMax-M2.7",
+          "MiniMax-M2.7-highspeed"
         ]
       }
     }

@@ -5,6 +5,43 @@
 
 ---
 
+## 当前实现快照（2026-05-05）
+
+当前代码不是严格按原 Phase 文件名落地，后续开发必须以本节为准，别照着旧文件名硬找。
+
+**已实现**
+- FastAPI 后端、Vue 3 前端、SQLite 数据库初始化
+- JWT 登录认证：`POST /api/auth/login`、`GET /api/auth/me`
+- 管理员权限依赖：`require_admin`
+- `/api/admin/users` 用户管理接口已加管理员鉴权
+- `/api/profiles` 管理接口已加管理员鉴权；`/api/profiles/models` 要求已登录用户
+- MiniMax Profile 路由：HTTP API / CLI profile 管理
+- 图片、语音、视频、音乐生成入口：`api/image.py`、`api/voice.py`、`api/video.py`、`api/music.py`
+- 提示词优化入口：`api/prompt.py`，显式调用文本模型扩写 prompt 后回填前端输入框
+- 项目首页：`frontend/src/views/HomeView.vue`，对话有图片结果时显示缩略图
+- 生成页面：`frontend/src/views/GenerateView.vue`，支持多类别生成、历史恢复、图片点击同页原图预览
+- Vue 管理页：`frontend/src/views/AdminView.vue`
+- Docker Compose 基础前后端编排，后端要求 `JWT_SECRET_KEY`
+- `.gitignore` 已补充运行时数据、密钥文件、构建产物忽略规则
+
+**仍未完成**
+- ComfyUI 工作流上传、队列、任务状态、结果归档
+- Celery / Redis 任务队列
+- Prompt 优化、图像理解、自动标签
+- 提示词库、收藏、批量下载
+- GPU 监控和系统日志
+- Nginx 反向代理与生产部署脚本
+- 自动化测试和 CI
+
+**当前最高优先级技术债**
+- `/minimax-output` 仍是公开静态目录，生产前必须改为带鉴权的文件代理
+- `profiles.json` 已被 git 跟踪，不适合继续承载真实 API Key
+- `conversation_messages.results` 仍是 `String(500)`，应改为 `Text` 或 JSON
+- `backend/api/admin.py` 内联 HTML Admin 页应删除或废弃，管理入口统一到 Vue `/admin`
+- `DATABASE_URL` 已环境化，但 `create_engine` 仍无条件传 SQLite 专用 `connect_args`
+
+---
+
 ## Phase 1: 项目骨架（Vue 3 + FastAPI + SQLite）
 
 **交付内容**：
@@ -27,7 +64,7 @@
 - `docker-compose.yml` — Docker Compose 基础配置
 
 **验收标准**：
-- 前端 `npm run dev` 可启动，显示空白页面 + Element Plus 组件测试
+- 前端 `npm run dev` 可启动，访问 `http://localhost:5173`
 - 后端 `uvicorn main:app --reload` 可启动，`/docs` 显示 Swagger UI
 - Docker Compose 可启动前后端容器
 
@@ -37,9 +74,9 @@
 
 **交付内容**：
 - users 数据表（id, username, password_hash, is_admin, created_at）
-- JWT Token 认证机制（access_token + refresh_token）
+- JWT Token 认证机制（当前为 access_token；refresh_token 未实现）
 - 登录 API（POST /api/auth/login）— 返回 JWT Token
-- 用户信息 API（GET /api/users/me）— 获取当前用户信息
+- 用户信息 API（GET /api/auth/me）— 获取当前用户信息
 - 前端登录页面（用户名 + 密码输入框）
 - 认证中间件（保护需要登录的 API 路由）
 - 前端 Auth Store（Pinia 状态管理，存储 Token 和用户信息）
@@ -52,6 +89,7 @@
 - `img-platform/frontend/src/stores/auth.ts` — 认证状态管理
 - `img-platform/frontend/src/views/LoginView.vue` — 登录页面
 - `img-platform/frontend/src/router/index.ts` — 路由守卫（需要登录的路由）
+- `img-platform/backend/scripts/create_admin.py` — 创建初始管理员账号
 
 **验收标准**：
 - 管理员可通过脚本创建初始账号
@@ -127,19 +165,17 @@
 - 侧边栏组件（可折叠：我的作品、提示词库、快捷操作）
 
 **关键文件**：
-- `img-platform/frontend/src/views/ChatView.vue` — 对话式生图主页面
-- `img-platform/frontend/src/components/chat/message-bubble.vue` — 消息气泡
-- `img-platform/frontend/src/components/chat/input-area.vue` — 输入区
-- `img-platform/frontend/src/components/chat/image-grid.vue` — 图像网格
-- `img-platform/frontend/src/components/chat/loading-progress.vue` — 加载进度
-- `img-platform/frontend/src/components/layout/sidebar.vue` — 侧边栏
-- `img-platform/frontend/src/composables/useChat.ts` — 聊天逻辑封装
+- `img-platform/frontend/src/views/GenerateView.vue` — 当前对话式生成主页面
+- `img-platform/frontend/src/views/HomeView.vue` — 项目首页和生成缩略图入口
+- `img-platform/frontend/src/services/api.ts` — Axios API 封装
+- 后续如继续扩展，应拆出 `components/chat/*` 和 `composables/useChat.ts`
 
 **验收标准**：
 - 用户可输入描述、选择工作流、点击发送
 - 等待时显示进度条和预估时间
 - 生成完成后显示图像网格和操作按钮
-- AI 优化按钮可调用 MiniMax 扩写 prompt
+- 图片结果可点击同页放大查看原图
+- AI 优化按钮可调用文本模型扩写 prompt，优化结果回填输入框
 
 ---
 
@@ -180,22 +216,18 @@
 - 系统设置页面（GPU 监控：温度/显存占用、生成队列管理、系统日志）
 
 **关键文件**：
-- `img-platform/frontend/src/views/admin/AdminDashboard.vue` — 管理员仪表盘
-- `img-platform/frontend/src/views/admin/UserManagement.vue` — 用户管理
-- `img-platform/frontend/src/views/admin/WorkflowManagement.vue` — 工作流配置
-- `img-platform/frontend/src/views/admin/QuotaManagement.vue` — API 配额管理
-- `img-platform/frontend/src/views/admin/StatsView.vue` — 使用统计
-- `img-platform/frontend/src/views/admin/SystemSettings.vue` — 系统设置
+- `img-platform/frontend/src/views/AdminView.vue` — 当前管理员 Profile 管理页
 - `img-platform/backend/api/admin.py` — 管理员 API（用户 CRUD、工作流 CRUD、配额设置）
-- `img-platform/backend/api/stats.py` — 统计 API（聚合查询）
-- `img-platform/backend/services/gpu_monitor.py` — GPU 监控服务（温度、显存）
+- `img-platform/backend/api/profiles.py` — Profile 管理 API
+- 后续如继续扩展，应拆出 `frontend/src/views/admin/*`
 
 **验收标准**：
 - 仅 admin 角色可访问管理员后台
 - 可创建/禁用用户账号
-- 可上传和管理 ComfyUI 工作流
-- 可查看 MiniMax token 使用统计
-- GPU 温度和显存占用实时显示
+- 可管理 MiniMax Profile
+- 可上传和管理 ComfyUI 工作流（未完成）
+- 可查看 MiniMax token 使用统计（未完成）
+- GPU 温度和显存占用实时显示（未完成）
 
 ---
 
@@ -230,12 +262,12 @@
 
 | 层级 | 技术 | 版本 | 说明 |
 |------|------|------|------|
-| **前端框架** | Vue 3 + TypeScript | 3.4.x | 响应式 UI，类型安全 |
-| **UI 组件库** | Element Plus | 2.4.x | 完整的后台组件 |
+| **前端框架** | Vue 3 + TypeScript | 3.5.x / 6.x | 响应式 UI，类型安全 |
+| **UI 组件库** | Element Plus | 2.13.x | 完整的后台组件 |
 | **CSS 框架** | Tailwind CSS | 3.4.x | 工具类快速开发 |
-| **状态管理** | Pinia | 2.1.x | Vue 3 官方推荐 |
-| **HTTP 客户端** | Axios | 1.6.x | API 调用封装 |
-| **构建工具** | Vite | 5.0.x | 快速开发和打包 |
+| **状态管理** | Pinia | 3.x | Vue 状态管理 |
+| **HTTP 客户端** | Axios | 1.15.x | API 调用封装 |
+| **构建工具** | Vite | 8.x | 快速开发和打包 |
 | **后端框架** | FastAPI | 0.109.x | Python 异步 API，自动文档 |
 | **ORM** | SQLAlchemy | 2.0.x | Python 数据库 ORM |
 | **数据库** | SQLite | 3.x | 轻量级，无需额外服务 |
@@ -244,7 +276,7 @@
 | **AI API** | MiniMax API | latest | M2.7 文本、视觉模型、image-01 生图 |
 | **认证** | JWT (PyJWT) | latest | Token-based 认证 |
 | **部署** | Docker + Docker Compose | latest | 容器化一键部署 |
-| **包管理** | pnpm (前端) / pip (后端) | latest | 快速、磁盘高效 |
+| **包管理** | npm (前端) / pip (后端) | latest | 当前仓库使用 npm lockfile |
 
 ---
 
@@ -253,6 +285,8 @@
 | 表名 | 所属 Phase | 用途 |
 |------|-----------|------|
 | `users` | Phase 2 | 用户账号（id, username, password_hash, is_admin, created_at） |
+| `conversations` | Phase 5 | 项目/对话容器（id, user_id, title, created_at） |
+| `conversation_messages` | Phase 5 | 对话消息与结果 URL（role, type, content, results, model, task_id） |
 | `workflows` | Phase 3 | ComfyUI 工作流配置（id, name, description, workflow_json, is_enabled） |
 | `generations` | Phase 3 | 生图历史记录（id, user_id, workflow_id, prompt, image_path, parameters） |
 | `api_quotas` | Phase 4 | API 配额追踪（id, user_id, model_type, used_tokens, reset_at） |
@@ -265,7 +299,7 @@
 - 每完成一个 Phase 执行四步走：Code Review → 测试完整性 → 编译验证 → 功能测试
 - 四步走全部通过后才能 commit
 - Commit message 格式：`phase-N: 简要描述`
-- 包管理器：pnpm（前端）/ pip（后端）
+- 包管理器：npm（前端）/ pip（后端）
 - Python 版本：3.10+
 - Node.js 版本：18.x LTS
 
@@ -278,4 +312,6 @@
 | Phase 3 | ComfyUI API 版本兼容性可能变化 | 封装客户端层，隔离变化；定期更新验证 |
 | Phase 4 | MiniMax API 需要网络连通性（可能需要代理） | 配置文件中预留代理设置；错误处理友好提示 |
 | Phase 7 | GPU 监控需要 NVIDIA 驱动和 nvidia-smi | Docker 配置中启用 GPU 透传；文档中说明前置要求 |
+| 当前版本 | `/minimax-output` 静态目录无鉴权 | 改成 `/api/files/*` 受控文件代理 |
+| 当前版本 | Profile 配置可能携带 API Key 且文件已被 git 跟踪 | 改为环境变量引用或加密存储，并从 git 跟踪中移除 |
 | Phase 8 | RTX 4090 显存有限（24GB），高并发可能 OOM | Celery 队列限制并发任务数；显存不足时排队等待 |

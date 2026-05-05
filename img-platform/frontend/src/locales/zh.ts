@@ -21,7 +21,7 @@ export default {
     userMessage: '你',
     noHistory: '暂无历史',
     send: '发送',
-    generating: '生成中...',
+    generatingShort: '生成中...',
     imageResult: '图片',
     voiceResult: '语音',
     videoResult: '视频',

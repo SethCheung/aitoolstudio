@@ -1,7 +1,15 @@
+import os
+
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, func
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "sqlite:///./img_platform.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./img_platform.db")
+
+if DATABASE_URL.startswith("sqlite:///") and DATABASE_URL != "sqlite:///:memory:":
+    sqlite_path = DATABASE_URL.removeprefix("sqlite:///")
+    sqlite_dir = os.path.dirname(sqlite_path)
+    if sqlite_dir:
+        os.makedirs(sqlite_dir, exist_ok=True)
 
 engine = create_engine(
     DATABASE_URL, 

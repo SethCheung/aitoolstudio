@@ -4,6 +4,8 @@
 > 评估对象：`/img-platform`（FastAPI 后端 + Vue 3 前端 + 文件 Profiles 配置）
 > 代码量：前端视图 ~3.3k 行 / 后端 API+Services ~2k 行
 
+> **状态说明（2026-05-05）**：本报告是历史评估快照，部分结论已过期。Admin/Profile 鉴权、前端构建错误、`DATABASE_URL` 环境化、项目缩略图、Generate 原图预览等已在后续迭代中处理。仍有效的高优先级风险包括：`/minimax-output` 静态目录公开、Profile 配置文件可能承载 API Key、缺少测试和迁移体系。最新安全清单见仓库根目录 `SECURITY.md`。
+
 ---
 
 ## 一、总评（TL;DR）

@@ -1,0 +1,39 @@
+.DS_Store
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+img-platform/backend/config/profiles.json
+img-platform/config/profiles.json
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+venv/
+.venv/
+img-platform/backend/venv/
+
+# Node
+node_modules/
+dist/
+build/
+img-platform/frontend/node_modules/
+img-platform/frontend/dist/
+
+# Runtime data and generated files
+*.db
+*.sqlite
+*.sqlite3
+data/
+uploads/
+minimax-output/
+img-platform/backend/uploads/
+img-platform/backend/*.jpg
+img-platform/backend/*.png
+img-platform/backend/*.webp
