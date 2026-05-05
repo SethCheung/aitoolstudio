@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -19,6 +19,9 @@ interface ProjectItem {
 
 const projects = ref<ProjectItem[]>([])
 const loading = ref(false)
+const searchQuery = ref('')
+const sortMode = ref<'recent' | 'oldest' | 'name'>('recent')
+const viewMode = ref<'grid' | 'list'>('grid')
 
 // Rename modal
 const renameVisible = ref(false)
@@ -52,6 +55,22 @@ function timeAgo(dateStr: string): string {
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'
   return Math.floor(diff / 86400) + 'd ago'
 }
+
+const filteredProjects = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  const list = projects.value.filter((project) => {
+    if (!query) return true
+    return [project.title, project.prompt, project.type]
+      .some((value) => value.toLowerCase().includes(query))
+  })
+
+  return [...list].sort((a, b) => {
+    if (sortMode.value === 'name') return a.title.localeCompare(b.title)
+    const aTime = new Date(a.created_at).getTime()
+    const bTime = new Date(b.created_at).getTime()
+    return sortMode.value === 'oldest' ? aTime - bTime : bTime - aTime
+  })
+})
 
 function openProject(id: number) {
   router.push({ path: '/generate', query: { convId: String(id) } })
@@ -106,7 +125,6 @@ onMounted(fetchProjects)
 
 <template>
   <div class="home-page">
-    <!-- Header -->
     <header class="top-header">
       <div class="header-logo">
         <svg class="logo-icon" viewBox="0 0 24 24" fill="currentColor">
@@ -114,27 +132,76 @@ onMounted(fetchProjects)
         </svg>
         <span class="logo-text">{{ t('generate.brand') }}</span>
       </div>
+
+      <label class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="11" cy="11" r="7"/>
+          <path d="M20 20l-3.5-3.5"/>
+        </svg>
+        <input v-model="searchQuery" type="search" placeholder="搜索项目、提示词或标签..." />
+        <span>⌘ K</span>
+      </label>
+
+      <div class="header-actions">
+        <button class="new-top-btn" type="button" @click="newProject">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          新建项目
+        </button>
+      </div>
     </header>
 
-    <!-- Projects Grid -->
     <main class="projects-main">
+      <section class="projects-toolbar">
+        <div>
+          <h1>Recent Projects</h1>
+          <p>共 {{ filteredProjects.length }} 个项目</p>
+        </div>
+
+        <div class="toolbar-actions">
+          <select v-model="sortMode" class="toolbar-select">
+            <option value="recent">最近更新</option>
+            <option value="oldest">最早创建</option>
+            <option value="name">项目名称</option>
+          </select>
+          <button class="filter-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+              <path d="M4 5h16l-6 7v5l-4 2v-7L4 5z"/>
+            </svg>
+            筛选
+          </button>
+          <div class="view-toggle">
+            <button type="button" :class="{ active: viewMode === 'grid' }" title="网格视图" @click="viewMode = 'grid'">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="6" height="6"/>
+                <rect x="14" y="4" width="6" height="6"/>
+                <rect x="4" y="14" width="6" height="6"/>
+                <rect x="14" y="14" width="6" height="6"/>
+              </svg>
+            </button>
+            <button type="button" :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
       <div v-if="loading" class="loading-state">
         <span>{{ t('common.loading') }}</span>
       </div>
 
-      <div v-else-if="projects.length === 0" class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
-          <rect x="3" y="3" width="18" height="18" rx="2"/>
-          <circle cx="8.5" cy="8.5" r="1.5"/>
-          <polyline points="21 15 16 10 5 21"/>
-        </svg>
-        <p class="empty-title">No projects yet</p>
-        <p class="empty-sub">Click the + button below to create your first project.</p>
-      </div>
+      <div v-else class="projects-grid" :class="{ list: viewMode === 'list' }">
+        <button class="create-card" type="button" @click="newProject">
+          <span class="create-plus">+</span>
+          <strong>新建项目</strong>
+          <small>创建空白画布或使用模板开始</small>
+        </button>
 
-      <div v-else class="projects-grid">
         <div
-          v-for="p in projects"
+          v-for="p in filteredProjects"
           :key="p.id"
           class="project-card"
         >
@@ -152,17 +219,13 @@ onMounted(fetchProjects)
             </div>
             <div class="card-body">
               <p class="card-title">{{ p.title }}</p>
-              <p class="card-meta">{{ timeAgo(p.created_at) }} · {{ p.type }}</p>
+              <p class="card-meta">{{ timeAgo(p.created_at) }}</p>
             </div>
           </div>
 
-          <!-- Hover Actions -->
           <div class="card-actions">
             <button class="card-action-btn" @click="startRename(p, $event)" title="重命名">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
+              ···
             </button>
             <button class="card-action-btn danger" @click="deleteProject(p, $event)" title="删除">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
@@ -174,13 +237,6 @@ onMounted(fetchProjects)
         </div>
       </div>
     </main>
-
-    <!-- Floating Add Button -->
-    <button class="fab" @click="newProject" title="New Project">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <path d="M12 5v14M5 12h14"/>
-      </svg>
-    </button>
 
     <!-- Rename Modal -->
     <Teleport to="body">
@@ -207,32 +263,149 @@ onMounted(fetchProjects)
 <style scoped>
 .home-page {
   min-height: 100vh;
-  background: #0a0a0f;
+  background:
+    radial-gradient(circle at 50% -12%, rgba(0, 217, 255, 0.12), transparent 34%),
+    linear-gradient(180deg, #03060b 0%, #050912 45%, #03060b 100%);
   color: white;
   font-family: 'Inter', -apple-system, sans-serif;
   display: flex;
   flex-direction: column;
 }
 .top-header {
-  height: 56px;
-  display: flex;
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(320px, 520px) minmax(300px, 1fr);
+  gap: 20px;
   align-items: center;
-  padding: 0 24px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 0 28px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: rgba(3, 6, 12, 0.74);
+  backdrop-filter: blur(18px);
   flex-shrink: 0;
 }
-.header-logo { display: flex; align-items: center; gap: 10px; }
-.logo-icon { width: 22px; height: 22px; color: #00d2ff; }
-.logo-text { font-size: 15px; font-weight: 600; color: white; }
-
+.header-logo { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.logo-icon { width: 21px; height: 21px; color: #00cfff; filter: drop-shadow(0 0 9px rgba(0,207,255,.46)); }
+.logo-text { font-size: 16px; font-weight: 730; color: white; white-space: nowrap; }
+.search-box {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 10px;
+  background: rgba(5, 8, 14, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.search-box svg { width: 18px; height: 18px; color: rgba(255,255,255,0.58); flex-shrink: 0; }
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 13px;
+}
+.search-box input::placeholder { color: rgba(255,255,255,0.46); }
+.search-box span { color: rgba(255,255,255,0.56); font-size: 12px; white-space: nowrap; }
+.header-actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.new-top-btn {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 17px;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #05c8ff, #00a9ef);
+  color: #00131c;
+  font-size: 13px;
+  font-weight: 760;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 178, 255, 0.24);
+}
+.new-top-btn svg { width: 16px; height: 16px; }
 .projects-main {
   flex: 1;
-  padding: 32px 24px 100px;
-  max-width: 1200px;
+  padding: 28px 28px 34px;
+  max-width: 1420px;
   margin: 0 auto;
   width: 100%;
 }
-.empty-state, .loading-state {
+.projects-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.projects-toolbar h1 {
+  margin: 0 0 7px;
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 760;
+}
+.projects-toolbar p {
+  margin: 0;
+  color: rgba(255,255,255,0.62);
+  font-size: 13px;
+}
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.toolbar-select,
+.filter-btn,
+.view-toggle {
+  height: 42px;
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 9px;
+  background: rgba(5,8,14,0.72);
+  color: rgba(255,255,255,0.88);
+}
+.toolbar-select {
+  padding: 0 14px;
+  font-size: 13px;
+  outline: 0;
+}
+.toolbar-select option { background: #08101a; color: #fff; }
+.filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.filter-btn svg { width: 17px; height: 17px; }
+.view-toggle {
+  display: inline-flex;
+  overflow: hidden;
+}
+.view-toggle button {
+  width: 52px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: rgba(255,255,255,0.68);
+  cursor: pointer;
+}
+.view-toggle button.active {
+  background: rgba(0,184,255,0.14);
+  color: #00d9ff;
+}
+.view-toggle svg { width: 19px; height: 19px; }
+.loading-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -241,107 +414,135 @@ onMounted(fetchProjects)
   gap: 12px;
   color: #9ca3af;
 }
-.empty-icon { width: 56px; height: 56px; color: rgba(0,210,255,0.3); }
-.empty-title { font-size: 18px; font-weight: 600; color: white; margin: 0; }
-.empty-sub { font-size: 14px; color: #6b7280; margin: 0; text-align: center; max-width: 320px; }
 
 .projects-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+  gap: 22px;
+}
+.projects-grid.list {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+.create-card {
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px dashed rgba(255,255,255,0.22);
+  border-radius: 10px;
+  background: rgba(5,8,14,0.36);
+  color: #fff;
+  cursor: pointer;
+}
+.create-card:hover {
+  border-color: rgba(0,217,255,0.52);
+  background: rgba(0,217,255,0.05);
+}
+.create-plus {
+  color: #00d9ff;
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 300;
+}
+.create-card strong { font-size: 14px; }
+.create-card small {
+  max-width: 136px;
+  color: rgba(255,255,255,0.56);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .project-card {
   position: relative;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: #111827;
+  min-height: 190px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(9,15,25,0.82);
   overflow: hidden;
   transition: all 0.2s;
 }
-.card-main { cursor: pointer; }
-.card-main:hover { opacity: 0.85; }
+.project-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(0,217,255,0.34);
+  box-shadow: 0 18px 52px rgba(0,0,0,0.34);
+}
+.card-main { height: 100%; cursor: pointer; }
 
 .card-thumb {
-  height: 160px;
-  background: #1a1a2e;
+  height: 132px;
+  background: #0b1220;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
-.card-thumb.empty { background: #1a1a2e; }
+.card-thumb.empty { background: linear-gradient(135deg, #0f172a, #111827); }
 .thumb-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-.thumb-placeholder { width: 48px; height: 48px; color: rgba(255,255,255,0.15); }
-.thumb-placeholder svg { width: 48px; height: 48px; }
-.card-body { padding: 14px 16px; }
+.thumb-placeholder { width: 40px; height: 40px; color: rgba(255,255,255,0.15); }
+.thumb-placeholder svg { width: 40px; height: 40px; }
+.card-body {
+  min-height: 58px;
+  padding: 10px 14px 12px;
+  background: linear-gradient(180deg, rgba(8,12,20,0.82), rgba(8,12,20,0.96));
+}
 .card-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 720;
   color: white;
-  margin: 0 0 6px;
+  margin: 0 0 5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card-meta { font-size: 12px; color: #6b7280; margin: 0; }
+.card-meta { font-size: 12px; color: rgba(255,255,255,0.56); margin: 0; }
+.projects-grid.list .create-card,
+.projects-grid.list .project-card {
+  min-height: 96px;
+}
+.projects-grid.list .project-card .card-main {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+}
+.projects-grid.list .card-thumb { height: 96px; }
+.projects-grid.list .card-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 96px;
+}
 
-/* Hover Actions */
 .card-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  right: 11px;
+  bottom: 13px;
   display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.15s;
+  gap: 6px;
+  opacity: 1;
 }
-.project-card:hover .card-actions { opacity: 1; }
 .card-action-btn {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 22px;
   border-radius: 6px;
   border: none;
-  background: rgba(0,0,0,0.65);
-  color: rgba(255,255,255,0.8);
+  background: transparent;
+  color: rgba(255,255,255,0.88);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.15s;
-  backdrop-filter: blur(4px);
+  font-size: 18px;
+  line-height: 1;
 }
-.card-action-btn:hover { background: rgba(0,0,0,0.85); color: white; }
+.card-action-btn:hover { background: rgba(255,255,255,0.08); color: white; }
 .card-action-btn.danger:hover { background: rgba(220,38,38,0.8); color: white; }
-
-/* FAB */
-.fab {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #00d9ff, #0080ff);
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 24px rgba(0, 130, 255, 0.45);
-  transition: all 0.2s;
-  z-index: 100;
-}
-.fab:hover {
-  transform: translateX(-50%) scale(1.08);
-  box-shadow: 0 6px 32px rgba(0, 130, 255, 0.6);
-}
-.fab svg { width: 24px; height: 24px; color: white; }
 
 /* Modal */
 .modal-overlay {
@@ -392,4 +593,54 @@ onMounted(fetchProjects)
 .modal-btn.cancel:hover { background: rgba(255,255,255,0.12); color: white; }
 .modal-btn.confirm { background: #00d2ff; color: #05070a; }
 .modal-btn.confirm:hover { background: #00b4d8; }
+
+@media (max-width: 980px) {
+  .top-header {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .header-actions,
+  .search-box {
+    width: 100%;
+  }
+
+  .header-actions {
+    justify-self: stretch;
+    justify-content: space-between;
+  }
+
+  .projects-main {
+    padding: 24px 18px 32px;
+  }
+
+  .projects-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .toolbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .projects-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .new-top-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .toolbar-select,
+  .filter-btn,
+  .view-toggle {
+    flex: 1;
+  }
+}
 </style>

@@ -17,6 +17,8 @@ interface Message {
   content: string
   results?: string[]
   model?: string
+  aspect?: string
+  style?: string
   loading?: boolean
   taskId?: string
   createdAt: Date
@@ -36,17 +38,35 @@ const selectedCategory = ref<'image' | 'voice' | 'video' | 'music'>('image')
 const selectedModel = ref('image-01')
 const selectedStyle = ref('Cinematic')
 const selectedAspect = ref('16:9')
+const selectedImageCount = ref<1 | 2 | 4>(4)
 
 const messages = ref<Message[]>([])
 const inputText = ref('')
+const searchText = ref('')
 const messagesContainer = ref<HTMLDivElement | null>(null)
 const isGenerating = ref(false)
 const isOptimizingPrompt = ref(false)
+const generationAbortController = ref<AbortController | null>(null)
 const convId = ref<number | null>(null)
 const previewImageUrl = ref('')
 
 const styles = ['Cinematic', 'Photorealistic', 'Anime', 'Abstract', 'Minimalist']
 const aspects = ['1:1', '16:9', '9:16', '4:3', '3:4']
+const imageCounts = [1, 2, 4] as const
+
+interface GenerationRecord {
+  id: string
+  prompt: string
+  response?: Message
+  type: Message['type']
+  results: string[]
+  model: string
+  aspect: string
+  style: string
+  loading: boolean
+  error: string
+  createdAt: Date
+}
 
 // ── Models ─────────────────────────────────────────────
 interface AvailableModels {
@@ -65,6 +85,62 @@ function modelNamesFor(category: keyof AvailableModels): string[] {
 
 const currentModelList = computed(() => {
   return modelNamesFor(selectedCategory.value as keyof AvailableModels)
+})
+
+const generationRecords = computed<GenerationRecord[]>(() => {
+  const records: GenerationRecord[] = []
+
+  for (let i = 0; i < messages.value.length; i += 1) {
+    const msg = messages.value[i]
+    if (msg.role !== 'user') continue
+
+    let response: Message | undefined
+    for (let j = i + 1; j < messages.value.length; j += 1) {
+      if (messages.value[j].role === 'user') break
+      if (messages.value[j].role === 'assistant' || messages.value[j].role === 'error') {
+        response = messages.value[j]
+        break
+      }
+    }
+
+    records.push({
+      id: `${msg.id}-${response?.id || 'pending'}`,
+      prompt: msg.content,
+      response,
+      type: response?.type || selectedCategory.value,
+      results: response?.results || [],
+      model: response?.model || selectedModel.value,
+      aspect: response?.aspect || selectedAspect.value,
+      style: response?.style || selectedStyle.value,
+      loading: Boolean(response?.loading),
+      error: response?.role === 'error' ? response.content : '',
+      createdAt: response?.createdAt || msg.createdAt,
+    })
+  }
+
+  return records.reverse()
+})
+
+const filteredGenerationRecords = computed(() => {
+  const keyword = searchText.value.trim().toLowerCase()
+  if (!keyword) return generationRecords.value
+  return generationRecords.value.filter(record => {
+    return [
+      record.prompt,
+      record.model,
+      record.aspect,
+      record.style,
+      record.type,
+    ].some(value => value.toLowerCase().includes(keyword))
+  })
+})
+
+const generationCountLabel = computed(() => {
+  return `${generationRecords.value.length} 条记录`
+})
+
+const projectTitleLabel = computed(() => {
+  return conversationTitle.value.trim() || messages.value[0]?.content.slice(0, 42) || '未命名项目'
 })
 
 watch(selectedCategory, () => {
@@ -88,6 +164,81 @@ function openImagePreview(url: string) {
 
 function closeImagePreview() {
   previewImageUrl.value = ''
+}
+
+function imageAspectRatio(aspect: string) {
+  const normalized = aspect.match(/^(\d+):(\d+)$/)
+  if (!normalized) return '16 / 9'
+  return `${normalized[1]} / ${normalized[2]}`
+}
+
+function isRequestCanceled(err: any) {
+  return err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.message === 'canceled'
+}
+
+function markActiveGenerationCanceled() {
+  messages.value.forEach(msg => {
+    if (msg.loading) {
+      msg.loading = false
+      msg.role = 'error'
+      msg.content = '已取消生成'
+    }
+  })
+}
+
+function cancelGeneration() {
+  if (!isGenerating.value) return
+  generationAbortController.value?.abort()
+  generationAbortController.value = null
+  isGenerating.value = false
+  markActiveGenerationCanceled()
+  ElMessage.info('已取消当前生成')
+}
+
+function formatRecordTime(date: Date) {
+  const now = new Date()
+  const sameDay = date.toDateString() === now.toDateString()
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  if (sameDay) return `今天 ${time}`
+  if (date.toDateString() === yesterday.toDateString()) return `昨天 ${time}`
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) + ` ${time}`
+}
+
+function reusePrompt(prompt: string) {
+  inputText.value = prompt
+  nextTick(scrollToBottom)
+}
+
+async function regenerateFromPrompt(prompt: string) {
+  if (isGenerating.value || isOptimizingPrompt.value) return
+  inputText.value = prompt
+  await nextTick()
+  await sendMessage()
+}
+
+async function createVariation(prompt: string) {
+  if (isGenerating.value || isOptimizingPrompt.value) return
+  inputText.value = `${prompt}, create a fresh variation with a different composition while preserving the core concept`
+  await nextTick()
+  await sendMessage()
+}
+
+function downloadFile(url: string) {
+  const link = document.createElement('a')
+  link.href = url
+  link.download = url.split('/').pop()?.split('?')[0] || 'generated-image'
+  link.target = '_blank'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
+function downloadAll(urls: string[]) {
+  urls.forEach((url, index) => {
+    window.setTimeout(() => downloadFile(url), index * 120)
+  })
 }
 
 function handlePreviewKeydown(event: KeyboardEvent) {
@@ -140,9 +291,9 @@ async function saveTitleOnBlur() {
 // ── Send ───────────────────────────────────────────────
 async function ensureConversation() {
   if (!convId.value) {
-    const resp = await api.post('/api/conversations', { title: 'New Conversation' })
+    const resp = await api.post('/api/conversations', { title: projectTitleLabel.value })
     convId.value = resp.data.id
-    conversationTitle.value = 'New Conversation'
+    conversationTitle.value = projectTitleLabel.value
   }
   return convId.value
 }
@@ -195,6 +346,8 @@ async function sendMessage() {
 
 async function sendImage(prompt: string) {
   const placeholders = createPlaceholder('image')
+  const controller = new AbortController()
+  generationAbortController.value = controller
   messages.value.push(placeholders.msg)
   isGenerating.value = true
   scrollToBottom()
@@ -204,8 +357,10 @@ async function sendImage(prompt: string) {
       prompt,
       model: selectedModel.value,
       aspect_ratio: selectedAspect.value,
-      n: 4,
+      n: selectedImageCount.value,
       response_format: 'url',
+    }, {
+      signal: controller.signal,
     })
     const data = resp.data as { image_urls: string[] }
     placeholders.msg.loading = false
@@ -214,12 +369,21 @@ async function sendImage(prompt: string) {
     placeholders.msg.results = data.image_urls || []
     placeholders.msg.type = 'image'
     placeholders.msg.model = selectedModel.value
+    placeholders.msg.aspect = selectedAspect.value
+    placeholders.msg.style = selectedStyle.value
     await saveAssistantResponse(placeholders.msg)
   } catch (err: any) {
+    if (isRequestCanceled(err) || controller.signal.aborted) {
+      placeholders.msg.content = '已取消生成'
+    } else {
+      placeholders.msg.content = err?.response?.data?.detail || err.message || 'Generation failed'
+    }
     placeholders.msg.role = 'error'
-    placeholders.msg.content = err?.response?.data?.detail || err.message || 'Generation failed'
     placeholders.msg.loading = false
   } finally {
+    if (generationAbortController.value === controller) {
+      generationAbortController.value = null
+    }
     isGenerating.value = false
     scrollToBottom()
   }
@@ -251,6 +415,8 @@ async function optimizePrompt() {
 
 async function sendVoice(text: string) {
   const placeholders = createPlaceholder('voice')
+  const controller = new AbortController()
+  generationAbortController.value = controller
   messages.value.push(placeholders.msg)
   isGenerating.value = true
   scrollToBottom()
@@ -260,6 +426,8 @@ async function sendVoice(text: string) {
       text,
       voice_id: 'male-qn-qingse',
       model: selectedModel.value,
+    }, {
+      signal: controller.signal,
     })
     const data = resp.data as { audio_url: string }
     placeholders.msg.loading = false
@@ -268,10 +436,15 @@ async function sendVoice(text: string) {
     placeholders.msg.model = selectedModel.value
     await saveAssistantResponse(placeholders.msg)
   } catch (err: any) {
+    placeholders.msg.content = isRequestCanceled(err) || controller.signal.aborted
+      ? '已取消生成'
+      : err?.response?.data?.detail || err.message || 'Voice generation failed'
     placeholders.msg.role = 'error'
-    placeholders.msg.content = err?.response?.data?.detail || err.message || 'Voice generation failed'
     placeholders.msg.loading = false
   } finally {
+    if (generationAbortController.value === controller) {
+      generationAbortController.value = null
+    }
     isGenerating.value = false
     scrollToBottom()
   }
@@ -279,6 +452,8 @@ async function sendVoice(text: string) {
 
 async function sendMusic(text: string) {
   const placeholders = createPlaceholder('music')
+  const controller = new AbortController()
+  generationAbortController.value = controller
   messages.value.push(placeholders.msg)
   isGenerating.value = true
   scrollToBottom()
@@ -287,6 +462,8 @@ async function sendMusic(text: string) {
     const resp = await api.post('/api/music/generate', {
       prompt: text,
       model: selectedModel.value,
+    }, {
+      signal: controller.signal,
     })
     const data = resp.data as { audio_url: string }
     placeholders.msg.loading = false
@@ -295,10 +472,15 @@ async function sendMusic(text: string) {
     placeholders.msg.model = selectedModel.value
     await saveAssistantResponse(placeholders.msg)
   } catch (err: any) {
+    placeholders.msg.content = isRequestCanceled(err) || controller.signal.aborted
+      ? '已取消生成'
+      : err?.response?.data?.detail || err.message || 'Music generation failed'
     placeholders.msg.role = 'error'
-    placeholders.msg.content = err?.response?.data?.detail || err.message || 'Music generation failed'
     placeholders.msg.loading = false
   } finally {
+    if (generationAbortController.value === controller) {
+      generationAbortController.value = null
+    }
     isGenerating.value = false
     scrollToBottom()
   }
@@ -306,6 +488,8 @@ async function sendMusic(text: string) {
 
 async function sendVideo(text: string) {
   const placeholders = createPlaceholder('video')
+  const controller = new AbortController()
+  generationAbortController.value = controller
   messages.value.push(placeholders.msg)
   isGenerating.value = true
   scrollToBottom()
@@ -314,29 +498,42 @@ async function sendVideo(text: string) {
     const resp = await api.post('/api/video/generate', {
       prompt: text,
       model: selectedModel.value,
+    }, {
+      signal: controller.signal,
     })
     const data = resp.data as { task_id: string }
     placeholders.msg.taskId = data.task_id
     placeholders.msg.loading = true
 
     // Poll for video completion
-    await pollVideoStatus(placeholders.msg, data.task_id)
+    await pollVideoStatus(placeholders.msg, data.task_id, controller.signal)
   } catch (err: any) {
+    placeholders.msg.content = isRequestCanceled(err) || controller.signal.aborted
+      ? '已取消生成'
+      : err?.response?.data?.detail || err.message || 'Video generation failed'
     placeholders.msg.role = 'error'
-    placeholders.msg.content = err?.response?.data?.detail || err.message || 'Video generation failed'
     placeholders.msg.loading = false
   } finally {
+    if (generationAbortController.value === controller) {
+      generationAbortController.value = null
+    }
     isGenerating.value = false
     scrollToBottom()
   }
 }
 
-async function pollVideoStatus(msg: Message, taskId: string) {
+async function pollVideoStatus(msg: Message, taskId: string, signal?: AbortSignal) {
   const maxAttempts = 30
   for (let i = 0; i < maxAttempts; i++) {
+    if (signal?.aborted) {
+      throw new DOMException('canceled', 'CanceledError')
+    }
     await new Promise(r => setTimeout(r, 3000))
+    if (signal?.aborted) {
+      throw new DOMException('canceled', 'CanceledError')
+    }
     try {
-      const resp = await api.get(`/api/video/status/${taskId}`)
+      const resp = await api.get(`/api/video/status/${taskId}`, { signal })
       const data = resp.data as { status: string; video_url?: string }
       if (data.video_url) {
         msg.loading = false
@@ -370,7 +567,7 @@ function createPlaceholder(type: Message['type']): { msg: Message } {
 function scrollToBottom() {
   nextTick(() => {
     if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      messagesContainer.value.scrollTop = 0
     }
   })
 }
@@ -464,256 +661,281 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="chat-page">
-    <!-- Left Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-top">
-        <!-- Brand + Editable Title -->
-        <div class="brand-row">
-          <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+  <div class="generate-page">
+    <header class="topbar">
+      <div class="project-brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+        </svg>
+        <input
+          v-if="isEditingTitle"
+          v-model="conversationTitle"
+          class="project-title-input"
+          placeholder="项目名称..."
+          @blur="saveTitleOnBlur"
+          @keydown.enter.prevent="saveTitleOnBlur"
+          autofocus
+        />
+        <button v-else class="project-title-button" type="button" @click="startEditTitle" :title="projectTitleLabel">
+          <span>{{ projectTitleLabel }}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
           </svg>
-          <div class="brand-title-group">
-            <span class="brand-name">{{ t('generate.brand') }}</span>
-            <div class="project-name-row">
-              <input
-                v-if="isEditingTitle"
-                v-model="conversationTitle"
-                class="title-edit-input"
-                placeholder="项目名称..."
-                @blur="saveTitleOnBlur"
-                @keydown.enter.prevent="saveTitleOnBlur"
-                autofocus
-              />
-              <span
-                v-else
-                class="project-name-display"
-                @click="startEditTitle"
-                :title="conversationTitle || '点击编辑项目名称'"
-              >
-                {{ conversationTitle || '未命名项目' }}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="edit-icon">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
-              </span>
-            </div>
-          </div>
-          <div class="brand-actions">
-            <button class="action-btn home-btn" @click.stop="goHome" title="返回主页">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
-              </svg>
-            </button>
-          </div>
-        </div>
+        </button>
       </div>
 
-      <!-- Category Tabs -->
-      <div class="sidebar-section">
-        <span class="section-label">{{ t('generate.category') }}</span>
-        <div class="category-tabs">
-          <button
-            v-for="cat in ['image', 'voice', 'video', 'music'] as const"
-            :key="cat"
-            class="cat-tab"
-            :class="{ active: selectedCategory === cat }"
-            @click="selectedCategory = cat"
+      <label class="top-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"/>
+          <path d="M21 21l-4.35-4.35"/>
+        </svg>
+        <input v-model="searchText" type="search" placeholder="搜索你的生成记录..." />
+        <kbd>⌘ K</kbd>
+      </label>
+
+      <button class="home-return" type="button" @click="goHome">
+        返回主页
+      </button>
+    </header>
+
+    <div class="workspace">
+      <main class="generation-main">
+        <section class="feed-header">
+          <div>
+            <h1>全部生成</h1>
+            <span>{{ generationCountLabel }}</span>
+          </div>
+        </section>
+
+        <section class="records-scroll" ref="messagesContainer">
+          <div v-if="filteredGenerationRecords.length === 0" class="empty-state">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+            </svg>
+            <h2>{{ searchText ? '没有匹配的生成记录' : '开始一次生成' }}</h2>
+            <p>{{ searchText ? '换个关键词试试。' : '底部输入提示词，AI enhance 可先帮你扩写。' }}</p>
+            <div v-if="history.length && !searchText" class="history-strip">
+              <button v-for="item in history.slice(0, 5)" :key="item.id" type="button" @click="loadFromHistory(item)">
+                <img v-if="item.thumb" :src="item.thumb" :alt="item.prompt" />
+                <span>{{ item.title || item.prompt || '历史项目' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <article
+            v-for="record in filteredGenerationRecords"
+            :key="record.id"
+            class="record-card"
+            :class="{ loading: record.loading, error: Boolean(record.error) }"
           >
-            <span class="cat-icon">{{ cat === 'image' ? '🖼' : cat === 'voice' ? '🎙' : cat === 'video' ? '🎬' : '🎵' }}</span>
-            <span>{{ t(`generate.category${cat.charAt(0).toUpperCase() + cat.slice(1)}`) }}</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- History -->
-      <div class="sidebar-section history-section">
-        <span class="section-label">History</span>
-        <div class="history-list" v-if="history.length">
-          <button
-            v-for="item in history"
-            :key="item.id"
-            class="history-item"
-            @click="loadFromHistory(item)"
-          >
-            <div class="history-thumb" v-if="item.thumb">
-              <img :src="item.thumb" :alt="item.prompt" />
-            </div>
-            <div class="history-thumb placeholder" v-else>
-              <span>{{ item.type.charAt(0).toUpperCase() }}</span>
-            </div>
-            <div class="history-info">
-              <span class="history-prompt">{{ item.prompt.slice(0, 40) }}{{ item.prompt.length > 40 ? '...' : '' }}</span>
-              <span class="history-type">{{ item.type }}</span>
-            </div>
-          </button>
-        </div>
-        <div class="history-empty" v-else>
-          <span>{{ t('generate.noHistory') }}</span>
-        </div>
-      </div>
-
-      <!-- User -->
-      <div class="sidebar-bottom">
-        <div class="user-info">
-          <div class="user-avatar">A</div>
-          <div class="user-details">
-            <span class="user-name">admin</span>
-            <span class="user-plan">{{ t('generate.proPlan') }}</span>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Main Chat Area -->
-    <main class="chat-main">
-      <!-- Messages -->
-      <div class="messages-container" ref="messagesContainer">
-        <div v-if="messages.length === 0" class="chat-empty">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="48" height="48" style="color: rgba(0,217,255,0.2)">
-            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
-          </svg>
-          <p>{{ t('generate.chatPlaceholder') }}</p>
-        </div>
-
-        <div
-          v-for="msg in messages"
-          :key="msg.id"
-          class="message-wrapper"
-          :class="msg.role"
-        >
-          <!-- User message -->
-          <div v-if="msg.role === 'user'" class="message user-msg">
-            <div class="msg-bubble">
-              {{ msg.content }}
-            </div>
-          </div>
-
-          <!-- Assistant / Error message -->
-          <div v-else class="message assistant-msg" :class="{ error: msg.role === 'error' }">
-            <div class="msg-avatar">
-              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-                <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
-              </svg>
-            </div>
-            <div class="msg-content">
-              <!-- Loading -->
-              <div v-if="msg.loading" class="msg-loading">
-                <div class="loading-dots"><span></span><span></span><span></span></div>
-                <span class="loading-text">{{ t('generate.generating') }}</span>
+            <header class="record-head">
+              <div class="record-title-block">
+                <p class="record-prompt">{{ record.prompt }}</p>
+                <div class="record-meta">
+                  <span class="chip model-chip">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+                    </svg>
+                    {{ record.model }}
+                  </span>
+                  <span v-if="record.type === 'image'" class="chip">{{ record.aspect }}</span>
+                  <span v-if="record.type === 'image'" class="chip">{{ record.style }}</span>
+                  <span class="time-chip">{{ formatRecordTime(record.createdAt) }}</span>
+                </div>
               </div>
 
-              <!-- Error -->
-              <div v-else-if="msg.role === 'error'" class="msg-error">
-                {{ msg.content }}
+              <div class="record-actions">
+                <button type="button" @click="regenerateFromPrompt(record.prompt)" :disabled="isGenerating || isOptimizingPrompt">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 0 1-15.6 6.1"/>
+                    <path d="M3 12A9 9 0 0 1 18.6 5.9"/>
+                    <path d="M18 2v4h4M6 22v-4H2"/>
+                  </svg>
+                  重新生成
+                </button>
+                <button type="button" @click="createVariation(record.prompt)" :disabled="isGenerating || isOptimizingPrompt">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
+                    <path d="M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M18.36 5.64l-2.12 2.12M7.76 16.24l-2.12 2.12"/>
+                  </svg>
+                  生成变体
+                </button>
+                <button type="button" @click="downloadAll(record.results)" :disabled="!record.results.length">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <path d="M7 10l5 5 5-5M12 15V3"/>
+                  </svg>
+                  下载全部
+                </button>
+                <button class="only-icon" type="button" @click="reusePrompt(record.prompt)" title="复用提示词">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+                  </svg>
+                </button>
               </div>
+            </header>
 
-              <!-- Image results -->
-              <div v-else-if="msg.type === 'image' && msg.results?.length" class="msg-images">
-                <div class="images-grid" :class="msg.results.length === 1 ? 'single' : 'multi'">
-                  <button
-                    v-for="(url, i) in msg.results"
-                    :key="url"
-                    class="image-thumb-button"
-                    type="button"
-                    :title="'查看原图 ' + (i + 1)"
-                    @click="openImagePreview(url)"
-                  >
-                    <img
-                      :src="url + '?cache=' + Date.now()"
-                      class="result-image"
-                      :alt="'Generated image ' + (i+1)"
-                      loading="lazy"
-                    />
-                    <span style="position:absolute;top:4px;left:4px;font-size:10px;background:rgba(0,0,0,0.6);color:#fff;padding:2px 6px;border-radius:4px">
-                      {{ i+1 }}. {{ url.split('/').pop()?.split('?')[0] }}
-                    </span>
+            <div v-if="record.loading" class="record-loading">
+              <div class="loading-dots"><span></span><span></span><span></span></div>
+              <span>{{ t('generate.generating') }}</span>
+              <button class="loading-cancel-btn" type="button" @click="cancelGeneration">
+                取消生成
+              </button>
+            </div>
+
+            <div v-else-if="record.error" class="record-error">
+              {{ record.error }}
+            </div>
+
+            <div v-else-if="record.type === 'image' && record.results.length" class="record-images">
+              <figure v-for="(url, i) in record.results" :key="url" class="generated-tile">
+                <button
+                  class="image-view-button"
+                  type="button"
+                  :title="'查看原图 ' + (i + 1)"
+                  :style="{ aspectRatio: imageAspectRatio(record.aspect) }"
+                  @click="openImagePreview(url)"
+                >
+                  <img :src="url" :alt="'Generated image ' + (i + 1)" loading="lazy" />
+                </button>
+                <div class="tile-top-actions">
+                  <button type="button" title="收藏">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27z"/>
+                    </svg>
+                  </button>
+                  <button type="button" title="下载" @click="downloadFile(url)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <path d="M7 10l5 5 5-5M12 15V3"/>
+                    </svg>
                   </button>
                 </div>
-                <span class="result-model">{{ msg.model }}</span>
-              </div>
-
-              <!-- Voice result -->
-              <div v-else-if="msg.type === 'voice' && msg.results?.length" class="msg-audio">
-                <audio :src="msg.results[0]" controls class="audio-player" />
-                <span class="result-model">{{ msg.model }}</span>
-              </div>
-
-              <!-- Music result -->
-              <div v-else-if="msg.type === 'music' && msg.results?.length" class="msg-audio">
-                <audio :src="msg.results[0]" controls class="audio-player" />
-                <span class="result-model">{{ msg.model }}</span>
-              </div>
-
-              <!-- Video result -->
-              <div v-else-if="msg.type === 'video' && msg.results?.length" class="msg-video">
-                <video
-                  :src="msg.results[0]"
-                  controls
-                  class="video-player"
-                />
-                <span class="result-model">{{ msg.model }}</span>
-              </div>
-
-              <!-- Text-only (no results) -->
-              <div v-else-if="msg.content" class="msg-text">
-                {{ msg.content }}
-              </div>
+                <figcaption>
+                  <button type="button" @click="openImagePreview(url)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="7"/>
+                      <path d="M21 21l-4.35-4.35"/>
+                    </svg>
+                    放大
+                  </button>
+                  <button type="button" @click="createVariation(record.prompt)" :disabled="isGenerating || isOptimizingPrompt">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
+                      <path d="M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12"/>
+                    </svg>
+                    变体
+                  </button>
+                  <button type="button" disabled title="暂未接入超分接口">
+                    <span>HD</span>
+                    Upscale
+                  </button>
+                  <button type="button" @click="downloadFile(url)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <path d="M7 10l5 5 5-5M12 15V3"/>
+                    </svg>
+                    下载
+                  </button>
+                </figcaption>
+              </figure>
             </div>
-          </div>
-        </div>
+
+            <div v-else-if="(record.type === 'voice' || record.type === 'music') && record.results.length" class="media-result">
+              <audio :src="record.results[0]" controls />
+            </div>
+
+            <div v-else-if="record.type === 'video' && record.results.length" class="media-result">
+              <video :src="record.results[0]" controls />
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <form class="composer" @submit.prevent="sendMessage">
+      <div class="composer-input">
+        <button class="upload-btn" type="button" title="添加参考图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <circle cx="8.5" cy="10.5" r="1.5"/>
+            <path d="M21 15l-5-5L5 21"/>
+          </svg>
+        </button>
+        <textarea
+          v-model="inputText"
+          class="prompt-textarea"
+          placeholder="描述你想要生成的图像..."
+          rows="1"
+          @keydown.enter.exact.prevent="sendMessage"
+        ></textarea>
+        <button
+          class="optimize-btn"
+          type="button"
+          title="AI enhance：扩写并优化提示词"
+          @click="optimizePrompt"
+          :disabled="!inputText.trim() || isGenerating || isOptimizingPrompt"
+        >
+          <span v-if="isOptimizingPrompt" class="mini-spinner"></span>
+          <span v-else>AI enhance</span>
+        </button>
       </div>
 
-      <!-- Input Bar -->
-      <div class="input-bar">
-        <div class="input-row">
-          <select v-model="selectedCategory" class="param-select" @change="selectedCategory = selectedCategory">
-            <option value="image">{{ t('generate.categoryImage') }}</option>
-            <option value="voice">{{ t('generate.categoryVoice') }}</option>
-            <option value="video">{{ t('generate.categoryVideo') }}</option>
-            <option value="music">{{ t('generate.categoryMusic') }}</option>
-          </select>
-          <select v-model="selectedModel" class="param-select">
-            <option v-for="m in currentModelList" :key="m" :value="m">{{ m }}</option>
-          </select>
-          <select v-if="selectedCategory === 'image'" v-model="selectedStyle" class="param-select">
-            <option v-for="s in styles" :key="s" :value="s">{{ s }}</option>
-          </select>
-          <select v-if="selectedCategory === 'image'" v-model="selectedAspect" class="param-select">
-            <option v-for="a in aspects" :key="a" :value="a">{{ a }}</option>
-          </select>
-        </div>
-        <div class="input-box">
+      <div class="composer-controls">
+        <select v-model="selectedCategory" class="param-select">
+          <option value="image">{{ t('generate.categoryImage') }}</option>
+          <option value="voice">{{ t('generate.categoryVoice') }}</option>
+          <option value="video">{{ t('generate.categoryVideo') }}</option>
+          <option value="music">{{ t('generate.categoryMusic') }}</option>
+        </select>
+        <select v-if="selectedCategory === 'image'" v-model="selectedStyle" class="param-select">
+          <option v-for="s in styles" :key="s" :value="s">风格 {{ s }}</option>
+        </select>
+        <select v-if="selectedCategory === 'image'" v-model="selectedAspect" class="param-select">
+          <option v-for="a in aspects" :key="a" :value="a">宽高比 {{ a }}</option>
+        </select>
+        <div v-if="selectedCategory === 'image'" class="count-toggle" aria-label="生成数量">
           <button
-            class="optimize-btn"
+            v-for="count in imageCounts"
+            :key="count"
             type="button"
-            title="AI 优化提示词"
-            @click="optimizePrompt"
-            :disabled="!inputText.trim() || isGenerating || isOptimizingPrompt"
+            :class="{ active: selectedImageCount === count }"
+            @click="selectedImageCount = count"
           >
-            <span v-if="isOptimizingPrompt" class="mini-spinner"></span>
-            <span v-else>AI</span>
-          </button>
-          <textarea
-            v-model="inputText"
-            class="prompt-textarea"
-            :placeholder="t('generate.chatPlaceholder')"
-            rows="1"
-            @keydown.enter.exact.prevent="sendMessage"
-          ></textarea>
-          <button
-            class="send-btn"
-            @click="sendMessage"
-            :disabled="!inputText.trim() || isGenerating || isOptimizingPrompt"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
-              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-            </svg>
+            {{ count }}x
           </button>
         </div>
+        <select v-model="selectedModel" class="param-select">
+          <option v-for="m in currentModelList" :key="m" :value="m">模型 {{ m }}</option>
+        </select>
+        <button class="control-icon" type="button" title="高级参数">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/>
+            <path d="M1 14h6M9 8h6M17 16h6"/>
+          </svg>
+        </button>
+        <button
+          v-if="isGenerating"
+          class="cancel-generate-btn"
+          type="button"
+          @click="cancelGeneration"
+        >
+          取消生成
+        </button>
+        <button
+          v-else
+          class="generate-btn"
+          type="submit"
+          :disabled="!inputText.trim() || isOptimizingPrompt"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
+          </svg>
+          生成
+        </button>
       </div>
-    </main>
+    </form>
 
     <Teleport to="body">
       <div v-if="previewImageUrl" class="image-preview-overlay" @click.self="closeImagePreview">
@@ -1465,5 +1687,969 @@ onUnmounted(() => {
 .send-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── Reference-style Generate Workspace ───────────────── */
+.generate-page {
+  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 24% 0%, rgba(0, 217, 255, 0.08), transparent 34%),
+    radial-gradient(circle at 82% 22%, rgba(97, 116, 255, 0.05), transparent 30%),
+    #05080d;
+  color: #f8fafc;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.topbar {
+  height: 68px;
+  min-height: 68px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 22px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(5, 8, 13, 0.78);
+  backdrop-filter: blur(18px);
+  z-index: 30;
+}
+
+.project-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 330px;
+  min-width: 0;
+  color: #fff;
+  z-index: 2;
+}
+
+.brand-mark {
+  width: 25px;
+  height: 25px;
+  color: #19c9ff;
+  filter: drop-shadow(0 0 10px rgba(25, 201, 255, 0.45));
+  flex-shrink: 0;
+}
+
+.project-title-button {
+  min-width: 0;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  cursor: text;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.project-title-button:hover {
+  border-color: rgba(148, 163, 184, 0.14);
+  background: rgba(255,255,255,0.035);
+}
+
+.project-title-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-title-button svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: rgba(226, 232, 240, 0.45);
+}
+
+.project-title-input {
+  width: min(280px, calc(100vw - 180px));
+  height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  outline: 0;
+  background: rgba(8, 12, 20, 0.86);
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 15px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.project-title-input:focus {
+  border-color: rgba(25, 201, 255, 0.42);
+  box-shadow: 0 0 0 3px rgba(25, 201, 255, 0.08);
+}
+
+.top-search {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 760px));
+  min-width: 360px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(8, 12, 20, 0.82);
+  color: rgba(226, 232, 240, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.top-search svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+.top-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 13px;
+}
+
+.top-search input::placeholder {
+  color: rgba(226, 232, 240, 0.42);
+}
+
+.top-search kbd {
+  height: 22px;
+  min-width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 6px;
+  color: rgba(226, 232, 240, 0.46);
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.home-return {
+  z-index: 2;
+  height: 40px;
+  min-width: 108px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 1px solid rgba(25, 201, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(25, 201, 255, 0.08);
+  color: #35d7ff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.home-return:hover {
+  border-color: rgba(25, 201, 255, 0.42);
+  background: rgba(25, 201, 255, 0.14);
+  color: #fff;
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+.rail {
+  width: 82px;
+  min-width: 82px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px 12px 14px;
+  border-right: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(4, 8, 14, 0.72);
+}
+
+.rail-actions,
+.rail-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.rail-item {
+  width: 58px;
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.66);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.rail-item svg {
+  width: 21px;
+  height: 21px;
+}
+
+.rail-item:hover {
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+}
+
+.rail-item.active {
+  color: #10d7ff;
+  border-color: rgba(16, 215, 255, 0.2);
+  background: rgba(16, 215, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(16, 215, 255, 0.03);
+}
+
+.storage-meter {
+  width: 58px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: rgba(226, 232, 240, 0.56);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.storage-meter strong {
+  color: rgba(226, 232, 240, 0.78);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.storage-meter small {
+  color: rgba(226, 232, 240, 0.48);
+  font-size: 10px;
+}
+
+.storage-meter i {
+  display: block;
+  width: 40px;
+  height: 4px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #19c9ff 36%, rgba(148, 163, 184, 0.18) 36%);
+}
+
+.generation-main {
+  flex: 1;
+  min-width: 0;
+  width: min(100%, 1680px);
+  display: flex;
+  flex-direction: column;
+  margin: 0 auto;
+  padding: 18px 24px 16px;
+}
+
+.feed-header {
+  min-height: 36px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.feed-header h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.feed-header span {
+  margin-left: 10px;
+  color: rgba(226, 232, 240, 0.42);
+  font-size: 13px;
+}
+
+.records-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 2px 10px 0;
+  overscroll-behavior: contain;
+}
+
+.records-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.records-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.empty-state {
+  flex: 1;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: rgba(226, 232, 240, 0.48);
+}
+
+.empty-state svg {
+  width: 48px;
+  height: 48px;
+  color: rgba(25, 201, 255, 0.22);
+}
+
+.empty-state h2 {
+  margin: 14px 0 7px;
+  font-size: 18px;
+  color: rgba(248, 250, 252, 0.9);
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.history-strip {
+  width: min(760px, 100%);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.history-strip button {
+  min-width: 0;
+  height: 74px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.44);
+  color: rgba(226, 232, 240, 0.72);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+}
+
+.history-strip img {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.history-strip span {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.record-card {
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.11);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(20, 28, 40, 0.78), rgba(10, 15, 24, 0.72)),
+    rgba(8, 12, 20, 0.8);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
+}
+
+.record-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 18px 10px;
+}
+
+.record-title-block {
+  min-width: 0;
+  flex: 1;
+}
+
+.record-prompt {
+  margin: 0 0 8px;
+  color: rgba(248, 250, 252, 0.96);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.record-meta,
+.record-actions,
+.tile-top-actions,
+.generated-tile figcaption,
+.composer-controls {
+  display: flex;
+  align-items: center;
+}
+
+.record-meta {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip,
+.time-chip {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.045);
+  color: rgba(226, 232, 240, 0.55);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.model-chip {
+  color: #c4a6ff;
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.model-chip svg {
+  width: 12px;
+  height: 12px;
+}
+
+.time-chip {
+  background: transparent;
+  padding-inline: 0;
+}
+
+.record-actions {
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.record-actions button,
+.generated-tile figcaption button,
+.tile-top-actions button,
+.control-icon,
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.11);
+  background: rgba(15, 23, 42, 0.5);
+  color: rgba(226, 232, 240, 0.78);
+  cursor: pointer;
+  font: inherit;
+}
+
+.record-actions button {
+  height: 34px;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.record-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.record-actions .only-icon {
+  width: 34px;
+  padding: 0;
+}
+
+.record-actions button:hover:not(:disabled),
+.generated-tile figcaption button:hover:not(:disabled),
+.tile-top-actions button:hover,
+.control-icon:hover,
+.upload-btn:hover {
+  color: #fff;
+  border-color: rgba(25, 201, 255, 0.25);
+  background: rgba(25, 201, 255, 0.08);
+}
+
+.record-actions button:disabled,
+.generated-tile figcaption button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.record-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 0 18px 16px;
+}
+
+.generated-tile {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(7, 12, 20, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.image-view-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: rgba(2, 6, 12, 0.42);
+  cursor: zoom-in;
+  overflow: hidden;
+}
+
+.image-view-button:focus-visible {
+  outline: 2px solid rgba(25, 201, 255, 0.78);
+  outline-offset: -2px;
+}
+
+.image-view-button img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.tile-top-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  gap: 5px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.tile-top-actions button {
+  width: 25px;
+  height: 25px;
+  border: 0;
+  border-radius: 7px;
+  color: rgba(255,255,255,0.88);
+  background: rgba(255,255,255,0.14);
+}
+
+.tile-top-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.generated-tile figcaption {
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 38px;
+  padding: 6px 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(7, 12, 20, 0.92);
+}
+
+.generated-tile figcaption button {
+  height: 24px;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255,255,255,0.88);
+  font-size: 11px;
+}
+
+.generated-tile figcaption svg {
+  width: 13px;
+  height: 13px;
+}
+
+.generated-tile figcaption span {
+  font-size: 9px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.record-loading,
+.record-error {
+  min-height: clamp(220px, 24vh, 320px);
+  margin: 0 18px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(15, 23, 42, 0.35);
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 13px;
+}
+
+.loading-cancel-btn {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid rgba(248, 113, 113, 0.26);
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.18);
+  color: #fca5a5;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.loading-cancel-btn:hover {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fff;
+}
+
+.record-error {
+  color: #ff7a7a;
+  border-color: rgba(255, 122, 122, 0.22);
+  background: rgba(127, 29, 29, 0.12);
+}
+
+.media-result {
+  padding: 0 18px 16px;
+}
+
+.media-result audio,
+.media-result video {
+  width: 100%;
+  max-height: 360px;
+  border-radius: 8px;
+}
+
+.composer {
+  position: relative;
+  width: min(1360px, calc(100vw - 96px));
+  flex-shrink: 0;
+  margin: 0 auto 18px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(19, 28, 40, 0.94), rgba(9, 14, 23, 0.96)),
+    rgba(8, 12, 20, 0.96);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px);
+}
+
+.composer-input {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-btn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+
+.upload-btn svg,
+.control-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.composer .prompt-textarea {
+  flex: 1;
+  min-height: 34px;
+  max-height: 92px;
+  padding: 7px 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: #f8fafc;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.composer .prompt-textarea::placeholder {
+  color: rgba(226, 232, 240, 0.4);
+}
+
+.composer .optimize-btn {
+  width: auto;
+  min-width: 98px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(168, 85, 247, 0.24);
+  background: rgba(124, 58, 237, 0.12);
+  color: #d9c2ff;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.composer .optimize-btn:hover:not(:disabled) {
+  border-color: rgba(168, 85, 247, 0.42);
+  background: rgba(124, 58, 237, 0.2);
+  box-shadow: 0 0 18px rgba(124, 58, 237, 0.18);
+}
+
+.composer-controls {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.composer .param-select {
+  flex: 0 1 180px;
+  min-width: 142px;
+  height: 38px;
+  padding: 0 36px 0 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(9, 14, 23, 0.72);
+  color: rgba(226, 232, 240, 0.78);
+  outline: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.count-toggle {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(9, 14, 23, 0.72);
+}
+
+.count-toggle button {
+  width: 42px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.58);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.count-toggle button:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.06);
+}
+
+.count-toggle button.active {
+  color: #07131d;
+  background: linear-gradient(135deg, #19d3ff, #44a8ff);
+}
+
+.composer .param-select option {
+  background: #0b1220;
+  color: #fff;
+}
+
+.control-icon {
+  width: 38px;
+  height: 38px;
+  margin-left: auto;
+  border-radius: 8px;
+}
+
+.generate-btn,
+.cancel-generate-btn {
+  min-width: 132px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-left: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #19d3ff, #078cff);
+  color: #00131f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 760;
+  box-shadow: 0 10px 28px rgba(8, 140, 255, 0.24);
+}
+
+.cancel-generate-btn {
+  background: linear-gradient(135deg, #fb7185, #ef4444);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(239, 68, 68, 0.22);
+}
+
+.generate-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.generate-btn:hover:not(:disabled) {
+  box-shadow: 0 12px 34px rgba(8, 140, 255, 0.34);
+}
+
+.cancel-generate-btn:hover {
+  box-shadow: 0 12px 34px rgba(239, 68, 68, 0.34);
+}
+
+.generate-btn:disabled,
+.composer .optimize-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1040px) {
+  .topbar {
+    padding-inline: 16px;
+  }
+
+  .project-brand {
+    width: 260px;
+  }
+
+  .top-search {
+    width: min(420px, calc(100vw - 460px));
+    min-width: 280px;
+  }
+
+  .record-images {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .record-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .record-actions {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    height: auto;
+    min-height: 64px;
+    padding: 12px 14px;
+  }
+
+  .top-search {
+    display: none;
+  }
+
+  .project-brand {
+    width: min(100%, 260px);
+  }
+
+  .home-return {
+    min-width: 88px;
+    padding-inline: 12px;
+  }
+
+  .generation-main {
+    padding: 16px 12px 16px;
+  }
+
+  .records-scroll {
+    padding-bottom: 8px;
+  }
+
+  .feed-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .record-images {
+    grid-template-columns: 1fr;
+  }
+
+  .record-prompt {
+    white-space: normal;
+  }
+
+  .generated-tile {
+    aspect-ratio: auto;
+  }
+
+  .image-view-button img {
+    width: 100%;
+    height: 100%;
+  }
+
+  .composer {
+    width: calc(100vw - 20px);
+    margin-bottom: 10px;
+  }
+
+  .composer .param-select {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  .control-icon {
+    margin-left: 0;
+  }
+
+  .generate-btn {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
 }
 </style>

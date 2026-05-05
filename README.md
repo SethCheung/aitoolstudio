@@ -8,8 +8,11 @@
 |------|------|------|
 | 登录认证 | 已实现 | JWT Bearer Token，登录接口有限流 |
 | 项目首页 | 已实现 | 展示用户项目，对话中有图片结果时显示缩略图 |
-| 生成页面 | 已实现 | 支持 image / voice / video / music 分类生成，图片结果可点开同页看原图 |
-| AI 优化 | 已实现 | 用户点击「AI 优化」后调用文本模型扩写 prompt，结果回填输入框 |
+| 生成页面 | 已实现 | 单栏生成工作台，支持 image / voice / video / music 分类生成，最新生成在上，旧记录滚动到下方 |
+| AI enhance | 已实现 | 用户点击「AI enhance」后调用文本模型扩写 prompt，结果回填输入框 |
+| 图片数量 | 已实现 | 图片生成支持 `1x / 2x / 4x`，数量会传给后端 `n` 参数 |
+| 取消生成 | 已实现 | 生成中可取消当前前端请求等待；服务端任务级取消仍需后续补齐 |
+| 图片预览 | 已实现 | 图片按比例完整预览，点击图片本身或“放大”按钮可同页查看原图 |
 | 对话历史 | 已实现 | 保存用户消息和 AI 回复，支持恢复对话 |
 | Profile 管理 | 已实现 | Vue Admin 页面管理 MiniMax HTTP/CLI profile |
 | Admin 鉴权 | 已加固 | `/api/admin/*` 和 profile 管理接口要求管理员 |
@@ -111,7 +114,7 @@ docker-compose up -d
 - CLI profile：通过本机 `mmx` 命令生成，输出文件默认落在 `~/minimax-output`
 - HTTP profile：通过 MiniMax HTTP API 调用，需要 API Key
 
-提示词优化使用 text 模型 profile。默认配置包含 `MiniMax-M2.7` 和 `MiniMax-M2.7-highspeed`。如果你新建 HTTP profile，记得在 text 分类里勾选文本模型；否则前端「AI 优化」会找不到可用 profile。
+提示词优化使用 text 模型 profile。默认配置包含 `MiniMax-M2.7` 和 `MiniMax-M2.7-highspeed`。如果你新建 HTTP profile，记得在 text 分类里勾选文本模型；否则前端「AI enhance」会找不到可用 profile。
 
 官方文档：
 

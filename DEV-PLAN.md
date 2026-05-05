@@ -19,7 +19,7 @@
 - 图片、语音、视频、音乐生成入口：`api/image.py`、`api/voice.py`、`api/video.py`、`api/music.py`
 - 提示词优化入口：`api/prompt.py`，显式调用文本模型扩写 prompt 后回填前端输入框
 - 项目首页：`frontend/src/views/HomeView.vue`，对话有图片结果时显示缩略图
-- 生成页面：`frontend/src/views/GenerateView.vue`，支持多类别生成、历史恢复、图片点击同页原图预览
+- 生成页面：`frontend/src/views/GenerateView.vue`，采用单栏生成工作台，支持多类别生成、历史恢复、AI enhance、`1x / 2x / 4x` 图片数量、生成中取消、图片点击同页原图预览
 - Vue 管理页：`frontend/src/views/AdminView.vue`
 - Docker Compose 基础前后端编排，后端要求 `JWT_SECRET_KEY`
 - `.gitignore` 已补充运行时数据、密钥文件、构建产物忽略规则
@@ -27,7 +27,7 @@
 **仍未完成**
 - ComfyUI 工作流上传、队列、任务状态、结果归档
 - Celery / Redis 任务队列
-- Prompt 优化、图像理解、自动标签
+- 图像理解、自动标签
 - 提示词库、收藏、批量下载
 - GPU 监控和系统日志
 - Nginx 反向代理与生产部署脚本
@@ -39,6 +39,7 @@
 - `conversation_messages.results` 仍是 `String(500)`，应改为 `Text` 或 JSON
 - `backend/api/admin.py` 内联 HTML Admin 页应删除或废弃，管理入口统一到 Vue `/admin`
 - `DATABASE_URL` 已环境化，但 `create_engine` 仍无条件传 SQLite 专用 `connect_args`
+- Generate 页的“取消生成”目前主要中断前端请求等待；如果后端/模型已开始执行，仍需服务端任务取消能力才能真正停止外部生成
 
 ---
 
@@ -153,29 +154,31 @@
 
 ---
 
-## Phase 5: 对话式生图界面（核心功能）
+## Phase 5: Generate 生成工作台（核心功能）
 
 **交付内容**：
-- 对话式布局组件（类似 ChatGPT/lovart.ai）
-- 消息气泡组件（用户消息右侧，系统回复左侧）
-- 输入区组件（多行文本框 + AI 优化按钮 + 上传图片 + 工作流选择 + 引擎切换）
-- 图像网格展示组件（1-9 张图，支持点击查看大图）
-- 操作按钮（下载、保存提示词、重新生成、放大、局部重绘）
-- 加载状态组件（进度条 + 预估时间）
-- 侧边栏组件（可折叠：我的作品、提示词库、快捷操作）
+- 单栏生成工作台布局（顶部项目名/搜索/返回主页，中间生成记录流，底部停靠生成框）
+- 生成记录卡片（prompt、模型、比例、风格、时间、图片结果和操作按钮）
+- 输入区组件（多行文本框 + AI enhance + 分类/风格/比例/数量/模型选择 + 生成/取消）
+- 图像网格展示组件（`1x / 2x / 4x`，支持点击图片查看原图）
+- 操作按钮（重新生成、生成变体、下载全部、单图放大/下载；Upscale 当前为占位）
+- 加载状态组件（稳定高度占位 + 取消生成按钮）
+- Generate 页不再保留左侧侧边栏，历史入口以首页项目卡片和当前记录流为主
 
 **关键文件**：
-- `img-platform/frontend/src/views/GenerateView.vue` — 当前对话式生成主页面
+- `img-platform/frontend/src/views/GenerateView.vue` — 当前生成工作台主页面
 - `img-platform/frontend/src/views/HomeView.vue` — 项目首页和生成缩略图入口
 - `img-platform/frontend/src/services/api.ts` — Axios API 封装
 - 后续如继续扩展，应拆出 `components/chat/*` 和 `composables/useChat.ts`
 
 **验收标准**：
-- 用户可输入描述、选择工作流、点击发送
-- 等待时显示进度条和预估时间
-- 生成完成后显示图像网格和操作按钮
-- 图片结果可点击同页放大查看原图
-- AI 优化按钮可调用文本模型扩写 prompt，优化结果回填输入框
+- 用户可输入描述、选择参数、点击生成
+- 等待时显示生成中状态，并可取消当前请求等待
+- 生成完成后在顶部显示最新记录，旧记录自然向下滚动
+- 图片结果按比例完整预览，不裁切、不压扁、不因为生成开始/完成导致整体布局跳动
+- 图片结果可点击图片本身或“放大”按钮同页查看原图
+- AI enhance 按钮可调用文本模型扩写 prompt，优化结果回填输入框
+- 图片生成数量可选择 `1x / 2x / 4x`
 
 ---
 
