@@ -76,8 +76,8 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 # 挂载 MiniMax CLI 输出目录（Token Plan 用户生成的文件）
 from pathlib import Path
 MINIMAX_OUTPUT_DIR = str(Path.home() / "minimax-output")
-if os.path.exists(MINIMAX_OUTPUT_DIR):
-    app.mount("/minimax-output", StaticFiles(directory=MINIMAX_OUTPUT_DIR, html=True), name="minimax-output")
+os.makedirs(MINIMAX_OUTPUT_DIR, exist_ok=True)
+app.mount("/minimax-output", StaticFiles(directory=MINIMAX_OUTPUT_DIR, html=True), name="minimax-output")
 
 
 @app.get("/")

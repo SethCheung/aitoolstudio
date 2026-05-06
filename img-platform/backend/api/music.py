@@ -73,6 +73,8 @@ async def generate(
                 prompt=req.prompt,
                 model=req.model,
                 lyrics=req.lyrics,
+                is_instrumental=req.is_instrumental,
+                lyrics_optimizer=req.lyrics_optimizer,
             )
         else:
             result = await http_generate_music(

@@ -1,17 +1,10 @@
-version: '3.8'
-
 services:
   frontend:
     build:
       context: ./img-platform/frontend
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
-    volumes:
-      - ./img-platform/frontend:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000
+      - "5173:80"
     depends_on:
       - backend
 
@@ -22,8 +15,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./img-platform/backend:/app
-      - ./data:/app/data  # 数据库和生成图像存储
+      - ./data:/app/data
+      - ./data/uploads:/app/uploads
+      - ./data/config:/app/config
+      - ./data/minimax-output:/root/minimax-output
     environment:
       - DATABASE_URL=sqlite:///./data/img_platform.db
       - IMAGES_DIR=/app/data/images

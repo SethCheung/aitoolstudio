@@ -22,15 +22,15 @@ const categories: Array<{ key: Category; label: string; icon: string }> = [
   { key: 'text', label: 'Text', icon: 'T' },
 ]
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
 const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, '')}/docs`
 
 const modelCategories: Record<Exclude<Category, 'all'>, string[]> = {
-  image: ['image-01', 'image-01-turbo'],
-  voice: ['speech-02-hd', 'speech-02'],
+  image: ['image-01'],
+  voice: ['speech-2.8-hd', 'speech-2.8-turbo', 'speech-2.6-hd', 'speech-2.6-turbo'],
   video: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'S2V-01'],
-  music: ['music-01'],
-  text: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
+  music: ['music-2.6', 'music-2.5+', 'music-2.5'],
+  text: ['MiniMax-M2.7'],
 }
 
 const profiles = ref<Profile[]>([])

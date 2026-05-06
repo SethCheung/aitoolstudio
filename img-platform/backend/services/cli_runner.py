@@ -281,12 +281,22 @@ async def generate_music(
     prompt: str,
     model: str = "music-01",
     lyrics: str = "",
+    is_instrumental: bool = False,
+    lyrics_optimizer: bool = False,
 ) -> dict:
     """mmx music generate --prompt "..." [--out filename.mp3]"""
     filename = f"{uuid.uuid4().hex}.mp3"
     cmd = ["mmx", "music", "generate", "--prompt", prompt, "--out", filename]
     if model:
         cmd.extend(["--model", model])
+    if lyrics:
+        cmd.extend(["--lyrics", lyrics])
+    elif is_instrumental:
+        cmd.append("--instrumental")
+    elif lyrics_optimizer:
+        cmd.append("--lyrics-optimizer")
+    else:
+        cmd.append("--lyrics-optimizer")
 
     out = await asyncio.get_event_loop().run_in_executor(None, _run_sync, cmd, 300)
 
