@@ -17,7 +17,9 @@
 - `/api/profiles` 管理接口已加管理员鉴权；`/api/profiles/models` 要求已登录用户
 - MiniMax Profile 路由：HTTP API / CLI profile 管理
 - 图片、语音、视频、音乐生成入口：`api/image.py`、`api/voice.py`、`api/video.py`、`api/music.py`
+- 本地 ComfyUI 直连入口：`comfyui-local` 模型通过 `api/image.py` 路由到 `services/comfyui.py`，默认连接 `http://192.168.1.195:8188`，支持 GPU/VRAM 状态检测、checkpoint 选择、默认文生图工作流、ComfyUI ImageScale Upscale、历史轮询和输出图本地归档
 - 语音生成已对齐 MiniMax 官方同步 T2A HTTP 调试台的核心参数：Speech 2.8/2.6/02/01 模型、音色、情绪、语速、音量、音调、音频格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典和声音效果
+- 视频生成已对齐 MiniMax 官方视频方案的异步闭环：文生视频、首帧图生视频、首尾帧、主体参考、`prompt_optimizer`、`fast_pretreatment`、时长、分辨率、`task_id` 查询、`file_id` 取文件和 `/uploads/videos` 本地归档
 - 音乐生成已对齐 MiniMax 官方音乐调试台的核心参数：music-2.6/music-cover/music-2.5+/music-2.5、歌词、风格描述、纯音乐、AI 歌词优化、音频规格、返回格式、Seed 和 AI 水印
 - 提示词优化入口：`api/prompt.py`，显式调用文本模型扩写 prompt 后回填前端输入框
 - 项目首页：`frontend/src/views/HomeView.vue`，对话有图片结果时显示缩略图
@@ -27,7 +29,7 @@
 - `.gitignore` 已补充运行时数据、密钥文件、构建产物忽略规则
 
 **仍未完成**
-- ComfyUI 工作流上传、队列、任务状态、结果归档
+- ComfyUI 工作流上传、参数映射、图生图/inpainting/ControlNet/LoRA 工作流和服务端任务取消
 - Celery / Redis 任务队列
 - 图像理解、自动标签
 - 提示词库、收藏、批量下载
@@ -105,7 +107,12 @@
 ## Phase 3: ComfyUI API 集成
 
 **交付内容**：
-- ComfyUI 客户端封装（WebSocket + HTTP API）
+- ComfyUI 客户端封装（当前已完成 HTTP `/system_stats`、`/prompt`、`/history/{prompt_id}`、`/view`；WebSocket 进度后续再做）
+- `comfyui-local` 默认文生图入口，保持 Generate 页面统一工作台格式
+- 默认图片 workflow 可用 checkpoint 列表接口，过滤掉音频、VAE 和 LTX 视频模型
+- ComfyUI GPU/VRAM 状态展示，生成中自动刷新
+- ComfyUI 原生 `ImageScale` Upscale 接口和前端图片操作按钮
+- ComfyUI 输出图下载到本平台 `/uploads/comfyui` 并写入生成记录
 - 工作流数据表（workflows: id, name, description, workflow_json, is_enabled, created_at）
 - 工作流管理 API（CRUD：/api/workflows）
 - 生图任务队列（Celery + Redis）
@@ -114,7 +121,10 @@
 - 生成历史记录表（generations: id, user_id, workflow_id, prompt, negative_prompt, image_path, parameters, created_at）
 
 **关键文件**：
-- `img-platform/backend/models/workflow.py` — Workflow 模型定义
+- `img-platform/backend/services/comfyui.py` — ComfyUI HTTP 客户端、默认工作流、结果下载
+- `img-platform/backend/api/comfyui.py` — ComfyUI 状态 API
+- `img-platform/backend/api/image.py` — `comfyui-local` 生图路由
+- `img-platform/backend/models/workflow.py` — Workflow 模型定义（未完成）
 - `img-platform/backend/models/generation.py` — Generation 模型定义
 - `img-platform/backend/services/comfyui_client.py` — ComfyUI API 客户端封装
 - `img-platform/backend/api/workflows.py` — 工作流管理 API
@@ -124,6 +134,11 @@
 - `img-platform/frontend/src/stores/generation.ts` — 生图状态管理
 
 **验收标准**：
+- 用户在 image 分类选择 `comfyui-local` 后可看到本地 ComfyUI 在线状态
+- 用户可看到 VRAM 占用并在生成中自动刷新
+- 用户可选择当前 ComfyUI 默认图片 workflow 可用 checkpoint
+- 用户输入 prompt 后可通过本地 ComfyUI 生成图片，并在当前记录流中查看结果
+- 用户点击图片操作区 Upscale 后可得到 2x 放大图片，新结果无需刷新即可展示
 - 管理员可通过 API 上传 ComfyUI JSON 工作流
 - 用户可提交生图请求，返回 task_id
 - 前端可轮询任务状态，显示进度条
@@ -139,6 +154,7 @@
 - 图像理解 API（POST /api/minimax/analyze-image）— 视觉模型分析图像，返回标签和描述
 - MiniMax 生图 API（POST /api/image/generate）— 对齐官方 `/v1/image_generation` 请求体，支持 `subject_reference`、`width/height`、`aspect_ratio`、`n`、`seed`、`prompt_optimizer`、`aigc_watermark` 和 image-01-live `style`
 - MiniMax 同步语音 API（POST /api/voice/generate）— 对齐官方 `/v1/t2a_v2` 请求体，支持 voice_setting、audio_setting、pronunciation_dict、language_boost、voice_modify、subtitle_enable
+- MiniMax 视频 API（POST /api/video/generate + GET /api/video/status/{task_id}）— 对齐官方 `/v1/video_generation`、`/v1/query/video_generation` 和 `/v1/files/retrieve` 三段式流程，支持首帧、尾帧、主体参考、Prompt 优化、快速预处理、时长和分辨率
 - MiniMax 音乐生成 API（POST /api/music/generate）— 对齐官方 `/v1/music_generation` 请求体，支持 lyrics、prompt、is_instrumental、lyrics_optimizer、audio_setting、output_format、seed、aigc_watermark
 - API 配额追踪表（api_quotas: id, user_id, model_type, used_tokens, reset_at）
 - 配额检查中间件（限制用户 API 调用频率和额度）
@@ -155,6 +171,7 @@
 - 上传图像可返回自动标签和描述
 - 调用 MiniMax image-01 可生成图像并保存
 - 调用 MiniMax Speech T2A 可按用户选择的官方参数生成音频，并保存为可播放 URL
+- 调用 MiniMax Hailuo 视频生成可返回 task_id，轮询成功后自动下载视频并保存为可播放 URL
 - 调用 MiniMax Music 可按用户选择的官方参数生成音乐，并保存为可播放 URL
 - API Token 使用量记录到数据库
 

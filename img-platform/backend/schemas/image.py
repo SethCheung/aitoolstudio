@@ -35,6 +35,7 @@ class ImageGenerateRequest(BaseModel):
     aigc_watermark: bool = Field(default=False, description="是否添加 AIGC 水印")
     style: Optional[ImageStyle] = Field(default=None, description="image-01-live 画风设置")
     subject_reference: list[ImageSubjectReference] = Field(default_factory=list, max_length=4, description="参考图片列表")
+    comfyui_checkpoint: Optional[str] = Field(default=None, description="ComfyUI checkpoint 文件名，仅 comfyui-local 生效")
 
     @field_validator("aspect_ratio")
     @classmethod
@@ -75,3 +76,19 @@ class ImageGenerateResponse(BaseModel):
     image_urls: list[str]
     success_count: int
     failed_count: int
+
+
+class ImageUpscaleRequest(BaseModel):
+    """图片放大请求"""
+    source_url: str = Field(..., description="已有图片 URL，支持 /uploads、/minimax-output 或 http(s)")
+    scale: float = Field(default=2, ge=1, le=4, description="放大倍数")
+    method: str = Field(default="lanczos", description="ComfyUI ImageScale 方法")
+    aspect_ratio: Optional[str] = Field(default=None, description="源图展示比例，用于结果预览")
+
+    @field_validator("method")
+    @classmethod
+    def validate_method(cls, value: str) -> str:
+        allowed = {"nearest-exact", "bilinear", "area", "bicubic", "lanczos"}
+        if value not in allowed:
+            raise ValueError("upscale method 不支持")
+        return value

@@ -28,7 +28,7 @@ const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, '')}/docs`
 const modelCategories: Record<Exclude<Category, 'all'>, string[]> = {
   image: ['image-01', 'image-01-turbo'],
   voice: ['speech-02-hd', 'speech-02'],
-  video: ['hailuo-video-01'],
+  video: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'S2V-01'],
   music: ['music-01'],
   text: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
 }
@@ -50,7 +50,7 @@ const form = ref({
   models: {
     image: ['image-01'],
     voice: [] as string[],
-    video: [] as string[],
+    video: ['MiniMax-Hailuo-2.3'],
     music: [] as string[],
     text: ['MiniMax-M2.7'],
   } as Record<string, string[]>,
@@ -102,7 +102,7 @@ function openAdd() {
     base_url: 'https://api.minimax.io',
     enabled: true,
     priority: Math.max(1, normalizedProfiles.value.length + 1),
-    models: { ...emptyModels(), image: ['image-01'], text: ['MiniMax-M2.7'] },
+    models: { ...emptyModels(), image: ['image-01'], video: ['MiniMax-Hailuo-2.3'], text: ['MiniMax-M2.7'] },
   }
   formError.value = ''
   showForm.value = true

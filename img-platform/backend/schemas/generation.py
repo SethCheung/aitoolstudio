@@ -16,6 +16,8 @@ class GenerationResponse(BaseModel):
     voice_id: Optional[str] = None
     video_model: Optional[str] = None
     video_duration: Optional[str] = None
+    task_id: Optional[str] = None
+    status: Optional[str] = None
     n_generated: Optional[int] = None
     created_at: Optional[datetime] = None
 

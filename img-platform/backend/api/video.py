@@ -1,11 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import sys, os, logging, httpx
+import sys, os, logging, httpx, uuid
+from pathlib import Path
+from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from schemas.video import VideoGenerateRequest, VideoResponse
+from schemas.video import VideoGenerateRequest
 from schemas.generation import GenerationResponse
-from services.minimax import generate_video as http_generate_video, query_video_task as http_query_video_task
+from services.minimax import (
+    generate_video as http_generate_video,
+    query_video_task as http_query_video_task,
+    retrieve_video_file as http_retrieve_video_file,
+)
 from services.cli_runner import generate_video as cli_generate_video
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
@@ -15,6 +21,46 @@ from api.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/video", tags=["视频生成"])
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "videos")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def normalize_video_status(status: str | int | None) -> str:
+    normalized = str(status or "processing").strip().lower()
+    if normalized in {"success", "succeeded", "done", "completed"}:
+        return "success"
+    if normalized in {"fail", "failed", "error"}:
+        return "failed"
+    return "processing"
+
+
+def extract_file_id(result: dict) -> str:
+    data = result.get("data", {})
+    return str(result.get("file_id") or data.get("file_id") or "")
+
+
+def extract_status(result: dict) -> str:
+    data = result.get("data", {})
+    return normalize_video_status(result.get("status") or data.get("status"))
+
+
+def video_extension_from(download_url: str, filename: str = "") -> str:
+    candidate = filename or Path(urlparse(download_url).path).name
+    suffix = Path(candidate).suffix.lower().lstrip(".")
+    return suffix if suffix in {"mp4", "mov", "webm", "m4v"} else "mp4"
+
+
+async def save_video_from_url(download_url: str, filename: str = "") -> str:
+    ext = video_extension_from(download_url, filename)
+    stored_name = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(UPLOAD_DIR, stored_name)
+    async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
+        resp = await client.get(download_url)
+        resp.raise_for_status()
+    with open(filepath, "wb") as f:
+        f.write(resp.content)
+    return f"/uploads/videos/{stored_name}"
 
 
 @router.post("/generate", response_model=GenerationResponse)
@@ -44,9 +90,17 @@ async def generate(
                 model=req.model,
                 duration=req.duration,
                 resolution=req.resolution,
+                first_frame_image=req.first_frame_image,
+                last_frame_image=req.last_frame_image,
+                subject_reference=[item.model_dump() for item in req.subject_reference or []] or None,
+                prompt_optimizer=req.prompt_optimizer,
+                fast_pretreatment=req.fast_pretreatment,
+                callback_url=req.callback_url,
                 api_key=profile["api_key"],
                 base_url=profile.get("base_url", "https://api.minimax.io"),
             )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Video generation failed")
         raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
@@ -75,21 +129,60 @@ async def generate(
 
     return {
         "id": gen.id,
+        "type": "video",
         "task_id": task_id,
         "status": "pending",
         "prompt": req.prompt,
+        "image_urls": [],
+        "audio_url": None,
+        "video_url": None,
+        "model": req.model,
+        "aspect_ratio": None,
+        "voice_model": None,
+        "voice_id": None,
+        "video_model": req.model,
+        "video_duration": str(req.duration),
+        "n_generated": 1,
+        "created_at": gen.created_at,
     }
 
 
 @router.get("/status/{task_id}")
-async def video_status(task_id: str, db: Session = Depends(get_db)):
-    """轮询视频生成状态（当前端点 404，需在 MiniMax 控制台查看）"""
+async def video_status(
+    task_id: str,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """轮询视频生成状态；成功后用 file_id 下载并归档到本地 uploads。"""
+    gen = db.query(Generation).filter(Generation.mini_max_id == task_id).first()
+    if gen and gen.video_url:
+        return {"task_id": task_id, "status": "success", "video_url": gen.video_url}
+    if not gen:
+        raise HTTPException(status_code=404, detail="Video task not found")
+
+    profile = get_profile_for_model(gen.video_model or "")
+    if not profile:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No enabled profile found for model '{gen.video_model}'",
+        )
+    if profile.get("auth_type", "http") == "cli":
+        return {
+            "task_id": task_id,
+            "status": "processing",
+            "video_url": None,
+            "note": "CLI video status polling is not available yet",
+        }
+
     try:
-        result = await query_video_task(task_id)
+        result = await http_query_video_task(
+            task_id,
+            api_key=profile["api_key"],
+            base_url=profile.get("base_url", "https://api.minimax.io"),
+        )
     except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return {"task_id": task_id, "status": "pending", "video_url": None, "note": "Query endpoint unavailable via API. Check MiniMax console."}
-        raise HTTPException(status_code=500, detail=str(e))
+        detail = e.response.text or str(e)
+        raise HTTPException(status_code=502, detail=f"MiniMax query failed: {detail}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -100,11 +193,27 @@ async def video_status(task_id: str, db: Session = Depends(get_db)):
             detail=f"MiniMax API error: {base_resp.get('status_msg', 'unknown')}",
         )
 
-    data = result.get("data", {})
-    status = data.get("status", 0)
-    video_url = data.get("video_url", "")
+    status = extract_status(result)
+    if status == "failed":
+        message = result.get("error_message") or result.get("data", {}).get("error_message") or "视频生成失败"
+        raise HTTPException(status_code=502, detail=message)
 
-    gen = db.query(Generation).filter(Generation.mini_max_id == task_id).first()
+    video_url = ""
+    if status == "success":
+        file_id = extract_file_id(result)
+        if not file_id:
+            raise HTTPException(status_code=502, detail="MiniMax task succeeded without file_id")
+        file_result = await http_retrieve_video_file(
+            file_id,
+            api_key=profile["api_key"],
+            base_url=profile.get("base_url", "https://api.minimax.io"),
+        )
+        file_info = file_result.get("file", {})
+        download_url = file_info.get("download_url", "")
+        if not download_url:
+            raise HTTPException(status_code=502, detail="MiniMax file retrieve returned no download_url")
+        video_url = await save_video_from_url(download_url, file_info.get("filename", ""))
+
     if gen and video_url:
         gen.video_url = video_url
         db.commit()

@@ -232,14 +232,38 @@ async def generate_video(
     model: str = "MiniMax-Hailuo-2.3",
     duration: int = 6,
     resolution: str = "768P",
+    first_frame_image: Optional[str] = None,
+    last_frame_image: Optional[str] = None,
+    subject_reference: Optional[list[dict]] = None,
+    prompt_optimizer: bool = True,
+    fast_pretreatment: bool = False,
+    callback_url: Optional[str] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
 ) -> dict:
-    """调用 MiniMax Hailuo (文生视频) API — 异步，返回 task_id"""
+    """调用 MiniMax 视频生成 API — 异步，返回 task_id。"""
     key = api_key or DEFAULT_API_KEY
     url = base_url or DEFAULT_BASE_URL
     if not key:
         raise ValueError("MINIMAX_API_KEY not configured")
+
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "duration": duration,
+        "resolution": resolution,
+        "prompt_optimizer": prompt_optimizer,
+    }
+    if fast_pretreatment:
+        payload["fast_pretreatment"] = True
+    if first_frame_image:
+        payload["first_frame_image"] = first_frame_image
+    if last_frame_image:
+        payload["last_frame_image"] = last_frame_image
+    if subject_reference:
+        payload["subject_reference"] = subject_reference
+    if callback_url:
+        payload["callback_url"] = callback_url
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
@@ -248,12 +272,7 @@ async def generate_video(
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": model,
-                "prompt": prompt,
-                "duration": duration,
-                "resolution": resolution,
-            },
+            json=payload,
         )
         resp.raise_for_status()
         return resp.json()
@@ -268,9 +287,26 @@ async def query_video_task(task_id: str, api_key: Optional[str] = None, base_url
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(
-            f"{url}/v1/video_generation",
+            f"{url}/v1/query/video_generation",
             headers={"Authorization": f"Bearer {key}"},
             params={"task_id": task_id},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def retrieve_video_file(file_id: str, api_key: Optional[str] = None, base_url: Optional[str] = None) -> dict:
+    """根据 file_id 获取视频文件下载信息。"""
+    key = api_key or DEFAULT_API_KEY
+    url = base_url or DEFAULT_BASE_URL
+    if not key:
+        raise ValueError("MINIMAX_API_KEY not configured")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{url}/v1/files/retrieve",
+            headers={"Authorization": f"Bearer {key}"},
+            params={"file_id": file_id},
         )
         resp.raise_for_status()
         return resp.json()

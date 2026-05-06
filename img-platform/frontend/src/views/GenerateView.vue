@@ -59,6 +59,12 @@ interface ImageReferenceItem {
   src: string
 }
 
+interface VideoReferenceItem {
+  id: string
+  name: string
+  src: string
+}
+
 // ── State ──────────────────────────────────────────────
 const selectedCategory = ref<GenerationCategory>('image')
 const selectedModel = ref('image-01')
@@ -74,6 +80,14 @@ const imageAigcWatermark = ref(false)
 const imageStyleWeight = ref(0.8)
 const imageReferenceItems = ref<ImageReferenceItem[]>([])
 const imageReferenceUrl = ref('')
+const comfyStatus = ref<'unknown' | 'online' | 'offline'>('unknown')
+const comfyDeviceName = ref('')
+const comfyVramUsedGb = ref(0)
+const comfyVramTotalGb = ref(0)
+const comfyVramPercent = ref(0)
+const comfyTorchUsedGb = ref(0)
+const comfyCheckpoints = ref<string[]>([])
+const selectedComfyCheckpoint = ref('')
 const selectedVoiceId = ref('male-qn-qingse')
 const customVoiceId = ref('')
 const useCustomVoice = ref(false)
@@ -103,6 +117,15 @@ const musicBitrate = ref(256000)
 const musicSeed = ref<number | null>(null)
 const musicAigcWatermark = ref(false)
 const musicReferenceAudioUrl = ref('')
+const videoMode = ref<'text' | 'image' | 'start-end' | 'subject'>('text')
+const videoDuration = ref(6)
+const videoResolution = ref('768P')
+const videoPromptOptimizer = ref(true)
+const videoFastPretreatment = ref(false)
+const videoFirstFrameUrl = ref('')
+const videoLastFrameUrl = ref('')
+const videoSubjectUrl = ref('')
+const videoSubjectReferences = ref<VideoReferenceItem[]>([])
 
 const messages = ref<Message[]>([])
 const inputText = ref('')
@@ -116,10 +139,20 @@ const isOptimizingPrompt = ref(false)
 const generationAbortController = ref<AbortController | null>(null)
 const convId = ref<number | null>(null)
 const previewImageUrl = ref('')
+const upscalingUrls = ref<Set<string>>(new Set())
+let comfyStatusTimer: ReturnType<typeof window.setInterval> | null = null
 
 const styles = ['默认', '漫画', '元气', '中世纪', '水彩']
 const aspects = ['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', '21:9']
 const imageCounts = [1, 2, 3, 4] as const
+const videoModes = [
+  { id: 'text', label: '文生视频' },
+  { id: 'image', label: '首帧图生视频' },
+  { id: 'start-end', label: '首尾帧' },
+  { id: 'subject', label: '主体参考' },
+] as const
+const videoDurations = [6, 10] as const
+const videoResolutions = ['512P', '768P', '1080P'] as const
 
 interface GenerationRecord {
   id: string
@@ -245,11 +278,23 @@ const pronunciationTones = computed(() => {
 const canSubmitGeneration = computed(() => {
   if (isOptimizingPrompt.value) return false
   if (inputText.value.trim()) return true
+  if (selectedCategory.value === 'video') {
+    return Boolean(videoFirstFrameUrl.value || videoLastFrameUrl.value || videoSubjectReferences.value.length)
+  }
   if (selectedCategory.value !== 'music') return false
   return Boolean(musicLyrics.value.trim() || musicLyricsOptimizer.value)
 })
 
 const activeImageReferenceCount = computed(() => imageReferenceItems.value.length)
+const activeVideoReferenceCount = computed(() => {
+  const frameCount = Number(Boolean(videoFirstFrameUrl.value)) + Number(Boolean(videoLastFrameUrl.value))
+  return frameCount + videoSubjectReferences.value.length
+})
+const isLocalComfyUI = computed(() => selectedCategory.value === 'image' && selectedModel.value === 'comfyui-local')
+const comfyVramLabel = computed(() => {
+  if (!comfyVramTotalGb.value) return 'VRAM --'
+  return `VRAM ${comfyVramUsedGb.value.toFixed(1)} / ${comfyVramTotalGb.value.toFixed(1)} GB · ${comfyVramPercent.value}%`
+})
 
 watch(selectedCategory, () => {
   const models = currentModelList.value
@@ -258,6 +303,9 @@ watch(selectedCategory, () => {
   }
   if (selectedCategory.value !== 'image') {
     imageReferenceUrl.value = ''
+  }
+  if (selectedCategory.value !== 'video') {
+    videoSubjectUrl.value = ''
   }
 })
 
@@ -276,8 +324,46 @@ watch(selectedModel, value => {
   if (value !== 'image-01-live') {
     selectedStyle.value = '默认'
   }
-  if (value !== 'image-01') {
+  if (value !== 'image-01' && value !== 'comfyui-local') {
     useCustomImageSize.value = false
+  }
+  if (value === 'comfyui-local') {
+    imagePromptOptimizer.value = false
+    imageAigcWatermark.value = false
+    imageReferenceItems.value = []
+    void refreshComfyStatus()
+  }
+})
+
+watch(videoMode, value => {
+  if (value === 'text') {
+    videoFirstFrameUrl.value = ''
+    videoLastFrameUrl.value = ''
+    videoSubjectReferences.value = []
+  }
+  if (value === 'image') {
+    videoLastFrameUrl.value = ''
+    videoSubjectReferences.value = []
+  }
+  if (value === 'start-end') {
+    videoSubjectReferences.value = []
+  }
+  if (value === 'subject') {
+    videoFirstFrameUrl.value = ''
+    videoLastFrameUrl.value = ''
+  }
+})
+
+watch([isGenerating, isLocalComfyUI], ([generating, local]) => {
+  if (generating && local && !comfyStatusTimer) {
+    void refreshComfyStatus()
+    comfyStatusTimer = window.setInterval(() => {
+      void refreshComfyStatus()
+    }, 2000)
+  }
+  if ((!generating || !local) && comfyStatusTimer) {
+    window.clearInterval(comfyStatusTimer)
+    comfyStatusTimer = null
   }
 })
 
@@ -298,6 +384,7 @@ function closeImagePreview() {
 }
 
 function imageAspectRatio(aspect: string) {
+  if (!aspect) return '16 / 9'
   const custom = aspect.match(/^(\d+)x(\d+)$/)
   if (custom) return `${custom[1]} / ${custom[2]}`
   const normalized = aspect.match(/^(\d+):(\d+)$/)
@@ -307,6 +394,65 @@ function imageAspectRatio(aspect: string) {
 
 function isRequestCanceled(err: any) {
   return err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.message === 'canceled'
+}
+
+async function refreshComfyStatus() {
+  try {
+    const [statusResp, checkpointsResp] = await Promise.all([
+      api.get('/api/comfyui/status'),
+      api.get('/api/comfyui/checkpoints'),
+    ])
+    const devices = statusResp.data?.devices || []
+    const device = devices[0] || {}
+    comfyDeviceName.value = device.name || ''
+    const total = Number(device.vram_total || 0)
+    const free = Number(device.vram_free || 0)
+    const torchTotal = Number(device.torch_vram_total || 0)
+    const torchFree = Number(device.torch_vram_free || 0)
+    const used = Math.max(0, total - free)
+    const torchUsed = Math.max(0, torchTotal - torchFree)
+    comfyVramTotalGb.value = total / 1024 / 1024 / 1024
+    comfyVramUsedGb.value = used / 1024 / 1024 / 1024
+    comfyTorchUsedGb.value = torchUsed / 1024 / 1024 / 1024
+    comfyVramPercent.value = total ? Math.round((used / total) * 100) : 0
+    comfyCheckpoints.value = checkpointsResp.data?.checkpoints || []
+    if (comfyCheckpoints.value.length && !comfyCheckpoints.value.includes(selectedComfyCheckpoint.value)) {
+      selectedComfyCheckpoint.value =
+        comfyCheckpoints.value.find(name => name.toLowerCase().includes('dreamshaper'))
+        || comfyCheckpoints.value.find(name => !/audio|vocoder|vae|ltx/i.test(name))
+        || comfyCheckpoints.value[0]
+    }
+    comfyStatus.value = 'online'
+  } catch (e) {
+    comfyStatus.value = 'offline'
+    comfyDeviceName.value = ''
+    comfyVramUsedGb.value = 0
+    comfyVramTotalGb.value = 0
+    comfyVramPercent.value = 0
+    comfyTorchUsedGb.value = 0
+  }
+}
+
+function patchMessage(id: string, patch: Partial<Message>) {
+  const index = messages.value.findIndex(msg => msg.id === id)
+  if (index < 0) return null
+  const updated = { ...messages.value[index], ...patch }
+  messages.value.splice(index, 1, updated)
+  return updated
+}
+
+function isUpscaling(url: string) {
+  return upscalingUrls.value.has(url)
+}
+
+function setUpscaling(url: string, value: boolean) {
+  const next = new Set(upscalingUrls.value)
+  if (value) {
+    next.add(url)
+  } else {
+    next.delete(url)
+  }
+  upscalingUrls.value = next
 }
 
 function markActiveGenerationCanceled() {
@@ -364,12 +510,15 @@ function updateImageSeed(event: Event) {
 }
 
 function openImageReferencePicker() {
-  selectedCategory.value = 'image'
   imageReferenceInput.value?.click()
 }
 
 function addImageReference(src: string, name = '参考图') {
   if (!src) return
+  if (isLocalComfyUI.value) {
+    ElMessage.warning('本地 ComfyUI 默认工作流暂不吃参考图，先别塞。')
+    return
+  }
   if (imageReferenceItems.value.some(item => item.src === src)) return
   if (imageReferenceItems.value.length >= 4) {
     ElMessage.warning('参考图最多添加 4 张，别贪多，模型也会迷糊。')
@@ -420,9 +569,92 @@ function addImageReferenceUrl() {
   imageReferenceUrl.value = ''
 }
 
+function assignVideoFrameReference(src: string, name = '视频参考图') {
+  if (!src) return
+  if (videoMode.value === 'text') {
+    videoMode.value = 'image'
+  }
+  if (videoMode.value === 'subject') {
+    addVideoSubjectReference(src, name)
+    return
+  }
+  if (videoMode.value === 'start-end' && videoFirstFrameUrl.value && !videoLastFrameUrl.value) {
+    videoLastFrameUrl.value = src
+    return
+  }
+  videoFirstFrameUrl.value = src
+}
+
+function addVideoSubjectReference(src: string, name = '主体参考图') {
+  if (!src) return
+  if (videoSubjectReferences.value.some(item => item.src === src)) return
+  if (videoSubjectReferences.value.length >= 4) {
+    ElMessage.warning('主体参考图最多 4 张。再多不是专业，是给模型添乱。')
+    return
+  }
+  videoSubjectReferences.value.push({
+    id: `video-ref-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name,
+    src,
+  })
+}
+
+function removeVideoReference(kind: 'first' | 'last' | 'subject', id?: string) {
+  if (kind === 'first') videoFirstFrameUrl.value = ''
+  if (kind === 'last') videoLastFrameUrl.value = ''
+  if (kind === 'subject' && id) {
+    videoSubjectReferences.value = videoSubjectReferences.value.filter(item => item.id !== id)
+  }
+}
+
+async function addVideoReferenceFiles(files: FileList | File[]) {
+  const imageFiles = Array.from(files).filter(file =>
+    ['image/jpeg', 'image/png', 'image/webp'].includes(file.type),
+  )
+  if (!imageFiles.length) {
+    ElMessage.warning('视频参考图只支持 JPG、PNG、WebP')
+    return
+  }
+  selectedCategory.value = 'video'
+  for (const file of imageFiles) {
+    if (file.size > 20 * 1024 * 1024) {
+      ElMessage.error(`${file.name} 超过 20MB，MiniMax 视频接口不会收。`)
+      continue
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('图片读取失败'))
+      reader.readAsDataURL(file)
+    })
+    assignVideoFrameReference(dataUrl, file.name)
+  }
+}
+
+function addVideoFrameUrl(kind: 'first' | 'last' | 'subject') {
+  const source = kind === 'last' ? videoLastFrameUrl.value : kind === 'subject' ? videoSubjectUrl.value : videoFirstFrameUrl.value
+  const url = source.trim()
+  if (!url) return
+  if (!/^https?:\/\//i.test(url) && !url.startsWith('data:image/')) {
+    ElMessage.warning('视频参考图需要是 http(s) URL 或 data:image')
+    return
+  }
+  selectedCategory.value = 'video'
+  if (kind === 'subject') {
+    addVideoSubjectReference(url, '主体 URL')
+    videoSubjectUrl.value = ''
+  } else if (kind === 'last') {
+    videoLastFrameUrl.value = url
+  } else {
+    videoFirstFrameUrl.value = url
+  }
+}
+
 async function handleImageReferenceInput(event: Event) {
   const files = (event.target as HTMLInputElement).files
-  if (files) {
+  if (files && selectedCategory.value === 'video') {
+    await addVideoReferenceFiles(files)
+  } else if (files) {
     await addImageReferenceFiles(files)
   }
   if (imageReferenceInput.value) {
@@ -434,14 +666,22 @@ async function handleComposerDrop(event: DragEvent) {
   const files = event.dataTransfer?.files
   if (files?.length) {
     event.preventDefault()
-    await addImageReferenceFiles(files)
+    if (selectedCategory.value === 'video') {
+      await addVideoReferenceFiles(files)
+    } else {
+      await addImageReferenceFiles(files)
+    }
     return
   }
   const url = event.dataTransfer?.getData('text/uri-list') || event.dataTransfer?.getData('text/plain') || ''
-  if (url && /^https?:\/\/.+\.(png|jpe?g)(\?.*)?$/i.test(url.trim())) {
+  if (url && /^https?:\/\/.+\.(png|jpe?g|webp)(\?.*)?$/i.test(url.trim())) {
     event.preventDefault()
-    selectedCategory.value = 'image'
-    addImageReference(url.trim(), '拖入参考图')
+    if (selectedCategory.value === 'video') {
+      assignVideoFrameReference(url.trim(), '拖入参考图')
+    } else {
+      selectedCategory.value = 'image'
+      addImageReference(url.trim(), '拖入参考图')
+    }
   }
 }
 
@@ -552,6 +792,79 @@ function downloadAll(urls: string[]) {
   })
 }
 
+async function upscaleImage(url: string, record: GenerationRecord) {
+  if (isGenerating.value || isOptimizingPrompt.value || isUpscaling(url)) return
+  const previewAspect = record.aspect || '16:9'
+  setUpscaling(url, true)
+  await ensureConversation()
+
+  const userMsg: Message = {
+    id: `user-upscale-${Date.now()}`,
+    role: 'user',
+    type: 'text',
+    content: `Upscale: ${record.prompt}`,
+    createdAt: new Date(),
+  }
+  messages.value.push(userMsg)
+  await saveMessages()
+
+  const placeholders = createPlaceholder('image')
+  const placeholderId = placeholders.msg.id
+  const controller = new AbortController()
+  generationAbortController.value = controller
+  messages.value.push({
+    ...placeholders.msg,
+    model: 'comfyui-upscale',
+    aspect: previewAspect,
+    style: 'Upscale 2x',
+  })
+  isGenerating.value = true
+  void refreshComfyStatus()
+  scrollToBottom()
+
+  try {
+    const resp = await api.post('/api/image/upscale', {
+      source_url: url,
+      scale: 2,
+      method: 'lanczos',
+      aspect_ratio: previewAspect,
+    }, {
+      signal: controller.signal,
+    })
+    const data = resp.data as { image_urls: string[] }
+    const updated = patchMessage(placeholderId, {
+      loading: false,
+      results: data.image_urls || [],
+      type: 'image',
+      model: 'comfyui-upscale',
+      aspect: previewAspect,
+      style: 'Upscale 2x',
+    })
+    if (updated) {
+      await saveAssistantResponse(updated)
+    }
+  } catch (err: any) {
+    patchMessage(placeholderId, {
+      content: isRequestCanceled(err) || controller.signal.aborted
+        ? '已取消放大'
+        : err?.response?.data?.detail || err.message || 'Upscale failed',
+      role: 'error',
+      loading: false,
+      model: 'comfyui-upscale',
+      aspect: previewAspect,
+      style: 'Upscale 2x',
+    })
+  } finally {
+    if (generationAbortController.value === controller) {
+      generationAbortController.value = null
+    }
+    isGenerating.value = false
+    setUpscaling(url, false)
+    void refreshComfyStatus()
+    scrollToBottom()
+  }
+}
+
 function handlePreviewKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     closeImagePreview()
@@ -629,7 +942,10 @@ async function saveMessages() {
 async function sendMessage() {
   if ((!inputText.value.trim() && !canSubmitGeneration.value) || isGenerating.value) return
   const text = inputText.value.trim()
-  const displayText = text || musicLyrics.value.trim().slice(0, 120) || 'AI 歌词优化音乐'
+  const displayText = text
+    || (selectedCategory.value === 'music' ? musicLyrics.value.trim().slice(0, 120) || 'AI 歌词优化音乐' : '')
+    || (selectedCategory.value === 'video' ? '视频参考图生成' : '')
+    || '生成请求'
   inputText.value = ''
 
   await ensureConversation()
@@ -658,6 +974,7 @@ async function sendMessage() {
 
 async function sendImage(prompt: string) {
   const placeholders = createPlaceholder('image')
+  const placeholderId = placeholders.msg.id
   const controller = new AbortController()
   generationAbortController.value = controller
   messages.value.push(placeholders.msg)
@@ -676,6 +993,7 @@ async function sendImage(prompt: string) {
       prompt_optimizer: imagePromptOptimizer.value,
       seed: imageSeed.value,
       aigc_watermark: imageAigcWatermark.value,
+      comfyui_checkpoint: isLocalComfyUI.value ? selectedComfyCheckpoint.value || null : null,
       style: selectedModel.value === 'image-01-live' && selectedStyle.value !== '默认'
         ? { style_type: selectedStyle.value, style_weight: imageStyleWeight.value }
         : null,
@@ -687,23 +1005,27 @@ async function sendImage(prompt: string) {
       signal: controller.signal,
     })
     const data = resp.data as { image_urls: string[] }
-    placeholders.msg.loading = false
     console.log('[sendImage] image_urls:', JSON.stringify(data.image_urls))
     console.log('[sendImage] results count:', (data.image_urls || []).length)
-    placeholders.msg.results = data.image_urls || []
-    placeholders.msg.type = 'image'
-    placeholders.msg.model = selectedModel.value
-    placeholders.msg.aspect = useCustomImageSize.value ? `${imageWidth.value}x${imageHeight.value}` : selectedAspect.value
-    placeholders.msg.style = selectedStyle.value
-    await saveAssistantResponse(placeholders.msg)
-  } catch (err: any) {
-    if (isRequestCanceled(err) || controller.signal.aborted) {
-      placeholders.msg.content = '已取消生成'
-    } else {
-      placeholders.msg.content = err?.response?.data?.detail || err.message || 'Generation failed'
+    const updated = patchMessage(placeholderId, {
+      loading: false,
+      results: data.image_urls || [],
+      type: 'image',
+      model: selectedModel.value,
+      aspect: useCustomImageSize.value ? `${imageWidth.value}x${imageHeight.value}` : selectedAspect.value,
+      style: isLocalComfyUI.value ? selectedComfyCheckpoint.value || '默认' : selectedStyle.value,
+    })
+    if (updated) {
+      await saveAssistantResponse(updated)
     }
-    placeholders.msg.role = 'error'
-    placeholders.msg.loading = false
+  } catch (err: any) {
+    patchMessage(placeholderId, {
+      content: isRequestCanceled(err) || controller.signal.aborted
+        ? '已取消生成'
+        : err?.response?.data?.detail || err.message || 'Generation failed',
+      role: 'error',
+      loading: false,
+    })
   } finally {
     if (generationAbortController.value === controller) {
       generationAbortController.value = null
@@ -848,6 +1170,22 @@ async function sendVideo(text: string) {
     const resp = await api.post('/api/video/generate', {
       prompt: text,
       model: selectedModel.value,
+      duration: videoDuration.value,
+      resolution: videoResolution.value,
+      first_frame_image: videoMode.value === 'image' || videoMode.value === 'start-end'
+        ? videoFirstFrameUrl.value || null
+        : null,
+      last_frame_image: videoMode.value === 'start-end'
+        ? videoLastFrameUrl.value || null
+        : null,
+      subject_reference: videoMode.value === 'subject' && videoSubjectReferences.value.length
+        ? [{
+            type: 'character',
+            image: videoSubjectReferences.value.map(item => item.src),
+          }]
+        : null,
+      prompt_optimizer: videoPromptOptimizer.value,
+      fast_pretreatment: videoFastPretreatment.value,
     }, {
       signal: controller.signal,
     })
@@ -873,12 +1211,12 @@ async function sendVideo(text: string) {
 }
 
 async function pollVideoStatus(msg: Message, taskId: string, signal?: AbortSignal) {
-  const maxAttempts = 30
+  const maxAttempts = 90
   for (let i = 0; i < maxAttempts; i++) {
     if (signal?.aborted) {
       throw new DOMException('canceled', 'CanceledError')
     }
-    await new Promise(r => setTimeout(r, 3000))
+    await new Promise(r => setTimeout(r, 10000))
     if (signal?.aborted) {
       throw new DOMException('canceled', 'CanceledError')
     }
@@ -987,6 +1325,9 @@ onMounted(async () => {
       selectedModel.value = modelNamesFor(firstCat)[0]
       console.log('[GenerateView] default category:', firstCat, 'model:', selectedModel.value)
     }
+    if (selectedModel.value === 'comfyui-local') {
+      await refreshComfyStatus()
+    }
   } catch (e) {
     console.warn('Failed to load models', e)
   }
@@ -1007,6 +1348,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handlePreviewKeydown)
+  if (comfyStatusTimer) {
+    window.clearInterval(comfyStatusTimer)
+    comfyStatusTimer = null
+  }
 })
 </script>
 
@@ -1177,9 +1522,14 @@ onUnmounted(() => {
                     </svg>
                     变体
                   </button>
-                  <button type="button" disabled title="暂未接入超分接口">
+                  <button
+                    type="button"
+                    title="使用 ComfyUI 放大 2x"
+                    :disabled="isGenerating || isOptimizingPrompt || isUpscaling(url)"
+                    @click="upscaleImage(url, record)"
+                  >
                     <span>HD</span>
-                    Upscale
+                    {{ isUpscaling(url) ? '放大中' : 'Upscale' }}
                   </button>
                   <button type="button" @click="downloadFile(url)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1206,7 +1556,7 @@ onUnmounted(() => {
 
     <form
       class="composer"
-      :class="{ 'drop-ready': selectedCategory === 'image' }"
+      :class="{ 'drop-ready': selectedCategory === 'image' || selectedCategory === 'video' }"
       @submit.prevent="sendMessage"
       @dragover.prevent
       @drop="handleComposerDrop"
@@ -1218,9 +1568,31 @@ onUnmounted(() => {
         </figure>
         <button class="reference-add" type="button" title="继续添加参考图" @click="openImageReferencePicker">+</button>
       </div>
+      <div v-if="selectedCategory === 'video' && activeVideoReferenceCount" class="reference-strip">
+        <figure v-if="videoFirstFrameUrl" class="reference-thumb">
+          <img :src="videoFirstFrameUrl" alt="首帧参考图" />
+          <button type="button" title="移除首帧" @click="removeVideoReference('first')">×</button>
+        </figure>
+        <figure v-if="videoLastFrameUrl" class="reference-thumb">
+          <img :src="videoLastFrameUrl" alt="尾帧参考图" />
+          <button type="button" title="移除尾帧" @click="removeVideoReference('last')">×</button>
+        </figure>
+        <figure v-for="item in videoSubjectReferences" :key="item.id" class="reference-thumb">
+          <img :src="item.src" :alt="item.name" />
+          <button type="button" title="移除主体参考图" @click="removeVideoReference('subject', item.id)">×</button>
+        </figure>
+        <button class="reference-add" type="button" title="继续添加视频参考图" @click="openImageReferencePicker">+</button>
+      </div>
 
       <div class="composer-input">
-        <button class="upload-btn" type="button" title="添加参考图" @click="openImageReferencePicker">
+        <button
+          v-if="selectedCategory === 'image' || selectedCategory === 'video'"
+          class="upload-btn"
+          type="button"
+          :title="selectedCategory === 'video' ? '添加视频参考图' : '添加参考图'"
+          :disabled="selectedCategory === 'image' && isLocalComfyUI"
+          @click="openImageReferencePicker"
+        >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="5" width="18" height="14" rx="2"/>
             <circle cx="8.5" cy="10.5" r="1.5"/>
@@ -1231,8 +1603,9 @@ onUnmounted(() => {
           ref="imageReferenceInput"
           class="hidden-file-input"
           type="file"
-          accept="image/jpeg,image/jpg,image/png"
+          accept="image/jpeg,image/jpg,image/png,image/webp"
           multiple
+          :disabled="selectedCategory === 'image' && isLocalComfyUI"
           @change="handleImageReferenceInput"
         />
         <textarea
@@ -1256,7 +1629,27 @@ onUnmounted(() => {
       </div>
 
       <div v-if="selectedCategory === 'image'" class="image-panel">
-        <div class="image-reference-row">
+        <div v-if="isLocalComfyUI" class="comfy-status-row" :class="comfyStatus">
+          <span class="status-dot"></span>
+          <span>本地 ComfyUI</span>
+          <strong>{{ comfyStatus === 'online' ? '在线' : comfyStatus === 'offline' ? '离线' : '检测中' }}</strong>
+          <small>{{ comfyVramLabel }}</small>
+          <small v-if="comfyTorchUsedGb">Torch {{ comfyTorchUsedGb.toFixed(1) }} GB</small>
+          <small v-if="comfyDeviceName">{{ comfyDeviceName }}</small>
+          <button type="button" @click="refreshComfyStatus">刷新</button>
+        </div>
+
+        <label v-if="isLocalComfyUI" class="voice-field comfy-checkpoint-field">
+          <span>ComfyUI checkpoint</span>
+          <select v-model="selectedComfyCheckpoint">
+            <option value="">自动选择图像模型</option>
+            <option v-for="checkpoint in comfyCheckpoints" :key="checkpoint" :value="checkpoint">
+              {{ checkpoint }}
+            </option>
+          </select>
+        </label>
+
+        <div v-else class="image-reference-row">
           <input
             v-model="imageReferenceUrl"
             type="url"
@@ -1270,15 +1663,15 @@ onUnmounted(() => {
           <summary>图片高级设置</summary>
           <div class="advanced-grid image-settings-grid">
             <label class="voice-check">
-              <input v-model="imagePromptOptimizer" type="checkbox" />
+              <input v-model="imagePromptOptimizer" type="checkbox" :disabled="isLocalComfyUI" />
               <span>官方 Prompt 优化</span>
             </label>
             <label class="voice-check">
-              <input v-model="imageAigcWatermark" type="checkbox" />
+              <input v-model="imageAigcWatermark" type="checkbox" :disabled="isLocalComfyUI" />
               <span>AIGC 水印</span>
             </label>
             <label class="voice-check">
-              <input v-model="useCustomImageSize" type="checkbox" :disabled="selectedModel !== 'image-01'" />
+              <input v-model="useCustomImageSize" type="checkbox" :disabled="selectedModel !== 'image-01' && selectedModel !== 'comfyui-local'" />
               <span>自定义尺寸</span>
             </label>
             <label class="voice-field">
@@ -1289,7 +1682,7 @@ onUnmounted(() => {
                 min="512"
                 max="2048"
                 step="8"
-                :disabled="!useCustomImageSize || selectedModel !== 'image-01'"
+                :disabled="!useCustomImageSize || (selectedModel !== 'image-01' && selectedModel !== 'comfyui-local')"
                 @input="updateImageDimension('width', $event)"
               />
             </label>
@@ -1301,7 +1694,7 @@ onUnmounted(() => {
                 min="512"
                 max="2048"
                 step="8"
-                :disabled="!useCustomImageSize || selectedModel !== 'image-01'"
+                :disabled="!useCustomImageSize || (selectedModel !== 'image-01' && selectedModel !== 'comfyui-local')"
                 @input="updateImageDimension('height', $event)"
               />
             </label>
@@ -1442,6 +1835,76 @@ onUnmounted(() => {
             <label class="voice-range">
               <span>效果音色 {{ voiceEffectTimbre }}</span>
               <input v-model.number="voiceEffectTimbre" type="range" min="-100" max="100" step="1" />
+            </label>
+          </div>
+        </details>
+      </div>
+
+      <div v-if="selectedCategory === 'video'" class="video-panel">
+        <div class="video-mode-row" aria-label="视频生成模式">
+          <button
+            v-for="mode in videoModes"
+            :key="mode.id"
+            type="button"
+            :class="{ active: videoMode === mode.id }"
+            @click="videoMode = mode.id"
+          >
+            {{ mode.label }}
+          </button>
+        </div>
+
+        <div v-if="videoMode === 'image' || videoMode === 'start-end'" class="image-reference-row">
+          <input
+            v-model="videoFirstFrameUrl"
+            type="url"
+            placeholder="首帧图片 URL，或把图片拖进对话框"
+            @keydown.enter.prevent="addVideoFrameUrl('first')"
+          />
+          <button type="button" @click="addVideoFrameUrl('first')">首帧</button>
+        </div>
+
+        <div v-if="videoMode === 'start-end'" class="image-reference-row">
+          <input
+            v-model="videoLastFrameUrl"
+            type="url"
+            placeholder="尾帧图片 URL；尺寸不一致时官方会按首帧裁切"
+            @keydown.enter.prevent="addVideoFrameUrl('last')"
+          />
+          <button type="button" @click="addVideoFrameUrl('last')">尾帧</button>
+        </div>
+
+        <div v-if="videoMode === 'subject'" class="image-reference-row">
+          <input
+            v-model="videoSubjectUrl"
+            type="url"
+            placeholder="主体参考图 URL，支持多张主体一致性参考"
+            @keydown.enter.prevent="addVideoFrameUrl('subject')"
+          />
+          <button type="button" @click="addVideoFrameUrl('subject')">主体</button>
+        </div>
+
+        <details class="voice-advanced">
+          <summary>视频高级设置</summary>
+          <div class="advanced-grid video-settings-grid">
+            <label class="voice-check">
+              <input v-model="videoPromptOptimizer" type="checkbox" />
+              <span>官方 Prompt 优化</span>
+            </label>
+            <label class="voice-check">
+              <input v-model="videoFastPretreatment" type="checkbox" />
+              <span>快速预处理</span>
+            </label>
+            <label class="voice-field">
+              <span>时长</span>
+              <select v-model.number="videoDuration">
+                <option v-for="duration in videoDurations" :key="duration" :value="duration">{{ duration }} 秒</option>
+              </select>
+            </label>
+            <label class="voice-field">
+              <span>分辨率</span>
+              <select v-model="videoResolution">
+                <option v-for="resolution in videoResolutions" :key="resolution" :value="resolution">{{ resolution }}</option>
+              </select>
             </label>
           </div>
         </details>
@@ -2382,6 +2845,10 @@ onUnmounted(() => {
   --composer-clearance: 430px;
 }
 
+.generate-page.mode-video {
+  --composer-clearance: 420px;
+}
+
 .generate-page.mode-music {
   --composer-clearance: 560px;
 }
@@ -2889,7 +3356,8 @@ onUnmounted(() => {
 }
 
 .record-actions button:disabled,
-.generated-tile figcaption button:disabled {
+.generated-tile figcaption button:disabled,
+.upload-btn:disabled {
   opacity: 0.42;
   cursor: not-allowed;
 }
@@ -2913,6 +3381,7 @@ onUnmounted(() => {
 
 .image-view-button {
   width: 100%;
+  max-height: min(58vh, 620px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3194,6 +3663,7 @@ onUnmounted(() => {
 
 .image-panel,
 .voice-panel,
+.video-panel,
 .music-panel {
   display: flex;
   flex-direction: column;
@@ -3234,12 +3704,76 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
+.comfy-status-row {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(9, 14, 23, 0.72);
+  color: rgba(226, 232, 240, 0.76);
+  font-size: 12px;
+}
+
+.comfy-status-row strong {
+  color: #e2e8f0;
+  font-size: 12px;
+}
+
+.comfy-status-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(148, 163, 184, 0.78);
+}
+
+.comfy-status-row button {
+  margin-left: auto;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.8);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.comfy-status-row.online .status-dot {
+  background: #22c55e;
+}
+
+.comfy-status-row.offline .status-dot {
+  background: #ef4444;
+}
+
+.comfy-checkpoint-field {
+  max-width: 100%;
+}
+
+.comfy-checkpoint-field select {
+  text-overflow: ellipsis;
+}
+
 .image-settings-grid {
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .speech-tags,
 .emotion-row,
+.video-mode-row,
 .music-tags,
 .music-options-row {
   display: flex;
@@ -3249,6 +3783,7 @@ onUnmounted(() => {
 }
 
 .speech-tags button,
+.video-mode-row button,
 .music-tags button,
 .emotion-row button,
 .voice-switch {
@@ -3265,13 +3800,19 @@ onUnmounted(() => {
 }
 
 .speech-tags button:hover,
+.video-mode-row button:hover,
 .music-tags button:hover,
 .emotion-row button:hover,
 .voice-switch:hover,
+.video-mode-row button.active,
 .emotion-row button.active {
   border-color: rgba(25, 211, 255, 0.38);
   background: rgba(14, 165, 233, 0.16);
   color: #e0f7ff;
+}
+
+.video-settings-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .music-templates {
@@ -3626,6 +4167,10 @@ onUnmounted(() => {
 
   .generate-page.mode-voice {
     --composer-clearance: 650px;
+  }
+
+  .generate-page.mode-video {
+    --composer-clearance: 640px;
   }
 
   .generate-page.mode-music {

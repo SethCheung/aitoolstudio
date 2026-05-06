@@ -282,7 +282,7 @@ ADMIN_HTML = """<!doctype html>
     const modelCategories = {
       image: ['image-01', 'image-01-turbo'],
       voice: ['speech-02-hd', 'speech-02'],
-      video: ['hailuo-video-01'],
+      video: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'S2V-01'],
       music: ['music-01'],
     };
     let currentModelOptions = structuredClone(modelCategories);

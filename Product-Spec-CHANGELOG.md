@@ -151,6 +151,50 @@
 
 ---
 
+## v1.8 - 2026-05-06
+
+**接入本地 ComfyUI 直连**
+
+### 变更内容
+- image 分类新增 `comfyui-local` 模型入口，保持当前 Studio Tool 的生成工作台、记录流、图片网格和原图预览格式
+- 后端新增 ComfyUI 客户端，默认连接 `http://192.168.1.195:8188`
+- 新增 `/api/comfyui/status`，读取 ComfyUI `/system_stats` 并在前端显示在线状态和 GPU 名称
+- ComfyUI 状态条新增 VRAM 已用/总量、占用百分比和 Torch VRAM，生成中每 2 秒刷新
+- 新增 `/api/comfyui/checkpoints`，读取并过滤默认图片工作流可用 checkpoint；当前可选 `dreamshaperXL_lightningDPMSDE.safetensors`
+- `POST /api/image/generate` 支持 `model: "comfyui-local"`，后端构造默认 API-format 文生图工作流并提交到 ComfyUI `/prompt`
+- `POST /api/image/upscale` 支持对已有图片进行 2x `lanczos` 放大，使用 ComfyUI 原生 `LoadImage → ImageScale → SaveImage` 工作流
+- 后端轮询 `/history/{prompt_id}`，通过 `/view` 拉取输出图并保存到本平台 `/uploads/comfyui`
+- ComfyUI 结果沿用现有生成记录流、下载和图片预览体验，不另做一套页面
+- 修复生成完成后必须刷新才显示的问题：前端完成响应后直接替换 loading 记录，立即展示结果图
+- 修复会话标题保存的 CORS `PATCH` 预检失败问题
+
+### 设计原则
+- 第一版先把本地 ComfyUI 跑进统一工作台，别一上来幻想完整节点编辑器
+- SSH 账号密码不写入仓库；当前只通过 ComfyUI HTTP API 接入
+- 参考图、ControlNet、LoRA、inpainting 和管理员工作流上传仍是后续工作流管理任务，当前不伪装支持
+
+---
+
+## v1.9 - 2026-05-06
+
+**视频生成对齐 MiniMax 官方视频方案**
+
+### 变更内容
+- video 分类从“提交任务后靠控制台看结果”升级为完整异步闭环
+- 支持文生视频、首帧图生视频、首尾帧视频和主体参考视频
+- 支持 `MiniMax-Hailuo-2.3`、`MiniMax-Hailuo-2.3-Fast`、`MiniMax-Hailuo-02` 和 `S2V-01` 模型入口
+- 支持官方 `prompt_optimizer`、`fast_pretreatment`、`duration` 和 `resolution` 参数
+- 后端创建任务调用 `/v1/video_generation`，轮询调用 `/v1/query/video_generation`
+- 任务成功后读取 `file_id`，再调用 `/v1/files/retrieve` 获取 `download_url`
+- 服务端将生成视频下载到 `/uploads/videos`，前端按现有记录流展示播放器
+
+### 设计原则
+- 视频生成必须是创建任务、查状态、取文件的完整链路，不接受“去控制台看”的半截方案
+- 前端只暴露官方真实接收的参数，避免堆一堆看着高级但请求体里没影的控件
+- 外部下载 URL 只作为中转，最终历史记录使用本平台本地归档地址，减少链接失效
+
+---
+
 ## 变更日志格式说明
 
 | 字段 | 说明 |

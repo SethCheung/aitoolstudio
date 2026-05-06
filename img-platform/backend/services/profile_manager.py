@@ -160,4 +160,12 @@ def get_all_models() -> dict:
     for cat, models in result.items():
         flattened[cat] = list(models.keys())
 
+    image_models = flattened.setdefault("image", [])
+    if "comfyui-local" not in image_models:
+        image_models.append("comfyui-local")
+
+    video_models = flattened.setdefault("video", [])
+    if not video_models:
+        video_models.extend(["MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast", "MiniMax-Hailuo-02", "S2V-01"])
+
     return flattened

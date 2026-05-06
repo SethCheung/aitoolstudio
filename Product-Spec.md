@@ -21,6 +21,10 @@
 | **生成工作台** | 用户可在同一页面选择 image / voice / video / music 分类、模型和参数后发起生成；Generate 页面采用顶部项目名 + 搜索 + 生成记录流 + 底部停靠生成框 |
 | **提示词优化** | 用户可点击「AI enhance」显式调用文本模型扩写当前输入，优化结果回填输入框，用户确认后再生成 |
 | **图片生成参数** | image 分类对齐 MiniMax 官方图片调试台，支持参考图微缩预览、URL/拖拽添加参考图、`1x / 2x / 3x / 4x` 快捷数量、1-9 自定义数量、官方 Prompt 优化、Seed、AIGC 水印、宽高比和 image-01 自定义尺寸 |
+| **本地 ComfyUI 直连** | image 分类新增 `comfyui-local` 模型入口，默认连接 `http://192.168.1.195:8188`，后端通过 ComfyUI HTTP API 提交默认文生图工作流，支持选择可用于图片工作流的 checkpoint，生成结果下载到本平台 `/uploads/comfyui` 后按现有图片网格展示 |
+| **ComfyUI GPU 状态** | `comfyui-local` 状态条展示在线状态、VRAM 已用/总量、占用百分比和 Torch VRAM，生成中每 2 秒刷新，帮助用户判断本地 GPU 是否正在工作 |
+| **ComfyUI Upscale** | 图片结果中的 Upscale 按钮接入 ComfyUI 原生 `ImageScale` 工作流，默认 2x `lanczos` 放大，结果作为新生成记录展示 |
+| **视频生成参数面板** | video 分类对齐 MiniMax 官方视频调试方案，支持文生视频、首帧图生视频、首尾帧视频、主体参考视频、官方 Prompt 优化、快速预处理、时长和分辨率 |
 | **语音生成参数面板** | voice 分类对齐 MiniMax 官方同步语音调试台，支持模型、音色、情绪、语速、音量、音调、格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典、声音效果和语气词标签 |
 | **音乐生成参数面板** | music 分类对齐 MiniMax 官方音乐调试台，支持歌曲模板、歌词结构标签、风格描述、歌词、纯音乐模式、AI 歌词优化、采样率、比特率、音频格式、返回格式、Seed 和 AI 音频水印 |
 | **取消生成** | 生成过程中前端可取消当前请求，立即停止等待并在记录中标记“已取消生成” |
@@ -33,8 +37,8 @@
 
 | 模块 | 当前状态 |
 |------|----------|
-| **ComfyUI 工作流** | Product Spec 中仍是核心规划，但当前代码未接入完整工作流上传、队列和执行 |
-| **ControlNet / LoRA / inpainting / upscale** | 属于规划能力，当前 UI/后端未形成完整闭环 |
+| **ComfyUI 工作流管理** | 当前已完成本地 ComfyUI 默认文生图直连；完整工作流上传、参数映射、队列管理和图生图/inpainting 工作流仍未完成 |
+| **ControlNet / LoRA / inpainting** | 属于规划能力，当前 UI/后端未形成完整闭环；Upscale 已完成第一版 ComfyUI ImageScale 放大 |
 | **图像理解/自动标签** | 规划中，当前未形成独立 API 和 UI 流程 |
 | **批量提示词任务、提示词库、收藏、下载 ZIP** | 规划中；当前只实现单 prompt 下的 `1x / 2x / 4x` 多图数量 |
 | **GPU 监控、系统日志、队列管理** | 规划中 |
@@ -60,7 +64,7 @@
 | **文生图 (txt2img)** | 用户输入提示词 + 选择工作流 → 点击生成 → ComfyUI 执行 → 得到图像 |
 | **图生图 (img2img)** | 用户上传参考图 + 输入提示词 → 选择工作流 → 生成 → 得到基于原图的变体 |
 | **局部重绘 (inpainting)** | 用户上传图像 + 涂抹需要修改的区域 → 输入修改描述 → 生成 → 得到局部修改后的图像 |
-| **高清修复/放大 (upscale)** | 用户选择已生成的图像 → 点击放大 → 系统调用 upscale 工作流 → 得到高分辨率版本 |
+| **高清修复/放大 (upscale)** | 用户选择已生成的图像 → 点击 Upscale → 系统调用 ComfyUI `LoadImage → ImageScale → SaveImage` 工作流 → 得到 2x 放大版本 |
 | **ControlNet 控制** | 用户上传姿态图/边缘图/深度图 → 选择对应 ControlNet 模型 → 生成 → 得到符合控制条件的图像 |
 | **LoRA 模型支持** | 用户在下拉框选择 LoRA 模型 → 调整权重 → 生成 → 得到具有特定风格的图像 |
 | **图片参数选择** | 用户输入单条提示词 → 可拖入参考图或粘贴参考图 URL → 选择比例/自定义尺寸、Seed、数量和官方 Prompt 优化 → 点击生成 → 得到对应参数的图片 |
@@ -68,7 +72,9 @@
 | **提示词优化** | 用户输入简单描述 → 点击「AI enhance」 → 文本模型扩写为详细 prompt 并回填输入框 → 用户可继续编辑或点击生成 |
 | **图像理解/自动标签** | 用户上传或生成图像 → 系统自动调用 MiniMax 视觉模型分析 → 得到自动标签和描述（用于分类和搜索） |
 | **MiniMax image-01 生图** | 用户在生成框选择 image 分类和 MiniMax 图像模型 → 输入提示词和可选参考图 → 调用 MiniMax `/v1/image_generation`，支持 `subject_reference`、`width/height`、`seed`、`n`、`prompt_optimizer` → 得到另一种风格的生图（作为 ComfyUI 的备选） |
+| **本地 ComfyUI 生图** | 用户在 image 分类选择 `comfyui-local` → 输入提示词、选择比例/数量/Seed 或自定义尺寸 → 后端提交到 `192.168.1.195:8188` 的 ComfyUI `/prompt` → 轮询 `/history/{prompt_id}` → 下载 `/view` 输出图到本平台并展示 |
 | **MiniMax 同步语音生成** | 用户在生成框选择 voice 分类 → 输入要合成的文本，可插入停顿 `<#0.5#>` 和官方语气词标签 → 选择模型、音色、情绪和音频规格 → 调用 MiniMax `/v1/t2a_v2` → 得到可在线播放/下载的音频 |
+| **MiniMax 视频生成** | 用户在生成框选择 video 分类 → 选择文生视频、首帧、首尾帧或主体参考模式 → 调用 MiniMax `/v1/video_generation` 创建异步任务 → 轮询 `/v1/query/video_generation` → 成功后用 `file_id` 调用 `/v1/files/retrieve` → 下载视频到本平台 `/uploads/videos` 并展示播放器 |
 | **MiniMax 音乐生成** | 用户在生成框选择 music 分类 → 输入音乐风格描述，填写或用 AI 优化歌词，可选择纯音乐、Seed、音频规格和水印 → 调用 MiniMax `/v1/music_generation` → 得到可在线播放/下载的音乐 |
 | **历史记录/图库管理** | 用户登录后查看项目首页/我的作品 → 系统展示所有生成记录，有图片结果的项目显示缩略图 → 可进入项目继续生成或查看历史 |
 | **原图预览** | 用户点击生成结果图片或“放大”按钮 → 系统在当前页面打开原图预览层 → 用户可检查细节并关闭返回生成记录 |
@@ -124,6 +130,7 @@
   - 图片数量选择：`1x / 2x / 3x / 4x` + 1-9 自定义输入
   - image 分类下展示 MiniMax 官方图片参数：参考图 `subject_reference`、官方 Prompt 优化、自定义尺寸、Seed、AIGC 水印、image-01-live 画风权重
   - voice 分类下展示 MiniMax 官方 T2A 参数：音色、情绪、语速、音量、音调、音频格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典、声音效果和语气词标签
+  - video 分类下展示 MiniMax 官方视频参数：文生视频、首帧图生视频、首尾帧视频、主体参考视频、`prompt_optimizer`、`fast_pretreatment`、`duration`、`resolution`
   - music 分类下展示 MiniMax 官方音乐参数：歌曲模板、歌词结构标签、纯音乐模式、AI 歌词优化、歌词、采样率、比特率、格式、返回格式、Seed、AI 音频水印和 music-cover 参考音频 URL
 - 生成按钮：靠右对齐，醒目样式
 - 取消按钮：生成中替换主按钮为“取消生成”，用于中途停止当前请求等待
@@ -165,8 +172,9 @@
 | **图像理解（MiniMax 视觉模型）** | 自动标签：分析用户上传或生成的图像，提取内容、风格、色彩等标签；用于分类和搜索 | 上传图像后自动调用；生成完成后自动调用 |
 | **图像生成（MiniMax image-01）** | 作为 ComfyUI 之外的备选生图引擎，支持文生图、参考图主体一致性、自定义尺寸、Seed 和多图输出 | 用户切换分类为 image 时调用 |
 | **语音合成（MiniMax Speech T2A）** | 使用 MiniMax 同步 T2A HTTP API，把文本转成音频；支持 Speech 2.8/2.6/02/01 系列模型、系统/复刻音色、情绪、音频规格、发音词典、语言增强和声音效果 | 用户切换分类为 voice 时调用；生成结果保存为本地音频并展示播放器 |
+| **视频生成（MiniMax Hailuo）** | 使用 MiniMax 异步视频 API，支持 `MiniMax-Hailuo-2.3`、`MiniMax-Hailuo-2.3-Fast`、`MiniMax-Hailuo-02`、`S2V-01`，覆盖文本、首帧、首尾帧和主体参考模式 | 用户切换分类为 video 时调用；生成完成后下载到本地并展示播放器 |
 | **音乐生成（MiniMax Music）** | 使用 MiniMax 音乐生成 API，把歌词和风格描述转成完整音乐；支持 music-2.6 / music-cover / music-2.5+ / music-2.5、纯音乐、AI 歌词优化、Seed 复现、Hex/URL 返回 | 用户切换分类为 music 时调用；生成结果保存为本地音频并展示播放器 |
-| **图像生成（ComfyUI + 本地 GPU）** | 主力生图引擎，支持所有工作流、LoRA、ControlNet 等功能 | 默认生成方式；执行管理员预设的工作流 |
+| **图像生成（ComfyUI + 本地 GPU）** | 主力生图引擎；当前已支持默认文生图直连，后续扩展工作流、LoRA、ControlNet 等能力 | `comfyui-local` 模型入口；完整管理员预设工作流管理仍待实现 |
 
 ## 技术方向
 
@@ -193,8 +201,21 @@
 | 图片生成 | HTTP API 或 `mmx image generate` CLI | 官方 API Base URL 使用 `https://api.minimax.io` |
 | 文本优化 | HTTP text chat API 或 `mmx text chat` CLI | 当前用于「AI enhance」，只回填 prompt，不自动触发生图 |
 | 语音生成 | HTTP API 或 CLI | HTTP 走 MiniMax `/v1/t2a_v2`；非流式请求使用 `output_format: "hex"`，服务端将 hex 音频保存到 `/uploads/voices`；CLI profile 保持文件输出兜底 |
-| 视频生成 | 异步任务 | 官方流程通常为提交任务 → 查询 task_id → 获得 file_id → 下载文件 |
+| 视频生成 | HTTP 异步任务 | HTTP 走 MiniMax `/v1/video_generation` 创建任务，轮询 `/v1/query/video_generation`，成功后用 `/v1/files/retrieve` 获取 `download_url`，服务端下载到 `/uploads/videos`；CLI profile 暂保留提交任务兜底 |
 | 音乐生成 | HTTP API 或 CLI | HTTP 走 MiniMax `/v1/music_generation`；默认使用 `output_format: "hex"` 并保存到 `/uploads/music`；CLI profile 保持文件输出兜底；music-cover 当前支持一步模式参考音频 URL |
+
+### ComfyUI 当前接入说明
+
+| 能力 | 当前接入方式 | 备注 |
+|------|--------------|------|
+| 服务地址 | `COMFYUI_BASE_URL`，默认 `http://192.168.1.195:8188` | 已验证 `/system_stats` 可访问，ComfyUI 版本为 `0.19.1` |
+| 状态检测 | `GET /api/comfyui/status` → ComfyUI `/system_stats` | 前端在选择 `comfyui-local` 时显示在线状态和 GPU 名称 |
+| GPU 占用 | ComfyUI `/system_stats` 的 `vram_total/vram_free/torch_vram_total/torch_vram_free` | 状态条显示 VRAM 占用；生成中每 2 秒刷新 |
+| 模型选择 | `GET /api/comfyui/checkpoints` → ComfyUI `/object_info` | 当前过滤掉 audio / VAE / LTX 视频模型，只展示默认图片 workflow 可用 checkpoint |
+| 默认文生图 | `POST /api/image/generate`，模型为 `comfyui-local` | 后端构造默认 API-format 工作流，提交到 ComfyUI `/prompt` |
+| 图片放大 | `POST /api/image/upscale` → ComfyUI `LoadImage/ImageScale/SaveImage` | 当前为 2x `lanczos` 几何放大，不是 ESRGAN/模型超分 |
+| 结果归档 | 轮询 `/history/{prompt_id}`，再通过 `/view` 拉取输出图 | 图片保存到本平台 `/uploads/comfyui`，沿用现有生成记录流和原图预览 |
+| 暂不支持 | 参考图、inpainting、ControlNet、LoRA、管理员工作流上传和参数映射 | 这些必须等工作流管理闭环完成，别装成已经有 |
 
 ### 性能要求
 | 指标 | 目标值 |
@@ -247,6 +268,8 @@
 | v1.2 | 2026-05-05 | 新增显式「AI enhance」流程：文本模型扩写 prompt 后回填输入框，由用户确认后生图 |
 | v1.3 | 2026-05-05 | 首页视觉和项目管理体验升级 |
 | v1.4 | 2026-05-05 | Generate 页面升级为生成工作台：生成记录流、底部停靠生成框、1x/2x/4x、取消生成、点击图片查看原图 |
-| v1.7 | 2026-05-06 | image 分类对齐 MiniMax 官方图片调试台：参考图缩略展示、拖拽/URL 添加、subject_reference、官方 Prompt 优化、Seed、自定义尺寸、AIGC 水印和 image-01-live 画风参数 |
 | v1.5 | 2026-05-06 | 语音生成对齐 MiniMax 官方同步语音调试台：补齐 Speech 2.8/2.6/02/01 模型、音色/情绪/音频规格/语言增强/发音词典/声音效果等参数 |
 | v1.6 | 2026-05-06 | 音乐生成对齐 MiniMax 官方音乐调试台：补齐模板、歌词结构标签、纯音乐、AI 歌词优化、音频规格、Seed、水印和 Hex/URL 返回 |
+| v1.7 | 2026-05-06 | image 分类对齐 MiniMax 官方图片调试台：参考图缩略展示、拖拽/URL 添加、subject_reference、官方 Prompt 优化、Seed、自定义尺寸、AIGC 水印和 image-01-live 画风参数 |
+| v1.8 | 2026-05-06 | 接入本地 ComfyUI：新增 `comfyui-local` 模型、GPU/VRAM 状态、默认文生图工作流提交、checkpoint 选择、Upscale、历史轮询和本地结果归档 |
+| v1.9 | 2026-05-06 | video 分类对齐 MiniMax 官方视频方案：文生视频、首帧图生视频、首尾帧、主体参考、异步查询 file_id 和本地视频归档 |

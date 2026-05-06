@@ -20,6 +20,7 @@ from api.music import router as music_router
 from api.prompt import router as prompt_router
 from api.generation import router as generation_router
 from api.conversation import router as conversation_router
+from api.comfyui import router as comfyui_router
 from models.database import init_db
 
 from limiter import limiter
@@ -43,7 +44,7 @@ app.add_middleware(
     ],
     allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -65,6 +66,7 @@ app.include_router(music_router)
 app.include_router(prompt_router)
 app.include_router(generation_router)
 app.include_router(profiles_router)
+app.include_router(comfyui_router)
 
 # 挂载静态文件（语音文件等）
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
