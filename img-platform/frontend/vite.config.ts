@@ -27,6 +27,11 @@ export default defineConfig(() => {
           changeOrigin: true,
           rewrite: (path) => path,
         },
+        '/uploads': {
+          target: apiBaseUrl,
+          changeOrigin: true,
+          rewrite: (path) => path,
+        },
       },
     },
   }

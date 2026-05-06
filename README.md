@@ -10,7 +10,7 @@
 | 项目首页 | 已实现 | 展示用户项目，对话中有图片结果时显示缩略图 |
 | 生成页面 | 已实现 | 单栏生成工作台，支持 image / voice / video / music 分类生成，最新生成在上，旧记录滚动到下方 |
 | AI enhance | 已实现 | 用户点击「AI enhance」后调用文本模型扩写 prompt，结果回填输入框 |
-| 图片数量 | 已实现 | 图片生成支持 `1x / 2x / 4x`，数量会传给后端 `n` 参数 |
+| 图片参数 | 已实现 | 图片生成支持参考图缩略展示、拖拽/URL 添加、`1x / 2x / 3x / 4x`、1-9 数量、自定义尺寸、Seed、官方 Prompt 优化和 AIGC 水印 |
 | 取消生成 | 已实现 | 生成中可取消当前前端请求等待；服务端任务级取消仍需后续补齐 |
 | 图片预览 | 已实现 | 图片按比例完整预览，点击图片本身或“放大”按钮可同页查看原图 |
 | 对话历史 | 已实现 | 保存用户消息和 AI 回复，支持恢复对话 |
@@ -115,6 +115,12 @@ docker-compose up -d
 - HTTP profile：通过 MiniMax HTTP API 调用，需要 API Key
 
 提示词优化使用 text 模型 profile。默认配置包含 `MiniMax-M2.7` 和 `MiniMax-M2.7-highspeed`。如果你新建 HTTP profile，记得在 text 分类里勾选文本模型；否则前端「AI enhance」会找不到可用 profile。
+
+语音生成对齐 MiniMax 官方同步 T2A HTTP 方案：前端 voice 分类会传 `voice_setting`、`audio_setting`、`pronunciation_dict`、`language_boost`、`voice_modify`、`subtitle_enable` 等参数；后端调用 `/v1/t2a_v2` 时固定使用非流式 `output_format: "hex"`，再保存为 `/uploads/voices/*` 音频文件。
+
+音乐生成对齐 MiniMax 官方 Music HTTP 方案：前端 music 分类会传歌词、风格描述、纯音乐模式、AI 歌词优化、`audio_setting`、`output_format`、`seed`、`aigc_watermark` 等参数；后端调用 `/v1/music_generation`，默认保存 Hex 音频到 `/uploads/music/*`。
+
+图片生成对齐 MiniMax 官方 Image 方案：前端 image 分类支持把本地 JPG/PNG 读成 `data:image/*` 后传入 `subject_reference`，也支持 URL 参考图；后端 HTTP/CLI 路由都会转发官方 `aspect_ratio`、`width/height`、`n`、`seed`、`prompt_optimizer`、`aigc_watermark` 等参数。
 
 官方文档：
 

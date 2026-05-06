@@ -35,6 +35,11 @@ def save_audio_hex(audio_hex: str, ext: str = "mp3") -> str:
     return f"/uploads/voices/{filename}"
 
 
+def normalize_audio_format(req: VoiceGenerateRequest) -> str:
+    """兼容旧前端字段 response_format，新的官方参数使用 audio_format。"""
+    return req.response_format or req.audio_format
+
+
 def serve_cli_file(src_path: "Path") -> str:
     """将 CLI 生成的文件复制到 uploads 目录，返回访问路径"""
     ext = src_path.suffix.lstrip(".") or "mp3"
@@ -59,13 +64,14 @@ async def generate(
         )
     try:
         auth_type = profile.get("auth_type", "http")
+        audio_format = normalize_audio_format(req)
         if auth_type == "cli":
             result = await cli_generate_voice(
                 text=req.text,
                 voice_id=req.voice_id,
                 model=req.model,
                 speed=req.speed,
-                output_format=req.response_format,
+                output_format=audio_format,
             )
         else:
             result = await http_generate_voice(
@@ -76,10 +82,24 @@ async def generate(
                 vol=req.vol,
                 pitch=req.pitch,
                 emotion=req.emotion,
-                response_format=req.response_format,
+                audio_format=audio_format,
+                sample_rate=req.sample_rate,
+                bitrate=req.bitrate,
+                channel=req.channel,
+                subtitle_enable=req.subtitle_enable,
+                stream=req.stream,
+                latex_read=req.latex_read,
+                language_boost=req.language_boost,
+                pronunciation_tones=req.pronunciation_tones,
+                voice_effect_pitch=req.voice_effect_pitch,
+                voice_effect_intensity=req.voice_effect_intensity,
+                voice_effect_timbre=req.voice_effect_timbre,
+                voice_effect=req.voice_effect,
                 api_key=profile["api_key"],
                 base_url=profile.get("base_url", "https://api.minimax.io"),
             )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Voice generation failed")
         raise HTTPException(status_code=500, detail="生成失败，请稍后重试")
@@ -92,15 +112,17 @@ async def generate(
         )
 
     data = result.get("data", {})
-    audio_value = data.get("audio", "")
+    audio_value = data.get("audio") or data.get("audio_url") or data.get("url") or ""
 
     # CLI 模式：audio_value 是 Path 对象（文件路径），直接 serve
     # HTTP 模式：audio_value 是 hex 编码的字符串
     from pathlib import Path
     if isinstance(audio_value, Path):
         audio_url = serve_cli_file(audio_value)
+    elif isinstance(audio_value, str) and audio_value.startswith(("http://", "https://")):
+        audio_url = audio_value
     else:
-        audio_url = save_audio_hex(audio_value, ext=req.response_format)
+        audio_url = save_audio_hex(audio_value, ext=audio_format)
 
     gen = Generation(
         type="voice",

@@ -3,6 +3,7 @@
 生成的文件保存在 `minimax-output/` 目录，调用方负责扫描取回 URL。
 """
 import asyncio
+import base64
 import json
 import os
 import shutil
@@ -33,6 +34,45 @@ def _run_sync(cmd: list[str], timeout: int = 120) -> str:
     return result.stdout.strip()
 
 
+def _data_url_to_file(data_url: str, prefix: str = "ref") -> str:
+    header, _, encoded = data_url.partition(",")
+    if not encoded or not header.startswith("data:image/"):
+        raise ValueError("Invalid image data URL")
+    image_type = header.split(";", 1)[0].split("/", 1)[1].lower()
+    extension = "jpg" if image_type == "jpeg" else image_type
+    if extension not in {"jpg", "png", "webp"}:
+        raise ValueError("Unsupported reference image type")
+    filename = f"{prefix}_{uuid.uuid4().hex[:8]}.{extension}"
+    output_path = _ensure_output_dir() / filename
+    output_path.write_bytes(base64.b64decode(encoded))
+    return str(output_path)
+
+
+def _optimizer_instruction_for(target: str) -> str:
+    normalized = target.lower().strip()
+    if normalized == "voice":
+        return (
+            "Optimize this as text for text-to-speech. Improve natural punctuation and pacing, preserve speech "
+            "tags and pause markers, and do not add visual composition, camera, lighting, or color details."
+        )
+    if normalized == "music":
+        return (
+            "Optimize this as a music generation style prompt. Focus on genre, mood, tempo, rhythm, "
+            "instrumentation, vocal character, arrangement, production texture, and performance energy. "
+            "Do not turn it into an image prompt, concert photo, lighting plan, or color palette. "
+            "Do not write lyrics unless the user explicitly asked for lyrics in this field."
+        )
+    if normalized == "video":
+        return (
+            "Optimize this as a video generation prompt with scene, subject, action, camera movement, timing, "
+            "atmosphere, motion, and production details."
+        )
+    return (
+        "Optimize this as an image generation prompt with subject, composition, style, lighting, color palette, "
+        "mood, and useful visual production details."
+    )
+
+
 async def optimize_prompt(
     prompt: str,
     model: str = "MiniMax-M2.7",
@@ -43,7 +83,8 @@ async def optimize_prompt(
         "Rewrite this user request into one polished prompt for AI generation. "
         "Preserve the user's intent. Return only the optimized prompt, no markdown or explanation.\n\n"
         f"Target: {target}\n"
-        f"User request: {prompt}"
+        f"User request: {prompt}\n\n"
+        f"{_optimizer_instruction_for(target)}"
     )
     system_prompt = (
         "You are a prompt engineer. Return only the optimized generation prompt, "
@@ -86,8 +127,16 @@ async def optimize_prompt(
 async def generate_image(
     prompt: str,
     model: str = "image-01",
-    aspect_ratio: str = "16:9",
+    aspect_ratio: Optional[str] = "16:9",
+    width: Optional[int] = None,
+    height: Optional[int] = None,
     n: int = 1,
+    response_format: str = "url",
+    prompt_optimizer: bool = False,
+    seed: Optional[int] = None,
+    aigc_watermark: bool = False,
+    style: Optional[dict] = None,
+    subject_reference: Optional[list[dict]] = None,
 ) -> dict:
     """mmx image generate --prompt "..." [--model image-01] [--aspect-ratio 16:9] [--n 2]"""
     import time, re, uuid
@@ -98,10 +147,29 @@ async def generate_image(
     cmd = ["mmx", "image", "generate", "--prompt", prompt]
     if model:
         cmd.extend(["--model", model])
-    if aspect_ratio:
+    if width is not None and height is not None:
+        cmd.extend(["--width", str(width), "--height", str(height)])
+    elif aspect_ratio:
         cmd.extend(["--aspect-ratio", aspect_ratio])
     if n and n > 1:
         cmd.extend(["--n", str(n)])
+    if response_format:
+        cmd.extend(["--response-format", response_format])
+    if prompt_optimizer:
+        cmd.append("--prompt-optimizer")
+    if seed is not None:
+        cmd.extend(["--seed", str(seed)])
+    if aigc_watermark:
+        cmd.append("--aigc-watermark")
+    if style:
+        print("[cli_runner] image style is only supported by HTTP profiles; ignoring for CLI", flush=True)
+    for index, ref in enumerate(subject_reference or []):
+        image_file = str(ref.get("image_file") or "")
+        if not image_file:
+            continue
+        if image_file.startswith("data:image/"):
+            image_file = _data_url_to_file(image_file, f"ref_{index}")
+        cmd.extend(["--subject-ref", f"type={ref.get('type', 'character')},image={image_file}"])
     cmd.extend(["--out-prefix", out_prefix])
 
     print(f"[cli_runner] running: {' '.join(cmd)}", flush=True)
@@ -183,12 +251,14 @@ async def generate_voice(
     text: str,
     voice_id: str = "male-qn-qingse",
     model: str = "speech-02-hd",
-    speed: int = 1,
+    speed: float = 1,
     output_format: str = "mp3",
 ) -> dict:
     """mmx speech synthesize --text "..." --out filename.mp3 [--voice ...]"""
     filename = f"{uuid.uuid4().hex}.{output_format}"
     cmd = ["mmx", "speech", "synthesize", "--text", text, "--out", filename]
+    if model:
+        cmd.extend(["--model", model])
     if voice_id:
         cmd.extend(["--voice", voice_id])
     if speed and speed != 1:

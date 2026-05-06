@@ -17,9 +17,11 @@
 - `/api/profiles` 管理接口已加管理员鉴权；`/api/profiles/models` 要求已登录用户
 - MiniMax Profile 路由：HTTP API / CLI profile 管理
 - 图片、语音、视频、音乐生成入口：`api/image.py`、`api/voice.py`、`api/video.py`、`api/music.py`
+- 语音生成已对齐 MiniMax 官方同步 T2A HTTP 调试台的核心参数：Speech 2.8/2.6/02/01 模型、音色、情绪、语速、音量、音调、音频格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典和声音效果
+- 音乐生成已对齐 MiniMax 官方音乐调试台的核心参数：music-2.6/music-cover/music-2.5+/music-2.5、歌词、风格描述、纯音乐、AI 歌词优化、音频规格、返回格式、Seed 和 AI 水印
 - 提示词优化入口：`api/prompt.py`，显式调用文本模型扩写 prompt 后回填前端输入框
 - 项目首页：`frontend/src/views/HomeView.vue`，对话有图片结果时显示缩略图
-- 生成页面：`frontend/src/views/GenerateView.vue`，采用单栏生成工作台，支持多类别生成、历史恢复、AI enhance、`1x / 2x / 4x` 图片数量、生成中取消、图片点击同页原图预览
+- 生成页面：`frontend/src/views/GenerateView.vue`，采用单栏生成工作台，支持多类别生成、历史恢复、AI enhance、图片参考图缩略展示、`1x / 2x / 3x / 4x` 和 1-9 图片数量、生成中取消、图片点击同页原图预览
 - Vue 管理页：`frontend/src/views/AdminView.vue`
 - Docker Compose 基础前后端编排，后端要求 `JWT_SECRET_KEY`
 - `.gitignore` 已补充运行时数据、密钥文件、构建产物忽略规则
@@ -135,7 +137,9 @@
 - MiniMax API 客户端封装（HTTP + SSE）
 - 提示词优化 API（POST /api/minimax/optimize-prompt）— M2.7 模型扩写 prompt
 - 图像理解 API（POST /api/minimax/analyze-image）— 视觉模型分析图像，返回标签和描述
-- MiniMax 生图 API（POST /api/generate/minimax）— image-01 模型生图
+- MiniMax 生图 API（POST /api/image/generate）— 对齐官方 `/v1/image_generation` 请求体，支持 `subject_reference`、`width/height`、`aspect_ratio`、`n`、`seed`、`prompt_optimizer`、`aigc_watermark` 和 image-01-live `style`
+- MiniMax 同步语音 API（POST /api/voice/generate）— 对齐官方 `/v1/t2a_v2` 请求体，支持 voice_setting、audio_setting、pronunciation_dict、language_boost、voice_modify、subtitle_enable
+- MiniMax 音乐生成 API（POST /api/music/generate）— 对齐官方 `/v1/music_generation` 请求体，支持 lyrics、prompt、is_instrumental、lyrics_optimizer、audio_setting、output_format、seed、aigc_watermark
 - API 配额追踪表（api_quotas: id, user_id, model_type, used_tokens, reset_at）
 - 配额检查中间件（限制用户 API 调用频率和额度）
 
@@ -150,6 +154,8 @@
 - 输入简单描述可调用 M2.7 扩写为详细 prompt
 - 上传图像可返回自动标签和描述
 - 调用 MiniMax image-01 可生成图像并保存
+- 调用 MiniMax Speech T2A 可按用户选择的官方参数生成音频，并保存为可播放 URL
+- 调用 MiniMax Music 可按用户选择的官方参数生成音乐，并保存为可播放 URL
 - API Token 使用量记录到数据库
 
 ---
@@ -160,7 +166,7 @@
 - 单栏生成工作台布局（顶部项目名/搜索/返回主页，中间生成记录流，底部停靠生成框）
 - 生成记录卡片（prompt、模型、比例、风格、时间、图片结果和操作按钮）
 - 输入区组件（多行文本框 + AI enhance + 分类/风格/比例/数量/模型选择 + 生成/取消）
-- 图像网格展示组件（`1x / 2x / 4x`，支持点击图片查看原图）
+- 图像网格展示组件（`1x / 2x / 3x / 4x` + 1-9 自定义数量，支持点击图片查看原图）
 - 操作按钮（重新生成、生成变体、下载全部、单图放大/下载；Upscale 当前为占位）
 - 加载状态组件（稳定高度占位 + 取消生成按钮）
 - Generate 页不再保留左侧侧边栏，历史入口以首页项目卡片和当前记录流为主
@@ -178,7 +184,7 @@
 - 图片结果按比例完整预览，不裁切、不压扁、不因为生成开始/完成导致整体布局跳动
 - 图片结果可点击图片本身或“放大”按钮同页查看原图
 - AI enhance 按钮可调用文本模型扩写 prompt，优化结果回填输入框
-- 图片生成数量可选择 `1x / 2x / 4x`
+- 图片生成数量可选择 `1x / 2x / 3x / 4x` 或输入 1-9；参考图可拖入底部对话框并微缩展示
 
 ---
 
@@ -276,7 +282,7 @@
 | **数据库** | SQLite | 3.x | 轻量级，无需额外服务 |
 | **任务队列** | Celery + Redis | 5.3.x / 7.2.x | 异步生图任务处理 |
 | **AI 引擎** | ComfyUI | latest | 本地生图，RTX 4090 GPU |
-| **AI API** | MiniMax API | latest | M2.7 文本、视觉模型、image-01 生图 |
+| **AI API** | MiniMax API | latest | M2.7 文本、视觉模型、image-01 生图、Speech T2A 语音合成、Music 音乐生成 |
 | **认证** | JWT (PyJWT) | latest | Token-based 认证 |
 | **部署** | Docker + Docker Compose | latest | 容器化一键部署 |
 | **包管理** | npm (前端) / pip (后端) | latest | 当前仓库使用 npm lockfile |

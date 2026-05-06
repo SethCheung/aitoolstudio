@@ -4,16 +4,36 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/services/api'
+import {
+  speechAudioFormats,
+  speechBitrates,
+  speechEmotions,
+  speechInterjections,
+  speechLanguageBoosts,
+  speechSampleRates,
+  speechVoiceEffects,
+  speechVoices,
+} from '@/lib/speech-options'
+import {
+  musicAudioFormats,
+  musicBitrates,
+  musicOutputFormats,
+  musicSampleRates,
+  musicStructureTags,
+  musicTemplates,
+} from '@/lib/music-options'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
 // ── Types ───────────────────────────────────────────────
+type GenerationCategory = 'image' | 'voice' | 'video' | 'music'
+
 interface Message {
   id: string
   role: 'user' | 'assistant' | 'error'
-  type: 'text' | 'image' | 'voice' | 'video' | 'music'
+  type: 'text' | GenerationCategory
   content: string
   results?: string[]
   model?: string
@@ -33,26 +53,73 @@ interface HistoryItem {
   createdAt: Date
 }
 
+interface ImageReferenceItem {
+  id: string
+  name: string
+  src: string
+}
+
 // ── State ──────────────────────────────────────────────
-const selectedCategory = ref<'image' | 'voice' | 'video' | 'music'>('image')
+const selectedCategory = ref<GenerationCategory>('image')
 const selectedModel = ref('image-01')
-const selectedStyle = ref('Cinematic')
+const selectedStyle = ref('默认')
 const selectedAspect = ref('16:9')
-const selectedImageCount = ref<1 | 2 | 4>(4)
+const selectedImageCount = ref(4)
+const useCustomImageSize = ref(false)
+const imageWidth = ref(1024)
+const imageHeight = ref(1024)
+const imageSeed = ref<number | null>(null)
+const imagePromptOptimizer = ref(false)
+const imageAigcWatermark = ref(false)
+const imageStyleWeight = ref(0.8)
+const imageReferenceItems = ref<ImageReferenceItem[]>([])
+const imageReferenceUrl = ref('')
+const selectedVoiceId = ref('male-qn-qingse')
+const customVoiceId = ref('')
+const useCustomVoice = ref(false)
+const selectedEmotion = ref('auto')
+const voiceSpeed = ref(1)
+const voiceVolume = ref(1)
+const voicePitch = ref(0)
+const audioFormat = ref('mp3')
+const sampleRate = ref(32000)
+const bitrate = ref(128000)
+const audioChannel = ref<1 | 2>(1)
+const subtitleEnabled = ref(false)
+const latexReadEnabled = ref(false)
+const languageBoost = ref('')
+const pronunciationToneInput = ref('')
+const voiceEffectPitch = ref(0)
+const voiceEffectIntensity = ref(0)
+const voiceEffectTimbre = ref(0)
+const voiceEffect = ref('')
+const musicLyrics = ref('')
+const musicInstrumental = ref(false)
+const musicLyricsOptimizer = ref(false)
+const musicAudioFormat = ref('mp3')
+const musicOutputFormat = ref('hex')
+const musicSampleRate = ref(44100)
+const musicBitrate = ref(256000)
+const musicSeed = ref<number | null>(null)
+const musicAigcWatermark = ref(false)
+const musicReferenceAudioUrl = ref('')
 
 const messages = ref<Message[]>([])
 const inputText = ref('')
 const searchText = ref('')
 const messagesContainer = ref<HTMLDivElement | null>(null)
+const promptTextarea = ref<HTMLTextAreaElement | null>(null)
+const musicLyricsTextarea = ref<HTMLTextAreaElement | null>(null)
+const imageReferenceInput = ref<HTMLInputElement | null>(null)
 const isGenerating = ref(false)
 const isOptimizingPrompt = ref(false)
 const generationAbortController = ref<AbortController | null>(null)
 const convId = ref<number | null>(null)
 const previewImageUrl = ref('')
 
-const styles = ['Cinematic', 'Photorealistic', 'Anime', 'Abstract', 'Minimalist']
-const aspects = ['1:1', '16:9', '9:16', '4:3', '3:4']
-const imageCounts = [1, 2, 4] as const
+const styles = ['默认', '漫画', '元气', '中世纪', '水彩']
+const aspects = ['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', '21:9']
+const imageCounts = [1, 2, 3, 4] as const
 
 interface GenerationRecord {
   id: string
@@ -143,10 +210,74 @@ const projectTitleLabel = computed(() => {
   return conversationTitle.value.trim() || messages.value[0]?.content.slice(0, 42) || '未命名项目'
 })
 
+const composerPlaceholder = computed(() => {
+  if (selectedCategory.value === 'voice') return '输入要合成的文本...'
+  if (selectedCategory.value === 'music') return '描述你想要生成的音乐...'
+  if (selectedCategory.value === 'video') return '描述你想要生成的视频...'
+  return '描述你想要生成的图像...'
+})
+
+const optimizePromptTitle = computed(() => {
+  if (selectedCategory.value === 'voice') return 'AI enhance：优化语音朗读文本'
+  if (selectedCategory.value === 'music') return 'AI enhance：优化音乐风格描述'
+  if (selectedCategory.value === 'video') return 'AI enhance：优化视频生成提示词'
+  return 'AI enhance：优化图像生成提示词'
+})
+
+const optimizePromptSuccessLabel = computed(() => {
+  if (selectedCategory.value === 'voice') return '语音文本'
+  if (selectedCategory.value === 'music') return '音乐提示词'
+  if (selectedCategory.value === 'video') return '视频提示词'
+  return '图像提示词'
+})
+
+const activeVoiceId = computed(() => {
+  return useCustomVoice.value ? customVoiceId.value.trim() : selectedVoiceId.value
+})
+
+const pronunciationTones = computed(() => {
+  return pronunciationToneInput.value
+    .split('\n')
+    .map(item => item.trim())
+    .filter(Boolean)
+})
+
+const canSubmitGeneration = computed(() => {
+  if (isOptimizingPrompt.value) return false
+  if (inputText.value.trim()) return true
+  if (selectedCategory.value !== 'music') return false
+  return Boolean(musicLyrics.value.trim() || musicLyricsOptimizer.value)
+})
+
+const activeImageReferenceCount = computed(() => imageReferenceItems.value.length)
+
 watch(selectedCategory, () => {
   const models = currentModelList.value
   if (models.length && !models.includes(selectedModel.value)) {
     selectedModel.value = models[0]
+  }
+  if (selectedCategory.value !== 'image') {
+    imageReferenceUrl.value = ''
+  }
+})
+
+watch(selectedImageCount, value => {
+  if (!Number.isFinite(value)) {
+    selectedImageCount.value = 1
+    return
+  }
+  const normalized = Math.min(9, Math.max(1, Math.round(value)))
+  if (normalized !== value) {
+    selectedImageCount.value = normalized
+  }
+})
+
+watch(selectedModel, value => {
+  if (value !== 'image-01-live') {
+    selectedStyle.value = '默认'
+  }
+  if (value !== 'image-01') {
+    useCustomImageSize.value = false
   }
 })
 
@@ -167,6 +298,8 @@ function closeImagePreview() {
 }
 
 function imageAspectRatio(aspect: string) {
+  const custom = aspect.match(/^(\d+)x(\d+)$/)
+  if (custom) return `${custom[1]} / ${custom[2]}`
   const normalized = aspect.match(/^(\d+):(\d+)$/)
   if (!normalized) return '16 / 9'
   return `${normalized[1]} / ${normalized[2]}`
@@ -211,18 +344,196 @@ function reusePrompt(prompt: string) {
   nextTick(scrollToBottom)
 }
 
-async function regenerateFromPrompt(prompt: string) {
-  if (isGenerating.value || isOptimizingPrompt.value) return
-  inputText.value = prompt
+function clampImageDimension(value: number) {
+  const bounded = Math.min(2048, Math.max(512, Number(value) || 1024))
+  return Math.round(bounded / 8) * 8
+}
+
+function updateImageDimension(kind: 'width' | 'height', event: Event) {
+  const value = clampImageDimension(Number((event.target as HTMLInputElement).value))
+  if (kind === 'width') {
+    imageWidth.value = value
+  } else {
+    imageHeight.value = value
+  }
+}
+
+function updateImageSeed(event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  imageSeed.value = value ? Number(value) : null
+}
+
+function openImageReferencePicker() {
+  selectedCategory.value = 'image'
+  imageReferenceInput.value?.click()
+}
+
+function addImageReference(src: string, name = '参考图') {
+  if (!src) return
+  if (imageReferenceItems.value.some(item => item.src === src)) return
+  if (imageReferenceItems.value.length >= 4) {
+    ElMessage.warning('参考图最多添加 4 张，别贪多，模型也会迷糊。')
+    return
+  }
+  imageReferenceItems.value.push({
+    id: `ref-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name,
+    src,
+  })
+}
+
+function removeImageReference(id: string) {
+  imageReferenceItems.value = imageReferenceItems.value.filter(item => item.id !== id)
+}
+
+async function addImageReferenceFiles(files: FileList | File[]) {
+  const imageFiles = Array.from(files).filter(file => file.type === 'image/jpeg' || file.type === 'image/png')
+  if (!imageFiles.length) {
+    ElMessage.warning('参考图只支持 JPG、PNG')
+    return
+  }
+  selectedCategory.value = 'image'
+  for (const file of imageFiles) {
+    if (file.size > 10 * 1024 * 1024) {
+      ElMessage.error(`${file.name} 超过 10MB，官方调试台也是这个限制。`)
+      continue
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('图片读取失败'))
+      reader.readAsDataURL(file)
+    })
+    addImageReference(dataUrl, file.name)
+  }
+}
+
+function addImageReferenceUrl() {
+  const url = imageReferenceUrl.value.trim()
+  if (!url) return
+  if (!/^https?:\/\//i.test(url) && !url.startsWith('data:image/')) {
+    ElMessage.warning('参考图 URL 需要是 http(s) 或 data:image')
+    return
+  }
+  selectedCategory.value = 'image'
+  addImageReference(url, 'URL 参考图')
+  imageReferenceUrl.value = ''
+}
+
+async function handleImageReferenceInput(event: Event) {
+  const files = (event.target as HTMLInputElement).files
+  if (files) {
+    await addImageReferenceFiles(files)
+  }
+  if (imageReferenceInput.value) {
+    imageReferenceInput.value.value = ''
+  }
+}
+
+async function handleComposerDrop(event: DragEvent) {
+  const files = event.dataTransfer?.files
+  if (files?.length) {
+    event.preventDefault()
+    await addImageReferenceFiles(files)
+    return
+  }
+  const url = event.dataTransfer?.getData('text/uri-list') || event.dataTransfer?.getData('text/plain') || ''
+  if (url && /^https?:\/\/.+\.(png|jpe?g)(\?.*)?$/i.test(url.trim())) {
+    event.preventDefault()
+    selectedCategory.value = 'image'
+    addImageReference(url.trim(), '拖入参考图')
+  }
+}
+
+function isGenerationCategory(type: Message['type']): type is GenerationCategory {
+  return type !== 'text'
+}
+
+function insertSpeechTag(tag: string) {
+  const textarea = promptTextarea.value
+  if (!textarea) {
+    inputText.value = `${inputText.value}${tag}`
+    return
+  }
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  inputText.value = `${inputText.value.slice(0, start)}${tag}${inputText.value.slice(end)}`
+  nextTick(() => {
+    textarea.focus()
+    const pos = start + tag.length
+    textarea.setSelectionRange(pos, pos)
+  })
+}
+
+function insertMusicTag(tag: string) {
+  const textarea = musicLyricsTextarea.value
+  if (!textarea) {
+    musicLyrics.value = `${musicLyrics.value}${musicLyrics.value ? '\n' : ''}${tag}\n`
+    return
+  }
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const insertion = `${tag}\n`
+  musicLyrics.value = `${musicLyrics.value.slice(0, start)}${insertion}${musicLyrics.value.slice(end)}`
+  nextTick(() => {
+    textarea.focus()
+    const pos = start + insertion.length
+    textarea.setSelectionRange(pos, pos)
+  })
+}
+
+function applyMusicTemplate(template: { prompt: string; lyrics: string }) {
+  inputText.value = template.prompt
+  musicLyrics.value = template.lyrics
+  selectedCategory.value = 'music'
+  nextTick(scrollToBottom)
+}
+
+function updateMusicSeed(event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  musicSeed.value = value ? Number(value) : null
+}
+
+function variationPromptFor(prompt: string, type: GenerationCategory) {
+  if (type === 'image') {
+    return `${prompt}, create a fresh variation with a different composition while preserving the core concept`
+  }
+  if (type === 'music') {
+    return `${prompt}, create a fresh musical variation while preserving the core mood`
+  }
+  if (type === 'video') {
+    return `${prompt}, create a fresh video variation while preserving the core scene`
+  }
+  return prompt
+}
+
+function loadingLabelFor(type: Message['type']) {
+  if (type === 'voice') return 'AI 正在合成你的语音...'
+  if (type === 'music') return 'AI 正在创作你的音乐...'
+  if (type === 'video') return 'AI 正在创作你的视频...'
+  return t('generate.generating')
+}
+
+async function sendRecordPrompt(prompt: string, type: Message['type'], model: string, variation = false) {
+  if (!isGenerationCategory(type) || isGenerating.value || isOptimizingPrompt.value) return
+  selectedCategory.value = type
+  const models = modelNamesFor(type)
+  if (model && (!models.length || models.includes(model))) {
+    selectedModel.value = model
+  }
+  inputText.value = variation ? variationPromptFor(prompt, type) : prompt
   await nextTick()
   await sendMessage()
 }
 
-async function createVariation(prompt: string) {
+async function regenerateFromPrompt(prompt: string, type: Message['type'], model: string) {
   if (isGenerating.value || isOptimizingPrompt.value) return
-  inputText.value = `${prompt}, create a fresh variation with a different composition while preserving the core concept`
-  await nextTick()
-  await sendMessage()
+  await sendRecordPrompt(prompt, type, model)
+}
+
+async function createVariation(prompt: string, type: Message['type'], model: string) {
+  if (isGenerating.value || isOptimizingPrompt.value) return
+  await sendRecordPrompt(prompt, type, model, true)
 }
 
 function downloadFile(url: string) {
@@ -316,8 +627,9 @@ async function saveMessages() {
 }
 
 async function sendMessage() {
-  if (!inputText.value.trim() || isGenerating.value) return
+  if ((!inputText.value.trim() && !canSubmitGeneration.value) || isGenerating.value) return
   const text = inputText.value.trim()
+  const displayText = text || musicLyrics.value.trim().slice(0, 120) || 'AI 歌词优化音乐'
   inputText.value = ''
 
   await ensureConversation()
@@ -326,7 +638,7 @@ async function sendMessage() {
     id: `user-${Date.now()}`,
     role: 'user',
     type: 'text',
-    content: text,
+    content: displayText,
     createdAt: new Date(),
   }
   messages.value.push(userMsg)
@@ -356,9 +668,21 @@ async function sendImage(prompt: string) {
     const resp = await api.post('/api/image/generate', {
       prompt,
       model: selectedModel.value,
-      aspect_ratio: selectedAspect.value,
+      aspect_ratio: useCustomImageSize.value ? null : selectedAspect.value,
+      width: useCustomImageSize.value ? imageWidth.value : null,
+      height: useCustomImageSize.value ? imageHeight.value : null,
       n: selectedImageCount.value,
       response_format: 'url',
+      prompt_optimizer: imagePromptOptimizer.value,
+      seed: imageSeed.value,
+      aigc_watermark: imageAigcWatermark.value,
+      style: selectedModel.value === 'image-01-live' && selectedStyle.value !== '默认'
+        ? { style_type: selectedStyle.value, style_weight: imageStyleWeight.value }
+        : null,
+      subject_reference: imageReferenceItems.value.map(item => ({
+        type: 'character',
+        image_file: item.src,
+      })),
     }, {
       signal: controller.signal,
     })
@@ -369,7 +693,7 @@ async function sendImage(prompt: string) {
     placeholders.msg.results = data.image_urls || []
     placeholders.msg.type = 'image'
     placeholders.msg.model = selectedModel.value
-    placeholders.msg.aspect = selectedAspect.value
+    placeholders.msg.aspect = useCustomImageSize.value ? `${imageWidth.value}x${imageHeight.value}` : selectedAspect.value
     placeholders.msg.style = selectedStyle.value
     await saveAssistantResponse(placeholders.msg)
   } catch (err: any) {
@@ -403,7 +727,7 @@ async function optimizePrompt() {
     const data = resp.data as { optimized_prompt: string }
     if (data.optimized_prompt?.trim()) {
       inputText.value = data.optimized_prompt.trim()
-      ElMessage.success('提示词已优化，可继续编辑或直接发送')
+      ElMessage.success(`${optimizePromptSuccessLabel.value}已优化，可继续编辑或直接发送`)
       await nextTick()
     }
   } catch (err: any) {
@@ -424,8 +748,24 @@ async function sendVoice(text: string) {
   try {
     const resp = await api.post('/api/voice/generate', {
       text,
-      voice_id: 'male-qn-qingse',
+      voice_id: activeVoiceId.value || 'male-qn-qingse',
       model: selectedModel.value,
+      speed: voiceSpeed.value,
+      vol: voiceVolume.value,
+      pitch: voicePitch.value,
+      emotion: selectedEmotion.value,
+      audio_format: audioFormat.value,
+      sample_rate: sampleRate.value,
+      bitrate: bitrate.value,
+      channel: audioChannel.value,
+      subtitle_enable: subtitleEnabled.value,
+      latex_read: latexReadEnabled.value,
+      language_boost: languageBoost.value || null,
+      pronunciation_tones: pronunciationTones.value,
+      voice_effect_pitch: voiceEffectPitch.value,
+      voice_effect_intensity: voiceEffectIntensity.value,
+      voice_effect_timbre: voiceEffectTimbre.value,
+      voice_effect: voiceEffect.value || null,
     }, {
       signal: controller.signal,
     })
@@ -462,6 +802,16 @@ async function sendMusic(text: string) {
     const resp = await api.post('/api/music/generate', {
       prompt: text,
       model: selectedModel.value,
+      lyrics: musicLyrics.value,
+      is_instrumental: musicInstrumental.value,
+      lyrics_optimizer: musicLyricsOptimizer.value,
+      audio_format: musicAudioFormat.value,
+      output_format: musicOutputFormat.value,
+      sample_rate: musicSampleRate.value,
+      bitrate: musicBitrate.value,
+      seed: musicSeed.value,
+      aigc_watermark: musicAigcWatermark.value,
+      reference_audio_url: musicReferenceAudioUrl.value || null,
     }, {
       signal: controller.signal,
     })
@@ -633,7 +983,7 @@ onMounted(async () => {
     const preferred: Array<keyof AvailableModels> = ['image', 'voice', 'music', 'video']
     const firstCat = preferred.find(c => modelNamesFor(c).length)
     if (firstCat) {
-      selectedCategory.value = firstCat as typeof selectedCategory.value
+      selectedCategory.value = firstCat as GenerationCategory
       selectedModel.value = modelNamesFor(firstCat)[0]
       console.log('[GenerateView] default category:', firstCat, 'model:', selectedModel.value)
     }
@@ -661,7 +1011,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="generate-page">
+  <div class="generate-page" :class="`mode-${selectedCategory}`">
     <header class="topbar">
       <div class="project-brand">
         <svg class="brand-mark" viewBox="0 0 24 24" fill="currentColor">
@@ -746,7 +1096,7 @@ onUnmounted(() => {
               </div>
 
               <div class="record-actions">
-                <button type="button" @click="regenerateFromPrompt(record.prompt)" :disabled="isGenerating || isOptimizingPrompt">
+                <button type="button" @click="regenerateFromPrompt(record.prompt, record.type, record.model)" :disabled="isGenerating || isOptimizingPrompt">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 12a9 9 0 0 1-15.6 6.1"/>
                     <path d="M3 12A9 9 0 0 1 18.6 5.9"/>
@@ -754,7 +1104,7 @@ onUnmounted(() => {
                   </svg>
                   重新生成
                 </button>
-                <button type="button" @click="createVariation(record.prompt)" :disabled="isGenerating || isOptimizingPrompt">
+                <button type="button" @click="createVariation(record.prompt, record.type, record.model)" :disabled="isGenerating || isOptimizingPrompt">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
                     <path d="M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M18.36 5.64l-2.12 2.12M7.76 16.24l-2.12 2.12"/>
@@ -778,7 +1128,7 @@ onUnmounted(() => {
 
             <div v-if="record.loading" class="record-loading">
               <div class="loading-dots"><span></span><span></span><span></span></div>
-              <span>{{ t('generate.generating') }}</span>
+              <span>{{ loadingLabelFor(record.type) }}</span>
               <button class="loading-cancel-btn" type="button" @click="cancelGeneration">
                 取消生成
               </button>
@@ -820,7 +1170,7 @@ onUnmounted(() => {
                     </svg>
                     放大
                   </button>
-                  <button type="button" @click="createVariation(record.prompt)" :disabled="isGenerating || isOptimizingPrompt">
+                  <button type="button" @click="createVariation(record.prompt, record.type, record.model)" :disabled="isGenerating || isOptimizingPrompt">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
                       <path d="M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12"/>
@@ -854,32 +1204,343 @@ onUnmounted(() => {
       </main>
     </div>
 
-    <form class="composer" @submit.prevent="sendMessage">
+    <form
+      class="composer"
+      :class="{ 'drop-ready': selectedCategory === 'image' }"
+      @submit.prevent="sendMessage"
+      @dragover.prevent
+      @drop="handleComposerDrop"
+    >
+      <div v-if="selectedCategory === 'image' && activeImageReferenceCount" class="reference-strip">
+        <figure v-for="item in imageReferenceItems" :key="item.id" class="reference-thumb">
+          <img :src="item.src" :alt="item.name" />
+          <button type="button" title="移除参考图" @click="removeImageReference(item.id)">×</button>
+        </figure>
+        <button class="reference-add" type="button" title="继续添加参考图" @click="openImageReferencePicker">+</button>
+      </div>
+
       <div class="composer-input">
-        <button class="upload-btn" type="button" title="添加参考图">
+        <button class="upload-btn" type="button" title="添加参考图" @click="openImageReferencePicker">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="5" width="18" height="14" rx="2"/>
             <circle cx="8.5" cy="10.5" r="1.5"/>
             <path d="M21 15l-5-5L5 21"/>
           </svg>
         </button>
+        <input
+          ref="imageReferenceInput"
+          class="hidden-file-input"
+          type="file"
+          accept="image/jpeg,image/jpg,image/png"
+          multiple
+          @change="handleImageReferenceInput"
+        />
         <textarea
+          ref="promptTextarea"
           v-model="inputText"
           class="prompt-textarea"
-          placeholder="描述你想要生成的图像..."
+          :placeholder="composerPlaceholder"
           rows="1"
           @keydown.enter.exact.prevent="sendMessage"
         ></textarea>
         <button
           class="optimize-btn"
           type="button"
-          title="AI enhance：扩写并优化提示词"
+          :title="optimizePromptTitle"
           @click="optimizePrompt"
           :disabled="!inputText.trim() || isGenerating || isOptimizingPrompt"
         >
           <span v-if="isOptimizingPrompt" class="mini-spinner"></span>
           <span v-else>AI enhance</span>
         </button>
+      </div>
+
+      <div v-if="selectedCategory === 'image'" class="image-panel">
+        <div class="image-reference-row">
+          <input
+            v-model="imageReferenceUrl"
+            type="url"
+            placeholder="粘贴参考图 URL，或把图片直接拖进对话框"
+            @keydown.enter.prevent="addImageReferenceUrl"
+          />
+          <button type="button" @click="addImageReferenceUrl">添加</button>
+        </div>
+
+        <details class="voice-advanced image-advanced">
+          <summary>图片高级设置</summary>
+          <div class="advanced-grid image-settings-grid">
+            <label class="voice-check">
+              <input v-model="imagePromptOptimizer" type="checkbox" />
+              <span>官方 Prompt 优化</span>
+            </label>
+            <label class="voice-check">
+              <input v-model="imageAigcWatermark" type="checkbox" />
+              <span>AIGC 水印</span>
+            </label>
+            <label class="voice-check">
+              <input v-model="useCustomImageSize" type="checkbox" :disabled="selectedModel !== 'image-01'" />
+              <span>自定义尺寸</span>
+            </label>
+            <label class="voice-field">
+              <span>宽度</span>
+              <input
+                :value="imageWidth"
+                type="number"
+                min="512"
+                max="2048"
+                step="8"
+                :disabled="!useCustomImageSize || selectedModel !== 'image-01'"
+                @input="updateImageDimension('width', $event)"
+              />
+            </label>
+            <label class="voice-field">
+              <span>高度</span>
+              <input
+                :value="imageHeight"
+                type="number"
+                min="512"
+                max="2048"
+                step="8"
+                :disabled="!useCustomImageSize || selectedModel !== 'image-01'"
+                @input="updateImageDimension('height', $event)"
+              />
+            </label>
+            <label class="voice-field">
+              <span>Seed</span>
+              <input
+                :value="imageSeed ?? ''"
+                type="number"
+                placeholder="留空随机"
+                @input="updateImageSeed"
+              />
+            </label>
+            <label v-if="selectedModel === 'image-01-live'" class="voice-field">
+              <span>画风权重 {{ imageStyleWeight.toFixed(1) }}</span>
+              <input v-model.number="imageStyleWeight" type="range" min="0.1" max="1" step="0.1" />
+            </label>
+          </div>
+        </details>
+      </div>
+
+      <div v-if="selectedCategory === 'voice'" class="voice-panel">
+        <div class="speech-tags" aria-label="语气词标签">
+          <button
+            v-for="item in speechInterjections"
+            :key="item.tag"
+            type="button"
+            @click="insertSpeechTag(item.tag)"
+          >
+            {{ item.label }}
+          </button>
+          <button type="button" @click="insertSpeechTag('<#0.5#>')">停顿 0.5s</button>
+        </div>
+
+        <div class="voice-grid">
+          <label class="voice-field">
+            <span>音色</span>
+            <select v-if="!useCustomVoice" v-model="selectedVoiceId">
+              <option v-for="voice in speechVoices" :key="voice.id" :value="voice.id">{{ voice.name }}</option>
+            </select>
+            <input v-else v-model="customVoiceId" type="text" placeholder="输入 voice_id" />
+          </label>
+          <button class="voice-switch" type="button" @click="useCustomVoice = !useCustomVoice">
+            {{ useCustomVoice ? '系统音色' : '自定义音色' }}
+          </button>
+
+          <label class="voice-field">
+            <span>格式</span>
+            <select v-model="audioFormat">
+              <option v-for="format in speechAudioFormats" :key="format" :value="format">{{ format.toUpperCase() }}</option>
+            </select>
+          </label>
+
+          <label class="voice-field">
+            <span>采样率</span>
+            <select v-model.number="sampleRate">
+              <option v-for="rate in speechSampleRates" :key="rate" :value="rate">{{ rate }} Hz</option>
+            </select>
+          </label>
+
+          <label class="voice-field">
+            <span>比特率</span>
+            <select v-model.number="bitrate">
+              <option v-for="rate in speechBitrates" :key="rate" :value="rate">{{ rate / 1000 }} kbps</option>
+            </select>
+          </label>
+
+          <label class="voice-field">
+            <span>声道</span>
+            <select v-model.number="audioChannel">
+              <option :value="1">单声道</option>
+              <option :value="2">立体声</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="emotion-row" aria-label="情绪">
+          <button
+            v-for="emotion in speechEmotions"
+            :key="emotion.id"
+            type="button"
+            :class="{ active: selectedEmotion === emotion.id }"
+            @click="selectedEmotion = emotion.id"
+          >
+            {{ emotion.name }}
+          </button>
+        </div>
+
+        <div class="voice-sliders">
+          <label>
+            <span>语速 {{ voiceSpeed }}</span>
+            <input v-model.number="voiceSpeed" type="range" min="0.5" max="2" step="0.1" />
+          </label>
+          <label>
+            <span>音量 {{ voiceVolume }}</span>
+            <input v-model.number="voiceVolume" type="range" min="0" max="10" step="0.1" />
+          </label>
+          <label>
+            <span>音调 {{ voicePitch }}</span>
+            <input v-model.number="voicePitch" type="range" min="-12" max="12" step="1" />
+          </label>
+        </div>
+
+        <details class="voice-advanced">
+          <summary>高级设置</summary>
+          <div class="advanced-grid">
+            <label class="voice-check">
+              <input v-model="subtitleEnabled" type="checkbox" />
+              <span>生成字幕</span>
+            </label>
+            <label class="voice-check">
+              <input v-model="latexReadEnabled" type="checkbox" />
+              <span>LaTeX 朗读</span>
+            </label>
+            <label class="voice-field">
+              <span>语言增强</span>
+              <select v-model="languageBoost">
+                <option v-for="item in speechLanguageBoosts" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </select>
+            </label>
+            <label class="voice-field">
+              <span>音效</span>
+              <select v-model="voiceEffect">
+                <option v-for="item in speechVoiceEffects" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </select>
+            </label>
+            <label class="voice-field span-2">
+              <span>发音词典</span>
+              <textarea v-model="pronunciationToneInput" rows="2" placeholder="每行一个：词语/读音"></textarea>
+            </label>
+            <label class="voice-range">
+              <span>效果音高 {{ voiceEffectPitch }}</span>
+              <input v-model.number="voiceEffectPitch" type="range" min="-100" max="100" step="1" />
+            </label>
+            <label class="voice-range">
+              <span>效果强度 {{ voiceEffectIntensity }}</span>
+              <input v-model.number="voiceEffectIntensity" type="range" min="-100" max="100" step="1" />
+            </label>
+            <label class="voice-range">
+              <span>效果音色 {{ voiceEffectTimbre }}</span>
+              <input v-model.number="voiceEffectTimbre" type="range" min="-100" max="100" step="1" />
+            </label>
+          </div>
+        </details>
+      </div>
+
+      <div v-if="selectedCategory === 'music'" class="music-panel">
+        <div class="music-templates" aria-label="歌曲模板">
+          <button
+            v-for="template in musicTemplates"
+            :key="template.name"
+            type="button"
+            @click="applyMusicTemplate(template)"
+          >
+            <strong>{{ template.name }}</strong>
+            <span>{{ template.prompt }}</span>
+          </button>
+        </div>
+
+        <div class="music-tags" aria-label="歌词结构标签">
+          <button
+            v-for="tag in musicStructureTags"
+            :key="tag"
+            type="button"
+            @click="insertMusicTag(tag)"
+          >
+            {{ tag }}
+          </button>
+        </div>
+
+        <div class="music-options-row">
+          <label class="voice-check">
+            <input v-model="musicInstrumental" type="checkbox" />
+            <span>纯音乐模式</span>
+          </label>
+          <label class="voice-check">
+            <input v-model="musicLyricsOptimizer" type="checkbox" />
+            <span>AI 歌词优化</span>
+          </label>
+          <label class="voice-check">
+            <input v-model="musicAigcWatermark" type="checkbox" />
+            <span>AI 音频水印</span>
+          </label>
+        </div>
+
+        <label v-if="selectedModel === 'music-cover'" class="voice-field">
+          <span>参考音频 URL</span>
+          <input v-model="musicReferenceAudioUrl" type="url" placeholder="https://example.com/reference.mp3" />
+        </label>
+
+        <label class="voice-field">
+          <span>歌词</span>
+          <textarea
+            ref="musicLyricsTextarea"
+            v-model="musicLyrics"
+            rows="5"
+            :placeholder="musicInstrumental ? '纯音乐模式下歌词可选，可用结构标签定义段落' : '输入歌词，可插入 [Verse]、[Chorus] 等结构标签'"
+          ></textarea>
+        </label>
+
+        <details class="voice-advanced">
+          <summary>高级设置</summary>
+          <div class="advanced-grid">
+            <label class="voice-field">
+              <span>采样率</span>
+              <select v-model.number="musicSampleRate">
+                <option v-for="rate in musicSampleRates" :key="rate" :value="rate">{{ rate }} Hz</option>
+              </select>
+            </label>
+            <label class="voice-field">
+              <span>比特率</span>
+              <select v-model.number="musicBitrate">
+                <option v-for="rate in musicBitrates" :key="rate" :value="rate">{{ rate / 1000 }} kbps</option>
+              </select>
+            </label>
+            <label class="voice-field">
+              <span>音频格式</span>
+              <select v-model="musicAudioFormat">
+                <option v-for="format in musicAudioFormats" :key="format" :value="format">{{ format.toUpperCase() }}</option>
+              </select>
+            </label>
+            <label class="voice-field">
+              <span>返回格式</span>
+              <select v-model="musicOutputFormat">
+                <option v-for="format in musicOutputFormats" :key="format" :value="format">{{ format === 'hex' ? 'Hex 编码' : 'URL 链接' }}</option>
+              </select>
+            </label>
+            <label class="voice-field">
+              <span>Seed</span>
+              <input
+                :value="musicSeed ?? ''"
+                type="number"
+                min="0"
+                max="1000000"
+                placeholder="0 - 1000000"
+                @input="updateMusicSeed"
+              />
+            </label>
+          </div>
+        </details>
       </div>
 
       <div class="composer-controls">
@@ -889,10 +1550,10 @@ onUnmounted(() => {
           <option value="video">{{ t('generate.categoryVideo') }}</option>
           <option value="music">{{ t('generate.categoryMusic') }}</option>
         </select>
-        <select v-if="selectedCategory === 'image'" v-model="selectedStyle" class="param-select">
-          <option v-for="s in styles" :key="s" :value="s">风格 {{ s }}</option>
+        <select v-if="selectedCategory === 'image'" v-model="selectedStyle" class="param-select" :disabled="selectedModel !== 'image-01-live'">
+          <option v-for="s in styles" :key="s" :value="s">画风 {{ s }}</option>
         </select>
-        <select v-if="selectedCategory === 'image'" v-model="selectedAspect" class="param-select">
+        <select v-if="selectedCategory === 'image'" v-model="selectedAspect" class="param-select" :disabled="useCustomImageSize">
           <option v-for="a in aspects" :key="a" :value="a">宽高比 {{ a }}</option>
         </select>
         <div v-if="selectedCategory === 'image'" class="count-toggle" aria-label="生成数量">
@@ -905,6 +1566,14 @@ onUnmounted(() => {
           >
             {{ count }}x
           </button>
+          <input
+            v-model.number="selectedImageCount"
+            class="count-input"
+            type="number"
+            min="1"
+            max="9"
+            title="生成数量 1-9"
+          />
         </div>
         <select v-model="selectedModel" class="param-select">
           <option v-for="m in currentModelList" :key="m" :value="m">模型 {{ m }}</option>
@@ -927,7 +1596,7 @@ onUnmounted(() => {
           v-else
           class="generate-btn"
           type="submit"
-          :disabled="!inputText.trim() || isOptimizingPrompt"
+          :disabled="!canSubmitGeneration"
         >
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>
@@ -1691,6 +2360,7 @@ onUnmounted(() => {
 
 /* ── Reference-style Generate Workspace ───────────────── */
 .generate-page {
+  --composer-clearance: 180px;
   min-height: 100vh;
   height: 100vh;
   overflow: hidden;
@@ -1702,6 +2372,18 @@ onUnmounted(() => {
     #05080d;
   color: #f8fafc;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.generate-page.mode-image {
+  --composer-clearance: 290px;
+}
+
+.generate-page.mode-voice {
+  --composer-clearance: 430px;
+}
+
+.generate-page.mode-music {
+  --composer-clearance: 560px;
 }
 
 .topbar {
@@ -1999,7 +2681,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 0 2px 10px 0;
+  padding: 0 2px var(--composer-clearance) 0;
   overscroll-behavior: contain;
 }
 
@@ -2365,11 +3047,16 @@ onUnmounted(() => {
 }
 
 .composer {
-  position: relative;
-  width: min(1360px, calc(100vw - 96px));
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  width: min(1080px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
   flex-shrink: 0;
-  margin: 0 auto 18px;
-  z-index: 40;
+  margin: 0;
+  z-index: 1200;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2383,10 +3070,23 @@ onUnmounted(() => {
   backdrop-filter: blur(18px);
 }
 
+.composer::-webkit-scrollbar {
+  width: 5px;
+}
+
+.composer::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+}
+
 .composer-input {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .upload-btn {
@@ -2440,6 +3140,291 @@ onUnmounted(() => {
   box-shadow: 0 0 18px rgba(124, 58, 237, 0.18);
 }
 
+.reference-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.reference-thumb {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  background: rgba(9, 14, 23, 0.72);
+}
+
+.reference-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.reference-thumb button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(2, 6, 23, 0.74);
+  color: #fff;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.reference-add {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.5);
+  color: rgba(226, 232, 240, 0.74);
+  cursor: pointer;
+  font-size: 24px;
+}
+
+.image-panel,
+.voice-panel,
+.music-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.image-reference-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.image-reference-row input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(9, 14, 23, 0.72);
+  color: #e2e8f0;
+  outline: 0;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.image-reference-row button {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(25, 211, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #bdefff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.image-settings-grid {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.speech-tags,
+.emotion-row,
+.music-tags,
+.music-options-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.speech-tags button,
+.music-tags button,
+.emotion-row button,
+.voice-switch {
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.72);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.speech-tags button:hover,
+.music-tags button:hover,
+.emotion-row button:hover,
+.voice-switch:hover,
+.emotion-row button.active {
+  border-color: rgba(25, 211, 255, 0.38);
+  background: rgba(14, 165, 233, 0.16);
+  color: #e0f7ff;
+}
+
+.music-templates {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.music-templates button {
+  min-width: 0;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.62);
+  color: #e2e8f0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.music-templates button:hover {
+  border-color: rgba(244, 114, 182, 0.36);
+  background: rgba(190, 24, 93, 0.16);
+}
+
+.music-templates strong,
+.music-templates span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-templates strong {
+  font-size: 12px;
+}
+
+.music-templates span {
+  margin-top: 4px;
+  color: rgba(203, 213, 225, 0.58);
+  font-size: 11px;
+}
+
+.voice-grid,
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.voice-field,
+.voice-range,
+.voice-check {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: rgba(203, 213, 225, 0.7);
+  font-size: 11px;
+}
+
+.voice-field span,
+.voice-range span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice-field select,
+.voice-field input,
+.voice-field textarea {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(9, 14, 23, 0.72);
+  color: #e2e8f0;
+  outline: 0;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.voice-field textarea {
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.voice-field option {
+  background: #0b1220;
+  color: #fff;
+}
+
+.voice-sliders {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.voice-sliders label,
+.voice-range {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: rgba(203, 213, 225, 0.7);
+  font-size: 11px;
+}
+
+.voice-sliders input,
+.voice-range input {
+  width: 100%;
+  accent-color: #19d3ff;
+}
+
+.voice-advanced {
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: rgba(2, 6, 23, 0.24);
+}
+
+.voice-advanced summary {
+  cursor: pointer;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.advanced-grid {
+  margin-top: 10px;
+}
+
+.voice-check {
+  min-height: 34px;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 8px;
+  background: rgba(9, 14, 23, 0.72);
+}
+
+.voice-check input {
+  accent-color: #19d3ff;
+}
+
+.span-2 {
+  grid-column: span 2;
+}
+
 .composer-controls {
   gap: 10px;
   flex-wrap: wrap;
@@ -2458,6 +3443,11 @@ onUnmounted(() => {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
+}
+
+.composer .param-select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .count-toggle {
@@ -2495,6 +3485,19 @@ onUnmounted(() => {
 .count-toggle button.active {
   color: #07131d;
   background: linear-gradient(135deg, #19d3ff, #44a8ff);
+}
+
+.count-input {
+  width: 48px;
+  height: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.58);
+  color: rgba(226, 232, 240, 0.78);
+  outline: 0;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 12px;
 }
 
 .composer .param-select option {
@@ -2581,6 +3584,12 @@ onUnmounted(() => {
     overflow-x: auto;
     padding-bottom: 2px;
   }
+
+  .voice-grid,
+  .advanced-grid,
+  .music-templates {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -2607,8 +3616,20 @@ onUnmounted(() => {
     padding: 16px 12px 16px;
   }
 
-  .records-scroll {
-    padding-bottom: 8px;
+  .generate-page {
+    --composer-clearance: 210px;
+  }
+
+  .generate-page.mode-image {
+    --composer-clearance: 500px;
+  }
+
+  .generate-page.mode-voice {
+    --composer-clearance: 650px;
+  }
+
+  .generate-page.mode-music {
+    --composer-clearance: 720px;
   }
 
   .feed-header {
@@ -2635,12 +3656,30 @@ onUnmounted(() => {
 
   .composer {
     width: calc(100vw - 20px);
-    margin-bottom: 10px;
+    bottom: 10px;
+    max-height: calc(100vh - 84px);
   }
 
   .composer .param-select {
     flex: 1 1 140px;
     min-width: 0;
+  }
+
+  .voice-grid,
+  .advanced-grid,
+  .voice-sliders {
+    grid-template-columns: 1fr;
+  }
+
+  .music-templates {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(150px, 72vw);
+    overflow-x: auto;
+  }
+
+  .span-2 {
+    grid-column: span 1;
   }
 
   .control-icon {
