@@ -2,3 +2,4 @@
 from .user import User
 from .generation import Generation
 from .conversation import Conversation, ConversationMessage
+from .prompt import Prompt

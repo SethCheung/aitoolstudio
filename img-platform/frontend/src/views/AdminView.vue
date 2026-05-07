@@ -11,7 +11,14 @@ interface Profile {
   models: Record<string, string[]>
 }
 
-type Category = 'all' | 'image' | 'voice' | 'video' | 'music' | 'text'
+interface User {
+  id: number
+  username: string
+  is_admin: boolean
+  created_at: string
+}
+
+type Category = 'all' | 'image' | 'voice' | 'video' | 'music' | 'text' | 'users'
 
 const categories: Array<{ key: Category; label: string; icon: string }> = [
   { key: 'all', label: 'All', icon: 'A' },
@@ -20,12 +27,13 @@ const categories: Array<{ key: Category; label: string; icon: string }> = [
   { key: 'video', label: 'Video', icon: '▶' },
   { key: 'music', label: 'Music', icon: '♪' },
   { key: 'text', label: 'Text', icon: 'T' },
+  { key: 'users', label: 'Users', icon: 'U' },
 ]
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
 const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, '')}/docs`
 
-const modelCategories: Record<Exclude<Category, 'all'>, string[]> = {
+const modelCategories: Record<Exclude<Category, 'all' | 'users'>, string[]> = {
   image: ['image-01'],
   voice: ['speech-2.8-hd', 'speech-2.8-turbo', 'speech-2.6-hd', 'speech-2.6-turbo'],
   video: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'S2V-01'],
@@ -34,13 +42,17 @@ const modelCategories: Record<Exclude<Category, 'all'>, string[]> = {
 }
 
 const profiles = ref<Profile[]>([])
+const users = ref<User[]>([])
 const activeCategory = ref<Category>('all')
 const selectedName = ref('')
 const isLoading = ref(false)
 const loadError = ref('')
 const showForm = ref(false)
+const showUserForm = ref(false)
 const editingProfile = ref<Profile | null>(null)
+const editingUser = ref<User | null>(null)
 const formError = ref('')
+const userFormError = ref('')
 const form = ref({
   name: '',
   api_key: '',
@@ -54,6 +66,11 @@ const form = ref({
     music: [] as string[],
     text: ['MiniMax-M2.7'],
   } as Record<string, string[]>,
+})
+const userForm = ref({
+  username: '',
+  password: '',
+  is_admin: false,
 })
 
 const normalizedProfiles = computed(() => {
@@ -74,6 +91,9 @@ const modelCount = computed(() => {
   })
   return names.size
 })
+
+const adminCount = computed(() => users.value.filter((u) => u.is_admin).length)
+const regularUserCount = computed(() => users.value.filter((u) => !u.is_admin).length)
 
 async function fetchProfiles() {
   isLoading.value = true
@@ -169,7 +189,87 @@ function categoryModels(profile: Profile) {
   return Object.entries(profile.models || {}).filter(([, models]) => models.length)
 }
 
-onMounted(fetchProfiles)
+async function fetchUsers() {
+  try {
+    const response = await api.get('/api/admin/users')
+    users.value = response.data
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to load users'
+  }
+}
+
+function openAddUser() {
+  editingUser.value = null
+  userForm.value = { username: '', password: '', is_admin: false }
+  showUserForm.value = true
+  userFormError.value = ''
+}
+
+function openEditUser(user: User) {
+  editingUser.value = user
+  userForm.value = { username: user.username, password: '', is_admin: user.is_admin }
+  showUserForm.value = true
+  userFormError.value = ''
+}
+
+async function saveUser() {
+  userFormError.value = ''
+  if (!userForm.value.username.trim()) {
+    userFormError.value = 'Username is required'
+    return
+  }
+  if (!editingUser.value && !userForm.value.password) {
+    userFormError.value = 'Password is required for new users'
+    return
+  }
+
+  const payload: any = {
+    username: userForm.value.username.trim(),
+    is_admin: userForm.value.is_admin,
+  }
+  if (userForm.value.password) {
+    payload.password = userForm.value.password
+  }
+
+  try {
+    if (editingUser.value) {
+      await api.put(`/api/admin/users/${editingUser.value.id}`, payload)
+    } else {
+      await api.post('/api/admin/users', payload)
+    }
+    showUserForm.value = false
+    await fetchUsers()
+  } catch (error: any) {
+    userFormError.value = error?.response?.data?.detail || error.message || 'Failed to save user'
+  }
+}
+
+async function deleteUser(user: User) {
+  if (!confirm(`Delete user "${user.username}"?`)) return
+  try {
+    await api.delete(`/api/admin/users/${user.id}`)
+    await fetchUsers()
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to delete user'
+  }
+}
+
+async function toggleAdmin(user: User) {
+  try {
+    await api.put(`/api/admin/users/${user.id}`, {
+      username: user.username,
+      is_admin: !user.is_admin,
+    })
+    await fetchUsers()
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to toggle admin'
+  }
+}
+
+onMounted(() => {
+  fetchProfiles()
+  fetchUsers()
+})
 </script>
 
 <template>
@@ -198,23 +298,23 @@ onMounted(fetchProfiles)
 
       <div class="header-actions">
         <a class="icon-button" :href="apiDocsUrl" target="_blank" title="Open API docs">⌘</a>
-        <button class="icon-button" title="Refresh profiles" @click="fetchProfiles">↻</button>
-        <button class="add-button" title="Add profile" @click="openAdd">+</button>
+        <button class="icon-button" title="Refresh" @click="activeCategory === 'users' ? fetchUsers() : fetchProfiles()">↻</button>
+        <button class="add-button" :title="activeCategory === 'users' ? 'Add user' : 'Add profile'" @click="activeCategory === 'users' ? openAddUser() : openAdd()">+</button>
       </div>
     </header>
 
     <section class="summary-strip">
       <div class="summary-item">
-        <span>{{ normalizedProfiles.length }}</span>
-        <p>Total profiles</p>
+        <span>{{ activeCategory === 'users' ? users.length : normalizedProfiles.length }}</span>
+        <p>{{ activeCategory === 'users' ? 'Total users' : 'Total profiles' }}</p>
       </div>
       <div class="summary-item">
-        <span>{{ enabledCount }}</span>
-        <p>Enabled</p>
+        <span>{{ activeCategory === 'users' ? adminCount : enabledCount }}</span>
+        <p>{{ activeCategory === 'users' ? 'Admins' : 'Enabled' }}</p>
       </div>
       <div class="summary-item">
-        <span>{{ modelCount }}</span>
-        <p>Routed models</p>
+        <span>{{ activeCategory === 'users' ? regularUserCount : modelCount }}</span>
+        <p>{{ activeCategory === 'users' ? 'Regular users' : 'Routed models' }}</p>
       </div>
       <div class="summary-item grow">
         <span>{{ loadError || 'Backend target: /api' }}</span>
@@ -223,52 +323,90 @@ onMounted(fetchProfiles)
     </section>
 
     <section class="profile-list" aria-label="Profiles">
-      <div v-if="isLoading" class="empty-state">Loading profiles...</div>
-      <div v-else-if="filteredProfiles.length === 0" class="empty-state">
-        No profiles in this category.
-        <button @click="openAdd">Add Profile</button>
-      </div>
+      <!-- Profile Management View -->
+      <template v-if="activeCategory !== 'users'">
+        <div v-if="isLoading" class="empty-state">Loading profiles...</div>
+        <div v-else-if="filteredProfiles.length === 0" class="empty-state">
+          No profiles in this category.
+          <button @click="openAdd">Add Profile</button>
+        </div>
 
-      <article
-        v-for="profile in filteredProfiles"
-        :key="profile.name"
-        class="profile-card"
-        :class="{ selected: selectedName === profile.name, disabled: !profile.enabled }"
-        @click="selectedName = profile.name"
-      >
-        <div class="drag-handle">⋮⋮</div>
-        <div class="profile-avatar">{{ profile.name.slice(0, 2).toUpperCase() }}</div>
+        <article
+          v-for="profile in filteredProfiles"
+          :key="profile.name"
+          class="profile-card"
+          :class="{ selected: selectedName === profile.name, disabled: !profile.enabled }"
+          @click="selectedName = profile.name"
+        >
+          <div class="drag-handle">⋮⋮</div>
+          <div class="profile-avatar">{{ profile.name.slice(0, 2).toUpperCase() }}</div>
 
-        <div class="profile-main">
-          <div class="profile-title-row">
-            <h2>{{ profile.name }}</h2>
-            <span class="status-pill" :class="{ on: profile.enabled }">
-              {{ profile.enabled ? 'Enabled' : 'Disabled' }}
-            </span>
+          <div class="profile-main">
+            <div class="profile-title-row">
+              <h2>{{ profile.name }}</h2>
+              <span class="status-pill" :class="{ on: profile.enabled }">
+                {{ profile.enabled ? 'Enabled' : 'Disabled' }}
+              </span>
+            </div>
+            <a class="base-url" :href="profile.base_url || '#'" target="_blank" @click.stop>
+              {{ profile.base_url || 'No base URL configured' }}
+            </a>
+            <div class="model-row">
+              <span v-for="[category, models] in categoryModels(profile)" :key="category" class="model-chip">
+                {{ category }} · {{ models.join(', ') }}
+              </span>
+            </div>
           </div>
-          <a class="base-url" :href="profile.base_url || '#'" target="_blank" @click.stop>
-            {{ profile.base_url || 'No base URL configured' }}
-          </a>
-          <div class="model-row">
-            <span v-for="[category, models] in categoryModels(profile)" :key="category" class="model-chip">
-              {{ category }} · {{ models.join(', ') }}
-            </span>
+
+          <div class="profile-meta">
+            <span>Priority {{ profile.priority }}</span>
+            <span>{{ profile.api_key_masked || '****' }}</span>
           </div>
+
+          <div class="profile-actions" @click.stop>
+            <button class="primary-action" @click="toggleProfile(profile)">
+              {{ profile.enabled ? 'Disable' : 'Enable' }}
+            </button>
+            <button class="tool-button" title="Edit" @click="openEdit(profile)">✎</button>
+            <button class="tool-button danger" title="Delete" @click="deleteProfile(profile)">⌫</button>
+          </div>
+        </article>
+      </template>
+
+      <!-- User Management View -->
+      <template v-else>
+        <div v-if="isLoading" class="empty-state">Loading users...</div>
+        <div v-else-if="users.length === 0" class="empty-state">
+          No users found.
+          <button @click="openAddUser">Add User</button>
         </div>
 
-        <div class="profile-meta">
-          <span>Priority {{ profile.priority }}</span>
-          <span>{{ profile.api_key_masked || '****' }}</span>
-        </div>
+        <article
+          v-for="user in users"
+          :key="user.id"
+          class="profile-card"
+        >
+          <div class="profile-avatar">{{ user.username.slice(0, 2).toUpperCase() }}</div>
 
-        <div class="profile-actions" @click.stop>
-          <button class="primary-action" @click="toggleProfile(profile)">
-            {{ profile.enabled ? 'Disable' : 'Enable' }}
-          </button>
-          <button class="tool-button" title="Edit" @click="openEdit(profile)">✎</button>
-          <button class="tool-button danger" title="Delete" @click="deleteProfile(profile)">⌫</button>
-        </div>
-      </article>
+          <div class="profile-main">
+            <div class="profile-title-row">
+              <h2>{{ user.username }}</h2>
+              <span class="status-pill" :class="{ on: user.is_admin }">
+                {{ user.is_admin ? 'Admin' : 'User' }}
+              </span>
+            </div>
+            <p class="base-url">ID: {{ user.id }}</p>
+          </div>
+
+          <div class="profile-actions" @click.stop>
+            <button class="primary-action" @click="toggleAdmin(user)">
+              {{ user.is_admin ? 'Revoke Admin' : 'Make Admin' }}
+            </button>
+            <button class="tool-button" title="Edit" @click="openEditUser(user)">✎</button>
+            <button class="tool-button danger" title="Delete" @click="deleteUser(user)">⌫</button>
+          </div>
+        </article>
+      </template>
     </section>
 
     <div v-if="showForm" class="modal-overlay" @click.self="showForm = false">
@@ -321,6 +459,39 @@ onMounted(fetchProfiles)
         <p v-if="formError" class="form-error">{{ formError }}</p>
         <div class="modal-actions">
           <button type="button" class="secondary-button" @click="showForm = false">Cancel</button>
+          <button type="submit" class="save-button">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- User Form Modal -->
+    <div v-if="showUserForm" class="modal-overlay" @click.self="showUserForm = false">
+      <form class="modal-card" @submit.prevent="saveUser">
+        <div class="modal-header">
+          <div>
+            <h2>{{ editingUser ? 'Edit User' : 'Add User' }}</h2>
+            <p>{{ editingUser ? 'Leave password blank to keep the existing password.' : 'Create a new user account.' }}</p>
+          </div>
+          <button type="button" class="tool-button" @click="showUserForm = false">×</button>
+        </div>
+
+        <label>
+          Username
+          <input v-model="userForm.username" :disabled="!!editingUser" placeholder="username" required />
+        </label>
+        <label>
+          Password
+          <input v-model="userForm.password" type="password" :placeholder="editingUser ? 'Leave blank to keep current' : 'Enter password'" :required="!editingUser" />
+        </label>
+
+        <label class="check-row">
+          <input v-model="userForm.is_admin" type="checkbox" />
+          Administrator privileges
+        </label>
+
+        <p v-if="userFormError" class="form-error">{{ userFormError }}</p>
+        <div class="modal-actions">
+          <button type="button" class="secondary-button" @click="showUserForm = false">Cancel</button>
           <button type="submit" class="save-button">Save</button>
         </div>
       </form>
