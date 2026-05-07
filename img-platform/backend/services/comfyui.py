@@ -182,6 +182,10 @@ async def _wait_for_history(client: httpx.AsyncClient, base_url: str, prompt_id:
     raise TimeoutError("ComfyUI generation timed out")
 
 
+def _comfyui_wait_timeout() -> float:
+    return float(int(os.getenv("COMFYUI_GENERATION_TIMEOUT", "300")) + 45)
+
+
 async def _download_outputs(client: httpx.AsyncClient, base_url: str, prompt_id: str, history: dict) -> list[str]:
     urls: list[str] = []
     COMFYUI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -324,7 +328,7 @@ async def upscale_image(
         if not prompt_id:
             raise ValueError("ComfyUI did not return prompt_id")
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=_comfyui_wait_timeout()) as client:
         history = await _wait_for_history(client, url, prompt_id)
         image_urls = await _download_outputs(client, url, prompt_id, history)
 
@@ -378,7 +382,7 @@ async def generate_image(
         if not prompt_id:
             raise ValueError("ComfyUI did not return prompt_id")
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=_comfyui_wait_timeout()) as client:
         history = await _wait_for_history(client, url, prompt_id)
         image_urls = await _download_outputs(client, url, prompt_id, history)
 

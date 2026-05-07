@@ -17,11 +17,15 @@
 | 模块 | 当前表现 |
 |------|----------|
 | **登录认证** | 用户通过用户名和密码登录，前端保存 JWT Token，后端保护生成、历史、Profile 和 Admin 接口 |
+| **后台用户管理** | 管理员通过 `/admin` 的 Users / All Users 界面查看全部账号，支持搜索、创建用户、编辑/重置密码、授予/撤销管理员权限和删除账号；关键危险操作有后端保护 |
 | **项目首页** | 登录后进入项目首页，展示当前用户的对话项目；如果项目中已有生成图片，卡片显示第一张图片缩略图 |
 | **生成工作台** | 用户可在同一页面选择 image / voice / video / music 分类、模型和参数后发起生成；Generate 页面采用顶部项目名 + 搜索 + 生成记录流 + 底部停靠生成框 |
 | **提示词优化** | 用户可点击「AI enhance」显式调用文本模型扩写当前输入，优化结果回填输入框，用户确认后再生成 |
 | **图片生成参数** | image 分类对齐 MiniMax 官方图片调试台，支持参考图微缩预览、URL/拖拽添加参考图、`1x / 2x / 3x / 4x` 快捷数量、1-9 自定义数量、官方 Prompt 优化、Seed、AIGC 水印、宽高比和 image-01 自定义尺寸 |
 | **本地 ComfyUI 直连** | image 分类新增 `comfyui-local` 模型入口，默认连接 `http://192.168.1.195:8188`，后端通过 ComfyUI HTTP API 提交默认文生图工作流，支持选择可用于图片工作流的 checkpoint，生成结果下载到本平台 `/uploads/comfyui` 后按现有图片网格展示 |
+| **ComfyUI Workflow 管理** | 管理员可在 `/admin` 的 Workflows 面板管理 ComfyUI API-format workflow JSON，支持默认文生图 workflow、启停、编辑、删除、复制 JSON，并可从 SMB 固定目录 `团队文件-SJM-MediaFile/Comfyui_Workflows` 同步导入；生成页选择 `comfyui-local` 后可选择启用的 workflow |
+| **ERNIE Image 工作流** | 本地 ComfyUI 检测到 `ComfyUI-ERNIE-Image` 自定义节点后，平台内置 `ERNIE Image` workflow 模板，使用 `baidu/ERNIE-Image` 模型路径，运行时注入 prompt、宽高和 seed |
+| **ComfyUI 模型路径快捷管理** | 管理员可在 `/admin` 的 Paths 面板保存 SMB 模型目录和 195 服务器本地挂载路径备注，首个默认快捷路径指向 `smb://192.168.1.60/团队文件-SJM-MediaFile/Comfyui_Model/audio_encoders` |
 | **ComfyUI GPU 状态** | `comfyui-local` 状态条展示在线状态、VRAM 已用/总量、占用百分比和 Torch VRAM，生成中每 2 秒刷新，帮助用户判断本地 GPU 是否正在工作 |
 | **ComfyUI Upscale** | 图片结果中的 Upscale 按钮接入 ComfyUI 原生 `ImageScale` 工作流，默认 2x `lanczos` 放大，结果作为新生成记录展示 |
 | **视频生成参数面板** | video 分类对齐 MiniMax 官方视频调试方案，支持文生视频、首帧图生视频、首尾帧视频、主体参考视频、官方 Prompt 优化、快速预处理、时长和分辨率 |
@@ -30,14 +34,14 @@
 | **取消生成** | 生成过程中前端可取消当前请求，立即停止等待并在记录中标记“已取消生成” |
 | **图片结果预览** | 生成图片以稳定比例网格展示；点击图片本身或“放大”按钮后在当前页面打开原图预览层，可点背景、关闭按钮或按 Esc 退出 |
 | **生成历史** | 用户 prompt 和 AI 结果保存为 conversation / conversation_messages，可从首页项目卡片或 Generate 页面恢复 |
-| **Profile 管理** | 管理员通过前端 `/admin` 管理 MiniMax Profile，支持 HTTP API 和 CLI 路由 |
+| **Profile 管理** | 管理员通过前端 `/admin` 管理模型供应商 Profile，支持 HTTP API 和 CLI 路由；各分类除预设模型外必须支持手动填写自定义模型 ID，用于后续接入其他供应商模型 |
 | **权限加固** | `/api/admin/*` 和 `/api/profiles` 管理接口要求管理员；`/api/profiles/models` 要求登录 |
 
 ### 未实现或仅规划
 
 | 模块 | 当前状态 |
 |------|----------|
-| **ComfyUI 工作流管理** | 当前已完成本地 ComfyUI 默认文生图直连；完整工作流上传、参数映射、队列管理和图生图/inpainting 工作流仍未完成 |
+| **ComfyUI 工作流高级管理** | 当前已支持 API-format JSON 的保存、启停和生成页选择；完整节点参数映射、图生图/inpainting/ControlNet 专用表单和队列管理仍未完成 |
 | **ControlNet / LoRA / inpainting** | 属于规划能力，当前 UI/后端未形成完整闭环；Upscale 已完成第一版 ComfyUI ImageScale 放大 |
 | **图像理解/自动标签** | 规划中，当前未形成独立 API 和 UI 流程 |
 | **批量提示词任务、提示词库、收藏、下载 ZIP** | 规划中；当前只实现单 prompt 下的 `1x / 2x / 4x` 多图数量 |
@@ -238,9 +242,9 @@
 ### 管理员后台功能
 | 功能模块 | 子功能 | 优先级 |
 |---------|--------|--------|
-| **用户管理** | 创建账号、禁用账号、重置密码 | 高 |
+| **用户管理** | 管理员在前端 `/admin` 明确进入 Users 管理区，支持创建账号、重置密码、授予/撤销管理员权限、删除账号；创建用户入口必须是可见的 `Add User` 操作，不依赖用户猜右上角 `+` 的上下文 | 高 |
 | **工作流配置** | 上传 ComfyUI JSON 工作流、设置名称和说明、启用/禁用 | 高 |
-| **API 配额管理** | MiniMax token 使用统计、自定义 API 接入配置 | 高 |
+| **API 配额管理** | MiniMax token 使用统计、自定义 API 接入配置；模型列表允许管理员按 image / voice / video / music / text 分类手动补充自定义模型 ID | 高 |
 | **使用统计** | 生成次数排行、热门模型/工作流、用户活跃度 | 中 |
 | **系统设置** | GPU 监控（温度/显存占用）、生成队列管理、系统日志 | 低 |
 
@@ -263,6 +267,8 @@
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v1.11 | 2026-05-07 | Admin Profile 模型选择支持自定义模型 ID，避免模型列表被 MiniMax 预设锁死，为后续其他供应商 API 接入预留入口 |
+| v1.10 | 2026-05-07 | 明确管理员后台用户管理入口：前端 `/admin` 必须展示可见 Add User 操作，并提供创建账号、重置密码、管理员权限切换和删除保护 |
 | v1.0 | 2026-04-30 | 初始版本 |
 | v1.1 | 2026-05-05 | 补充当前 MVP 状态、项目缩略图、生成页原图预览、权限加固和安全限制 |
 | v1.2 | 2026-05-05 | 新增显式「AI enhance」流程：文本模型扩写 prompt 后回填输入框，由用户确认后生图 |

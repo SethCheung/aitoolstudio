@@ -36,6 +36,7 @@ class ImageGenerateRequest(BaseModel):
     style: Optional[ImageStyle] = Field(default=None, description="image-01-live 画风设置")
     subject_reference: list[ImageSubjectReference] = Field(default_factory=list, max_length=4, description="参考图片列表")
     comfyui_checkpoint: Optional[str] = Field(default=None, description="ComfyUI checkpoint 文件名，仅 comfyui-local 生效")
+    comfyui_workflow_id: Optional[str] = Field(default=None, description="ComfyUI workflow ID，仅 comfyui-local 生效")
 
     @field_validator("aspect_ratio")
     @classmethod

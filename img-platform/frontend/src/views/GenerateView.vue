@@ -65,6 +65,14 @@ interface VideoReferenceItem {
   src: string
 }
 
+interface ComfyWorkflow {
+  id: string
+  name: string
+  description?: string
+  category: string
+  enabled: boolean
+}
+
 // ── State ──────────────────────────────────────────────
 const selectedCategory = ref<GenerationCategory>('image')
 const selectedModel = ref('image-01')
@@ -88,6 +96,8 @@ const comfyVramPercent = ref(0)
 const comfyTorchUsedGb = ref(0)
 const comfyCheckpoints = ref<string[]>([])
 const selectedComfyCheckpoint = ref('')
+const comfyWorkflows = ref<ComfyWorkflow[]>([])
+const selectedComfyWorkflow = ref('')
 const selectedVoiceId = ref('male-qn-qingse')
 const customVoiceId = ref('')
 const useCustomVoice = ref(false)
@@ -398,9 +408,10 @@ function isRequestCanceled(err: any) {
 
 async function refreshComfyStatus() {
   try {
-    const [statusResp, checkpointsResp] = await Promise.all([
+    const [statusResp, checkpointsResp, workflowsResp] = await Promise.all([
       api.get('/api/comfyui/status'),
       api.get('/api/comfyui/checkpoints'),
+      api.get('/api/comfyui/workflows'),
     ])
     const devices = statusResp.data?.devices || []
     const device = devices[0] || {}
@@ -421,6 +432,12 @@ async function refreshComfyStatus() {
         comfyCheckpoints.value.find(name => name.toLowerCase().includes('dreamshaper'))
         || comfyCheckpoints.value.find(name => !/audio|vocoder|vae|ltx/i.test(name))
         || comfyCheckpoints.value[0]
+    }
+    comfyWorkflows.value = (workflowsResp.data?.workflows || []).filter((workflow: ComfyWorkflow) => workflow.category === 'image')
+    if (comfyWorkflows.value.length && !comfyWorkflows.value.some(workflow => workflow.id === selectedComfyWorkflow.value)) {
+      selectedComfyWorkflow.value =
+        comfyWorkflows.value.find(workflow => workflow.id === 'default-txt2img')?.id
+        || comfyWorkflows.value[0].id
     }
     comfyStatus.value = 'online'
   } catch (e) {
@@ -994,6 +1011,7 @@ async function sendImage(prompt: string) {
       seed: imageSeed.value,
       aigc_watermark: imageAigcWatermark.value,
       comfyui_checkpoint: isLocalComfyUI.value ? selectedComfyCheckpoint.value || null : null,
+      comfyui_workflow_id: isLocalComfyUI.value ? selectedComfyWorkflow.value || null : null,
       style: selectedModel.value === 'image-01-live' && selectedStyle.value !== '默认'
         ? { style_type: selectedStyle.value, style_weight: imageStyleWeight.value }
         : null,
@@ -1645,6 +1663,16 @@ onUnmounted(() => {
             <option value="">自动选择图像模型</option>
             <option v-for="checkpoint in comfyCheckpoints" :key="checkpoint" :value="checkpoint">
               {{ checkpoint }}
+            </option>
+          </select>
+        </label>
+
+        <label v-if="isLocalComfyUI" class="voice-field comfy-checkpoint-field">
+          <span>ComfyUI workflow</span>
+          <select v-model="selectedComfyWorkflow">
+            <option value="">默认代码工作流</option>
+            <option v-for="workflow in comfyWorkflows" :key="workflow.id" :value="workflow.id">
+              {{ workflow.name }}
             </option>
           </select>
         </label>

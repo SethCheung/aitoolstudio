@@ -19,11 +19,13 @@ services:
       - ./data/uploads:/app/uploads
       - ./data/config:/app/config
       - ./data/minimax-output:/root/minimax-output
+      - /vol3/@team/SJM-MediaFile/Comfyui_Workflows:/app/workflow-imports:ro
     environment:
       - DATABASE_URL=sqlite:///./data/img_platform.db
       - IMAGES_DIR=/app/data/images
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - COMFYUI_WORKFLOW_IMPORT_DIR=/app/workflow-imports
     restart: unless-stopped
 
   # Phase 3 添加 Redis 用于 Celery 任务队列

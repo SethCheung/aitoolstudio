@@ -65,12 +65,18 @@ async def create_user(
 async def update_user(
     user_id: int,
     req: AdminUserRequest,
-    _: User = Depends(require_admin),
+    current_admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current_admin.id and not req.is_admin:
+        raise HTTPException(status_code=400, detail="Cannot revoke your own admin privileges")
+    if user.is_admin and not req.is_admin:
+        admin_count = db.query(User).filter(User.is_admin == True).count()
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot revoke the last admin user")
 
     username = req.username.strip()
     if not username:
@@ -93,12 +99,18 @@ async def update_user(
 @router.delete("/api/admin/users/{user_id}")
 async def delete_user(
     user_id: int,
-    _: User = Depends(require_admin),
+    current_admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current_admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    if user.is_admin:
+        admin_count = db.query(User).filter(User.is_admin == True).count()
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last admin user")
     db.delete(user)
     db.commit()
     return {"ok": True}

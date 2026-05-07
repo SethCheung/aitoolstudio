@@ -1,5 +1,114 @@
 # Product Spec 变更记录
 
+## v1.16 - 2026-05-07
+
+**新增 ERNIE Image 内置 Workflow 模板**
+
+### 变更内容
+- Workflows 自动补入 `ERNIE Image` 内置模板，使用 `ComfyUI-ERNIE-Image` 自定义节点
+- ERNIE workflow 默认模型路径为 `baidu/ERNIE-Image`
+- runtime patch 新增 ERNIE 支持：`ERNIEImagePrompt.text`、`ERNIEImage.width/height/seed`
+- 已将 `ernie-image.json` 导出到 SMB 固定目录 `团队文件-SJM-MediaFile/Comfyui_Workflows`
+
+### 设计原则
+- ERNIE 不是 checkpoint 工作流，不能套普通 `CheckpointLoaderSimple + KSampler` 的逻辑硬跑
+- 第一版先支持文生图闭环；负面词、steps、guidance 等专用参数后续再做显式 UI，不塞进隐藏魔法
+
+---
+
+## v1.15 - 2026-05-07
+
+**Workflow 支持从 SMB 固定目录同步**
+
+### 变更内容
+- 在 `团队文件-SJM-MediaFile` SMB 中建立固定目录 `Comfyui_Workflows`
+- 后端 Docker 挂载该目录到 `/app/workflow-imports`，作为只读 workflow 导入源
+- Workflows 面板新增 `Sync Folder` 操作，可导入该目录下的 ComfyUI API-format JSON
+- 已将当前 `Default txt2img` 导出为 `Comfyui_Workflows/default-txt2img.json`
+
+### 设计原则
+- 不再全盘扫描网盘，workflow 只认固定目录，避免把模型配置 JSON、缓存 JSON 当 workflow 导入
+- 195 上如果有保存的 workflow，需要放进 SMB 的 `Comfyui_Workflows` 后再同步；没有 195 SSH/文件访问时，不能凭空读取它本机用户目录
+
+---
+
+## v1.14 - 2026-05-07
+
+**Admin 增加 ComfyUI Workflow 管理后台**
+
+### 变更内容
+- `/admin` 新增 Workflows 面板，支持管理 ComfyUI API-format workflow JSON
+- 自动初始化 `Default txt2img` 工作流，作为本地 ComfyUI 文生图默认配置
+- Workflow 支持名称、描述、分类、启用状态、备注、JSON 编辑、复制、删除和启停
+- 新增 `/api/comfyui/workflows` CRUD 接口；普通用户只能读取启用 workflow，管理员可读取全部
+- image 生成请求新增 `comfyui_workflow_id`，生成页选择 `comfyui-local` 后可选择启用的 workflow
+
+### 设计原则
+- 后台不能只是存配置，生成页必须能用，否则就是配置墓地
+- 第一版只支持通用 runtime patch：prompt、checkpoint、seed、尺寸和 batch size；复杂节点映射后续单独做，不在这一版装全能
+
+---
+
+## v1.13 - 2026-05-07
+
+**Admin 增加 ComfyUI 模型路径快捷管理**
+
+### 变更内容
+- `/admin` 新增 Paths 面板，用于集中保存 ComfyUI 模型存储路径
+- 默认加入 `SJM audio_encoders` 快捷路径，指向 `smb://192.168.1.60/团队文件-SJM-MediaFile/Comfyui_Model/audio_encoders`
+- 路径记录支持 SMB / 存储 URI、195 服务器本地 mount path、分类、备注、启用状态、复制和增删改
+
+### 设计原则
+- 路径管理只负责记录和复制，不假装能自动修改 195 上的 ComfyUI mount 或 `extra_model_paths.yaml`
+- SMB 地址、195 本地挂载路径、ComfyUI 实际加载路径必须分开写清楚，别靠记忆维护生产系统
+
+---
+
+## v1.12 - 2026-05-07
+
+**后台新增管理全部用户界面**
+
+### 变更内容
+- Admin 后台 Users 分类升级为独立的 All Users 管理界面
+- 管理员可在同一界面查看所有账号、搜索用户名或用户 ID、查看角色和创建时间
+- 用户列表直接提供编辑/重置密码、授予或撤销管理员权限、删除账号和 Add User 入口
+
+### 设计原则
+- “管理全部用户”是后台一级能力，不能靠一个不明显的添加按钮糊弄过去
+- 账号列表、角色状态和危险操作必须集中展示，管理员才知道自己到底在管什么
+
+---
+
+## v1.11 - 2026-05-07
+
+**Profile 模型支持自定义填写**
+
+### 变更内容
+- Admin Profile 的 image / voice / video / music / text 模型配置区新增自定义模型 ID 输入
+- 管理员可以在预设 MiniMax 模型之外添加任意模型名，并保存到对应 Profile 的模型路由列表
+- 已保存的自定义模型在编辑 Profile 时继续显示，可取消勾选移除
+
+### 设计原则
+- 模型管理不能被 MiniMax 预设锁死，后续买其他供应商 API 时必须能先录入模型 ID
+- 先解决模型 ID 配置入口；不同供应商的请求协议适配后续按实际 API 单独实现，别在没买 API 前瞎兼容
+
+---
+
+## v1.10 - 2026-05-07
+
+**管理员后台用户管理入口显性化**
+
+### 变更内容
+- 明确 `/admin` 需要可见的 `Add User` 操作，不能只靠切到 Users tab 后猜右上角 `+`
+- 用户管理支持创建账号、编辑/重置密码、授予/撤销管理员权限和删除账号
+- 后端用户管理接口增加防呆：禁止管理员删除自己、撤销自己的管理员权限、删除或撤销最后一个管理员
+
+### 设计原则
+- 后台核心操作必须明牌，别把“添加用户”藏成解谜游戏
+- 权限操作宁可啰嗦一点，也不能一键把系统管理员删没
+
+---
+
 ## v1.0 - 2026-04-30
 
 **初始版本**

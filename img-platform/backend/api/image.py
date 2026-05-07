@@ -7,6 +7,7 @@ from schemas.image import ImageGenerateRequest, ImageUpscaleRequest
 from schemas.generation import GenerationResponse
 from services.minimax import generate_image as http_generate_image
 from services.comfyui import generate_image as comfyui_generate_image, upscale_image as comfyui_upscale_image
+from services.comfyui_workflows import runtime_workflow
 from services.cli_runner import generate_image as cli_generate_image
 from services.profile_manager import get_profile_for_model
 from models.database import get_db
@@ -76,6 +77,16 @@ async def generate(
     """文生图 — 按模型自动路由到对应 profile"""
     if req.model == "comfyui-local":
         try:
+            workflow = runtime_workflow(
+                workflow_id=req.comfyui_workflow_id,
+                prompt=req.prompt,
+                aspect_ratio=req.aspect_ratio,
+                width=req.width,
+                height=req.height,
+                n=req.n,
+                seed=req.seed,
+                checkpoint=req.comfyui_checkpoint,
+            ) if req.comfyui_workflow_id else None
             result = await comfyui_generate_image(
                 prompt=req.prompt,
                 aspect_ratio=req.aspect_ratio,
@@ -84,6 +95,7 @@ async def generate(
                 n=req.n,
                 seed=req.seed,
                 checkpoint=req.comfyui_checkpoint,
+                workflow=workflow,
             )
         except Exception:
             logger.exception("ComfyUI image generation failed")
