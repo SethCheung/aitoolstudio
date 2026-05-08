@@ -4,9 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const router = useRouter()
+const auth = useAuthStore()
 
 interface ProjectItem {
   id: number
@@ -80,6 +82,11 @@ function newProject() {
   router.push('/generate')
 }
 
+async function logout() {
+  auth.logout()
+  await router.replace('/login')
+}
+
 // Rename
 function startRename(p: ProjectItem, e: Event) {
   e.stopPropagation()
@@ -143,6 +150,9 @@ onMounted(fetchProjects)
       </label>
 
       <div class="header-actions">
+        <button class="logout-top-btn" type="button" @click="logout">
+          退出登录
+        </button>
         <button class="new-top-btn" type="button" @click="newProject">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M12 5v14M5 12h14"/>
@@ -314,6 +324,24 @@ onMounted(fetchProjects)
   display: flex;
   align-items: center;
   gap: 11px;
+}
+.logout-top-btn {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 9px;
+  background: rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.82);
+  font-size: 13px;
+  font-weight: 720;
+  cursor: pointer;
+}
+.logout-top-btn:hover {
+  border-color: rgba(255,255,255,0.28);
+  background: rgba(255,255,255,0.12);
+  color: #fff;
 }
 .new-top-btn {
   height: 40px;

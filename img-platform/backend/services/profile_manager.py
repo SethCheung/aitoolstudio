@@ -167,5 +167,7 @@ def get_all_models() -> dict:
     video_models = flattened.setdefault("video", [])
     if not video_models:
         video_models.extend(["MiniMax-Hailuo-2.3", "MiniMax-Hailuo-2.3-Fast", "MiniMax-Hailuo-02", "S2V-01"])
+    if "comfyui-local-video" not in video_models:
+        video_models.append("comfyui-local-video")
 
     return flattened

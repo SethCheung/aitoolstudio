@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 
 interface Profile {
   name: string
@@ -58,6 +60,8 @@ const categories: Array<{ key: Category; label: string; icon: string }> = [
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
 const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, '')}/docs`
+const router = useRouter()
+const auth = useAuthStore()
 
 const modelCategories: Record<Exclude<Category, 'all' | 'users' | 'paths' | 'workflows'>, string[]> = {
   image: ['image-01'],
@@ -627,6 +631,11 @@ async function toggleAdmin(user: User) {
   }
 }
 
+async function logout() {
+  auth.logout()
+  await router.replace('/login')
+}
+
 onMounted(() => {
   fetchProfiles()
   fetchUsers()
@@ -662,6 +671,9 @@ onMounted(() => {
       <div class="header-actions">
         <a class="icon-button" :href="apiDocsUrl" target="_blank" title="Open API docs">⌘</a>
         <button class="icon-button" title="Refresh" @click="refreshActive">↻</button>
+        <button class="text-action muted logout-action" title="退出登录" @click="logout">
+          退出登录
+        </button>
         <button class="text-action muted" title="Manage all users" @click="activeCategory = 'users'">
           Users
         </button>
@@ -1231,6 +1243,10 @@ onMounted(() => {
 .text-action.muted {
   background: #f3f4f6;
   color: #111827;
+}
+.text-action.logout-action {
+  background: #fff1f2;
+  color: #be123c;
 }
 .text-action span {
   font-size: 18px;

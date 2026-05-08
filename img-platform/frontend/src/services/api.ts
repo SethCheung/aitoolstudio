@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '',
-  timeout: 300000,
+  timeout: 1200000,
 })
 
 // 请求拦截器：自动注入 Token

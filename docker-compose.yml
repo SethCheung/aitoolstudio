@@ -16,15 +16,18 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-      - ./data/uploads:/app/uploads
+      - /vol3/@team/SJM-MediaFile/AI-Tool-Studio/outputs/uploads:/app/uploads
       - ./data/config:/app/config
-      - ./data/minimax-output:/root/minimax-output
+      - /vol3/@team/SJM-MediaFile/AI-Tool-Studio/outputs/minimax-output:/root/minimax-output
       - /vol3/@team/SJM-MediaFile/Comfyui_Workflows:/app/workflow-imports:ro
     environment:
       - DATABASE_URL=sqlite:///./data/img_platform.db
       - IMAGES_DIR=/app/data/images
+      - UPLOAD_DIR=/app/uploads
+      - MINIMAX_OUTPUT_DIR=/root/minimax-output
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - COMFYUI_GENERATION_TIMEOUT=900
       - COMFYUI_WORKFLOW_IMPORT_DIR=/app/workflow-imports
     restart: unless-stopped
 

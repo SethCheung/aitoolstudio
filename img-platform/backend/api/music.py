@@ -9,6 +9,7 @@ from schemas.generation import GenerationResponse
 from services.minimax import generate_music as http_generate_music
 from services.cli_runner import generate_music as cli_generate_music
 from services.profile_manager import get_profile_for_model
+from services.storage import upload_category_dir, upload_url
 from models.database import get_db
 from models.user import User
 from models.generation import Generation
@@ -17,8 +18,7 @@ from api.auth import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/music", tags=["音乐生成"])
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "music")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+UPLOAD_DIR = upload_category_dir("music")
 
 
 def save_audio_hex(audio_hex: str, ext: str = "mp3") -> str:
@@ -28,19 +28,19 @@ def save_audio_hex(audio_hex: str, ext: str = "mp3") -> str:
     except (binascii.Error, TypeError, ValueError):
         raise HTTPException(status_code=502, detail="Invalid music audio data from MiniMax API")
     filename = f"{uuid.uuid4().hex}.{ext}"
-    filepath = os.path.join(UPLOAD_DIR, filename)
-    with open(filepath, "wb") as f:
+    filepath = UPLOAD_DIR / filename
+    with filepath.open("wb") as f:
         f.write(audio_bytes)
-    return f"/uploads/music/{filename}"
+    return upload_url("music", filename)
 
 
 def serve_cli_file(src_path: Path) -> str:
     """将 CLI 生成的音乐复制到 uploads 目录，返回可播放 URL。"""
     ext = src_path.suffix.lstrip(".") or "mp3"
     filename = f"{uuid.uuid4().hex}.{ext}"
-    dst = os.path.join(UPLOAD_DIR, filename)
+    dst = UPLOAD_DIR / filename
     shutil.copy2(src_path, dst)
-    return f"/uploads/music/{filename}"
+    return upload_url("music", filename)
 
 
 def resolve_music_audio_url(result: dict, ext: str) -> str:

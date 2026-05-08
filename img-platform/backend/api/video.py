@@ -13,7 +13,10 @@ from services.minimax import (
     retrieve_video_file as http_retrieve_video_file,
 )
 from services.cli_runner import generate_video as cli_generate_video
+from services.comfyui import generate_video as comfyui_generate_video
+from services.comfyui_workflows import runtime_workflow
 from services.profile_manager import get_profile_for_model
+from services.storage import upload_category_dir, upload_url
 from models.database import get_db
 from models.user import User
 from models.generation import Generation
@@ -22,8 +25,7 @@ from api.auth import get_current_user
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/video", tags=["视频生成"])
 
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads", "videos")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+UPLOAD_DIR = upload_category_dir("videos")
 
 
 def normalize_video_status(status: str | int | None) -> str:
@@ -54,13 +56,13 @@ def video_extension_from(download_url: str, filename: str = "") -> str:
 async def save_video_from_url(download_url: str, filename: str = "") -> str:
     ext = video_extension_from(download_url, filename)
     stored_name = f"{uuid.uuid4().hex}.{ext}"
-    filepath = os.path.join(UPLOAD_DIR, stored_name)
+    filepath = UPLOAD_DIR / stored_name
     async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
         resp = await client.get(download_url)
         resp.raise_for_status()
-    with open(filepath, "wb") as f:
+    with filepath.open("wb") as f:
         f.write(resp.content)
-    return f"/uploads/videos/{stored_name}"
+    return upload_url("videos", stored_name)
 
 
 @router.post("/generate", response_model=GenerationResponse)
@@ -70,6 +72,68 @@ async def generate(
     _current_user: User = Depends(get_current_user),
 ):
     """文生视频 — 按模型路由到对应 profile，返回 task_id（需轮询 /api/video/status）"""
+    if req.model == "comfyui-local-video":
+        try:
+            if not req.comfyui_workflow_id:
+                raise ValueError("请选择一个 video 类型的 ComfyUI workflow")
+            workflow = runtime_workflow(
+                workflow_id=req.comfyui_workflow_id,
+                prompt=req.prompt,
+                aspect_ratio=req.aspect_ratio,
+                width=req.width,
+                height=req.height,
+                n=1,
+                seed=req.seed,
+                checkpoint=None,
+                expected_category="video",
+                duration=req.duration,
+                fps=req.fps,
+            )
+            result = await comfyui_generate_video(prompt=req.prompt, workflow=workflow)
+            video_url = result.get("data", {}).get("video_url")
+            if not video_url:
+                raise ValueError("ComfyUI workflow did not return a video URL")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except TimeoutError:
+            logger.exception("ComfyUI video generation timed out")
+            raise HTTPException(status_code=504, detail="ComfyUI 视频生成超时，请检查本地队列和工作流")
+        except Exception:
+            logger.exception("ComfyUI video generation failed")
+            raise HTTPException(status_code=502, detail="ComfyUI 视频生成失败，请检查本地服务和工作流")
+
+        gen = Generation(
+            type="video",
+            prompt=req.prompt,
+            video_url=video_url,
+            video_model=req.model,
+            video_duration=str(req.duration),
+            n_generated=1,
+            mini_max_id=result.get("id", ""),
+        )
+        db.add(gen)
+        db.commit()
+        db.refresh(gen)
+
+        return {
+            "id": gen.id,
+            "type": "video",
+            "task_id": result.get("id", ""),
+            "status": "success",
+            "prompt": req.prompt,
+            "image_urls": [],
+            "audio_url": None,
+            "video_url": video_url,
+            "model": req.model,
+            "aspect_ratio": req.aspect_ratio,
+            "voice_model": None,
+            "voice_id": None,
+            "video_model": req.model,
+            "video_duration": str(req.duration),
+            "n_generated": 1,
+            "created_at": gen.created_at,
+        }
+
     profile = get_profile_for_model(req.model)
     if not profile:
         raise HTTPException(

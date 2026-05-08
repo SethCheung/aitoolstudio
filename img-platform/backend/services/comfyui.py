@@ -9,10 +9,10 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
+from services.storage import local_path_from_public_url, upload_category_dir, upload_url
+
 
 DEFAULT_COMFYUI_BASE_URL = os.getenv("COMFYUI_BASE_URL", "http://192.168.1.195:8188")
-COMFYUI_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "uploads" / "comfyui"
-BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 def _clean_base_url(base_url: Optional[str] = None) -> str:
@@ -188,7 +188,7 @@ def _comfyui_wait_timeout() -> float:
 
 async def _download_outputs(client: httpx.AsyncClient, base_url: str, prompt_id: str, history: dict) -> list[str]:
     urls: list[str] = []
-    COMFYUI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir = upload_category_dir("comfyui")
 
     for node_output in history.get("outputs", {}).values():
         for image in node_output.get("images", []):
@@ -205,11 +205,105 @@ async def _download_outputs(client: httpx.AsyncClient, base_url: str, prompt_id:
             resp.raise_for_status()
 
             local_name = f"{prompt_id}_{Path(filename).name}"
-            local_path = COMFYUI_OUTPUT_DIR / local_name
+            local_path = output_dir / local_name
             local_path.write_bytes(resp.content)
-            urls.append(f"/uploads/comfyui/{local_name}")
+            urls.append(upload_url("comfyui", local_name))
 
     return urls
+
+
+def _output_extension(filename: str, fallback: str = "mp4") -> str:
+    suffix = Path(filename or "").suffix.lower().lstrip(".")
+    return suffix or fallback
+
+
+async def _download_media_outputs(
+    client: httpx.AsyncClient,
+    base_url: str,
+    prompt_id: str,
+    history: dict,
+    output_keys: set[str],
+    category: str,
+    fallback_ext: str,
+    allowed_exts: set[str],
+) -> list[str]:
+    urls: list[str] = []
+    output_dir = upload_category_dir(category)
+
+    for node_output in history.get("outputs", {}).values():
+        if not isinstance(node_output, dict):
+            continue
+        for key in output_keys:
+            for item in node_output.get(key, []) or []:
+                filename = item.get("filename")
+                if not filename:
+                    continue
+                ext = _output_extension(filename, fallback_ext)
+                if ext.lower() not in allowed_exts:
+                    continue
+                subfolder = item.get("subfolder") or ""
+                media_type = item.get("type") or "output"
+                view_url = (
+                    f"{base_url}/view?filename={quote(filename, safe='')}"
+                    f"&subfolder={quote(subfolder, safe='')}&type={quote(media_type, safe='')}"
+                )
+                resp = await client.get(view_url)
+                resp.raise_for_status()
+
+                local_name = f"{prompt_id}_{Path(filename).name}"
+                local_path = output_dir / local_name
+                local_path.write_bytes(resp.content)
+                urls.append(upload_url(category, local_name))
+
+    return urls
+
+
+async def _download_video_outputs(client: httpx.AsyncClient, base_url: str, prompt_id: str, history: dict) -> list[str]:
+    return await _download_media_outputs(
+        client=client,
+        base_url=base_url,
+        prompt_id=prompt_id,
+        history=history,
+        output_keys={"videos", "gifs"},
+        category="videos",
+        fallback_ext="mp4",
+        allowed_exts={"mp4", "mov", "webm", "m4v", "gif"},
+    )
+
+
+def _workflow_uses_batch(workflow: dict) -> bool:
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs", {})
+        if node.get("class_type") == "EmptyLatentImage" and int(inputs.get("batch_size") or 1) > 1:
+            return True
+    return False
+
+
+def _workflow_with_seed(workflow: dict, seed: int) -> dict:
+    import copy
+
+    patched = copy.deepcopy(workflow)
+    for node in patched.values():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs", {})
+        if node.get("class_type") in {"KSampler", "ERNIEImage"} and "seed" in inputs:
+            inputs["seed"] = seed
+    return patched
+
+
+async def _queue_workflow(client: httpx.AsyncClient, base_url: str, workflow: dict) -> str:
+    queue_resp = await client.post(f"{base_url}/prompt", json={"prompt": workflow})
+    queue_resp.raise_for_status()
+    queued = queue_resp.json()
+    if "error" in queued:
+        raise ValueError(str(queued.get("error")))
+    prompt_id = queued.get("prompt_id")
+    if not prompt_id:
+        raise ValueError("ComfyUI did not return prompt_id")
+    return prompt_id
 
 
 def _png_dimensions(data: bytes) -> Optional[tuple[int, int]]:
@@ -253,10 +347,10 @@ async def _source_image_bytes(source_url: str) -> tuple[bytes, str]:
     path = unquote(parsed.path if parsed.scheme else source_url.split("?", 1)[0])
 
     if path.startswith("/uploads/"):
-        local_path = BACKEND_DIR / path.lstrip("/")
+        local_path = local_path_from_public_url(path)
         return local_path.read_bytes(), local_path.name
     if path.startswith("/minimax-output/"):
-        local_path = Path.home() / "minimax-output" / Path(path).name
+        local_path = local_path_from_public_url(path)
         return local_path.read_bytes(), local_path.name
     if parsed.scheme in {"http", "https"}:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -319,14 +413,7 @@ async def upscale_image(
                 },
             },
         }
-        queue_resp = await client.post(f"{url}/prompt", json={"prompt": workflow})
-        queue_resp.raise_for_status()
-        queued = queue_resp.json()
-        if "error" in queued:
-            raise ValueError(str(queued.get("error")))
-        prompt_id = queued.get("prompt_id")
-        if not prompt_id:
-            raise ValueError("ComfyUI did not return prompt_id")
+        prompt_id = await _queue_workflow(client, url, workflow)
 
     async with httpx.AsyncClient(timeout=_comfyui_wait_timeout()) as client:
         history = await _wait_for_history(client, url, prompt_id)
@@ -372,23 +459,52 @@ async def generate_image(
             seed=seed,
             checkpoint=checkpoint,
         )
-        queue_resp = await client.post(f"{url}/prompt", json={"prompt": prompt_workflow})
-        queue_resp.raise_for_status()
-        queued = queue_resp.json()
-        if "error" in queued:
-            raise ValueError(str(queued.get("error")))
+        if workflow is not None and n > 1 and not _workflow_uses_batch(prompt_workflow):
+            base_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
+            prompt_ids = [
+                await _queue_workflow(client, url, _workflow_with_seed(prompt_workflow, (base_seed + index) % 2**32))
+                for index in range(n)
+            ]
+        else:
+            prompt_ids = [await _queue_workflow(client, url, prompt_workflow)]
 
-        prompt_id = queued.get("prompt_id")
-        if not prompt_id:
-            raise ValueError("ComfyUI did not return prompt_id")
+    async with httpx.AsyncClient(timeout=_comfyui_wait_timeout()) as client:
+        image_urls = []
+        for prompt_id in prompt_ids:
+            history = await _wait_for_history(client, url, prompt_id)
+            image_urls.extend(await _download_outputs(client, url, prompt_id, history))
+
+    return {
+        "id": ",".join(prompt_ids),
+        "data": {"image_urls": image_urls},
+        "metadata": {"engine": "comfyui", "base_url": url},
+        "base_resp": {"status_code": 0, "status_msg": "success"},
+    }
+
+
+async def generate_video(
+    prompt: str,
+    workflow: dict,
+    base_url: Optional[str] = None,
+) -> dict:
+    """Queue a ComfyUI video workflow and return the first locally proxied video URL."""
+    if not workflow:
+        raise ValueError("ComfyUI video generation requires a saved workflow")
+
+    url = _clean_base_url(base_url)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        prompt_id = await _queue_workflow(client, url, workflow)
 
     async with httpx.AsyncClient(timeout=_comfyui_wait_timeout()) as client:
         history = await _wait_for_history(client, url, prompt_id)
-        image_urls = await _download_outputs(client, url, prompt_id, history)
+        video_urls = await _download_video_outputs(client, url, prompt_id, history)
+
+    if not video_urls:
+        raise ValueError("ComfyUI workflow finished but did not produce a video output")
 
     return {
         "id": prompt_id,
-        "data": {"image_urls": image_urls},
-        "metadata": {"engine": "comfyui", "base_url": url},
+        "data": {"video_url": video_urls[0], "video_urls": video_urls},
+        "metadata": {"engine": "comfyui-video", "base_url": url, "prompt": prompt},
         "base_resp": {"status_code": 0, "status_msg": "success"},
     }

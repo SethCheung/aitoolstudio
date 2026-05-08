@@ -12,7 +12,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-MINIMAX_OUTPUT = Path.home() / "minimax-output"
+from services.storage import get_minimax_output_root
+
+MINIMAX_OUTPUT = get_minimax_output_root()
 
 
 def _ensure_output_dir() -> Path:

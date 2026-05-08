@@ -22,6 +22,7 @@ from api.generation import router as generation_router
 from api.conversation import router as conversation_router
 from api.comfyui import router as comfyui_router
 from models.database import init_db
+from services.storage import ensure_dir, get_minimax_output_root, get_upload_root
 
 from limiter import limiter
 
@@ -69,15 +70,12 @@ app.include_router(profiles_router)
 app.include_router(comfyui_router)
 
 # 挂载静态文件（语音文件等）
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+UPLOAD_DIR = ensure_dir(get_upload_root())
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 # 挂载 MiniMax CLI 输出目录（Token Plan 用户生成的文件）
-from pathlib import Path
-MINIMAX_OUTPUT_DIR = str(Path.home() / "minimax-output")
-os.makedirs(MINIMAX_OUTPUT_DIR, exist_ok=True)
-app.mount("/minimax-output", StaticFiles(directory=MINIMAX_OUTPUT_DIR, html=True), name="minimax-output")
+MINIMAX_OUTPUT_DIR = ensure_dir(get_minimax_output_root())
+app.mount("/minimax-output", StaticFiles(directory=str(MINIMAX_OUTPUT_DIR), html=True), name="minimax-output")
 
 
 @app.get("/")

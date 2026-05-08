@@ -21,6 +21,10 @@ class VideoGenerateRequest(BaseModel):
     callback_url: Optional[str] = None
     fps: Optional[int] = None
     seed: Optional[int] = None
+    aspect_ratio: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    comfyui_workflow_id: Optional[str] = None
 
 
 class VideoResponse(BaseModel):

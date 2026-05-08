@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -133,6 +134,22 @@ DEFAULT_WORKFLOWS = [
     },
 ]
 
+VIDEO_WORKFLOW_HINTS = (
+    "animatediff",
+    "ltx",
+    "mochi",
+    "svd",
+    "video",
+    "vhs",
+    "wan",
+    "wanvideo",
+    "hunyuan",
+    "cogvideo",
+)
+
+PROMPT_INPUT_NAMES = ("text", "prompt", "positive", "positive_prompt", "caption")
+NEGATIVE_PROMPT_KEYS = ("negative", "neg")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -156,6 +173,19 @@ def validate_workflow_json(workflow_json: dict) -> None:
             raise ValueError(f"Workflow node {node_id} is missing class_type")
         if not isinstance(node.get("inputs", {}), dict):
             raise ValueError(f"Workflow node {node_id} inputs must be an object")
+
+
+def _infer_workflow_category(path: Path, workflow_json: dict) -> str:
+    path_text = " ".join(part.lower() for part in path.parts)
+    if any(hint in path_text for hint in VIDEO_WORKFLOW_HINTS):
+        return "video"
+    for node in workflow_json.values():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "").lower()
+        if any(hint in class_type for hint in VIDEO_WORKFLOW_HINTS):
+            return "video"
+    return "image"
 
 
 def _load() -> dict:
@@ -259,7 +289,7 @@ def _workflow_from_file(path: Path) -> dict:
 
     workflow.setdefault("name", path.stem.replace("_", " ").replace("-", " ").strip() or path.stem)
     workflow.setdefault("description", f"Imported from SMB workflow folder: {path.name}")
-    workflow.setdefault("category", "image")
+    workflow.setdefault("category", _infer_workflow_category(path, workflow["workflow_json"]))
     workflow.setdefault("enabled", True)
     workflow.setdefault("notes", f"Source: {path}")
     return workflow
@@ -292,41 +322,58 @@ def runtime_workflow(
     n: int,
     seed: Optional[int],
     checkpoint: Optional[str],
+    expected_category: Optional[str] = None,
+    duration: Optional[int] = None,
+    fps: Optional[int] = None,
 ) -> dict:
     workflow = get_workflow(workflow_id)
     if not workflow:
         raise ValueError("Workflow not found or disabled")
+    if expected_category and workflow.get("category") != expected_category:
+        raise ValueError(f"Workflow '{workflow.get('name')}' is not a {expected_category} workflow")
 
     patched = copy.deepcopy(workflow["workflow_json"])
     image_width, image_height = _size_for(aspect_ratio, width, height)
     prompt_patched = False
+    resolved_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
+    resolved_fps = fps or 24
+    resolved_frames = max(1, int((duration or 0) * resolved_fps)) if duration else None
 
     for node in patched.values():
         class_type = node.get("class_type")
         inputs = node.get("inputs", {})
-        if class_type in {"CLIPTextEncode", "ERNIEImagePrompt"} and not prompt_patched and "text" in inputs:
-            inputs["text"] = prompt
-            prompt_patched = True
-        elif class_type == "EmptyLatentImage":
-            if "width" in inputs:
-                inputs["width"] = image_width
-            if "height" in inputs:
-                inputs["height"] = image_height
-            if "batch_size" in inputs:
-                inputs["batch_size"] = n
-        elif class_type == "KSampler":
-            if seed is not None and "seed" in inputs:
-                inputs["seed"] = seed
-        elif class_type == "ERNIEImage":
-            if "width" in inputs:
-                inputs["width"] = image_width
-            if "height" in inputs:
-                inputs["height"] = image_height
-            if seed is not None and "seed" in inputs:
-                inputs["seed"] = seed
-        elif class_type == "CheckpointLoaderSimple":
-            if checkpoint and "ckpt_name" in inputs:
-                inputs["ckpt_name"] = checkpoint
+        for key, value in list(inputs.items()):
+            key_lower = key.lower()
+            if isinstance(value, str) and "{{prompt}}" in value:
+                inputs[key] = value.replace("{{prompt}}", prompt)
+                prompt_patched = True
+                continue
+            if (
+                not prompt_patched
+                and key_lower in PROMPT_INPUT_NAMES
+                and not any(term in key_lower for term in NEGATIVE_PROMPT_KEYS)
+                and isinstance(value, str)
+                and class_type not in {"CheckpointLoaderSimple"}
+            ):
+                inputs[key] = prompt
+                prompt_patched = True
+                continue
+            if key_lower in {"width", "w"} and isinstance(value, int):
+                inputs[key] = image_width
+            elif key_lower in {"height", "h"} and isinstance(value, int):
+                inputs[key] = image_height
+            elif key_lower == "batch_size":
+                inputs[key] = n
+            elif key_lower in {"seed", "noise_seed"}:
+                inputs[key] = resolved_seed
+            elif checkpoint and key_lower == "ckpt_name":
+                inputs[key] = checkpoint
+            elif fps and key_lower == "fps":
+                inputs[key] = fps
+            elif duration and key_lower == "duration":
+                inputs[key] = duration
+            elif resolved_frames and key_lower in {"num_frames", "frames", "frame_count", "length", "video_length"}:
+                inputs[key] = resolved_frames
 
     if not prompt_patched:
         raise ValueError("Workflow does not contain a supported prompt text input to patch")

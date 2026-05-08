@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 import {
   speechAudioFormats,
   speechBitrates,
@@ -26,6 +27,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
+const auth = useAuthStore()
 
 // ── Types ───────────────────────────────────────────────
 type GenerationCategory = 'image' | 'voice' | 'video' | 'music'
@@ -41,6 +43,8 @@ interface Message {
   style?: string
   loading?: boolean
   taskId?: string
+  progressStartedAt?: number
+  progressTargetSeconds?: number
   createdAt: Date
 }
 
@@ -98,6 +102,7 @@ const comfyCheckpoints = ref<string[]>([])
 const selectedComfyCheckpoint = ref('')
 const comfyWorkflows = ref<ComfyWorkflow[]>([])
 const selectedComfyWorkflow = ref('')
+const selectedVideoComfyWorkflow = ref('')
 const selectedVoiceId = ref('male-qn-qingse')
 const customVoiceId = ref('')
 const useCustomVoice = ref(false)
@@ -146,11 +151,13 @@ const musicLyricsTextarea = ref<HTMLTextAreaElement | null>(null)
 const imageReferenceInput = ref<HTMLInputElement | null>(null)
 const isGenerating = ref(false)
 const isOptimizingPrompt = ref(false)
+const generationProgressNow = ref(Date.now())
 const generationAbortController = ref<AbortController | null>(null)
 const convId = ref<number | null>(null)
 const previewImageUrl = ref('')
 const upscalingUrls = ref<Set<string>>(new Set())
 let comfyStatusTimer: ReturnType<typeof window.setInterval> | null = null
+let generationProgressTimer: ReturnType<typeof window.setInterval> | null = null
 
 const styles = ['默认', '漫画', '元气', '中世纪', '水彩']
 const aspects = ['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16', '21:9']
@@ -175,6 +182,8 @@ interface GenerationRecord {
   style: string
   loading: boolean
   error: string
+  progressStartedAt: number
+  progressTargetSeconds: number
   createdAt: Date
 }
 
@@ -224,6 +233,8 @@ const generationRecords = computed<GenerationRecord[]>(() => {
       style: response?.style || selectedStyle.value,
       loading: Boolean(response?.loading),
       error: response?.role === 'error' ? response.content : '',
+      progressStartedAt: response?.progressStartedAt || response?.createdAt.getTime() || msg.createdAt.getTime(),
+      progressTargetSeconds: response?.progressTargetSeconds || estimateGenerationSeconds(response?.type || selectedCategory.value),
       createdAt: response?.createdAt || msg.createdAt,
     })
   }
@@ -287,6 +298,7 @@ const pronunciationTones = computed(() => {
 
 const canSubmitGeneration = computed(() => {
   if (isOptimizingPrompt.value) return false
+  if (isLocalComfyVideo.value && !selectedVideoComfyWorkflow.value) return false
   if (inputText.value.trim()) return true
   if (selectedCategory.value === 'video') {
     return Boolean(videoFirstFrameUrl.value || videoLastFrameUrl.value || videoSubjectReferences.value.length)
@@ -301,6 +313,10 @@ const activeVideoReferenceCount = computed(() => {
   return frameCount + videoSubjectReferences.value.length
 })
 const isLocalComfyUI = computed(() => selectedCategory.value === 'image' && selectedModel.value === 'comfyui-local')
+const isLocalComfyVideo = computed(() => selectedCategory.value === 'video' && selectedModel.value === 'comfyui-local-video')
+const isLocalComfyActive = computed(() => isLocalComfyUI.value || isLocalComfyVideo.value)
+const imageComfyWorkflows = computed(() => comfyWorkflows.value.filter(workflow => workflow.category === 'image'))
+const videoComfyWorkflows = computed(() => comfyWorkflows.value.filter(workflow => workflow.category === 'video'))
 const comfyVramLabel = computed(() => {
   if (!comfyVramTotalGb.value) return 'VRAM --'
   return `VRAM ${comfyVramUsedGb.value.toFixed(1)} / ${comfyVramTotalGb.value.toFixed(1)} GB · ${comfyVramPercent.value}%`
@@ -343,6 +359,13 @@ watch(selectedModel, value => {
     imageReferenceItems.value = []
     void refreshComfyStatus()
   }
+  if (value === 'comfyui-local-video') {
+    videoPromptOptimizer.value = false
+    videoFirstFrameUrl.value = ''
+    videoLastFrameUrl.value = ''
+    videoSubjectReferences.value = []
+    void refreshComfyStatus()
+  }
 })
 
 watch(videoMode, value => {
@@ -364,7 +387,7 @@ watch(videoMode, value => {
   }
 })
 
-watch([isGenerating, isLocalComfyUI], ([generating, local]) => {
+watch([isGenerating, isLocalComfyActive], ([generating, local]) => {
   if (generating && local && !comfyStatusTimer) {
     void refreshComfyStatus()
     comfyStatusTimer = window.setInterval(() => {
@@ -374,6 +397,20 @@ watch([isGenerating, isLocalComfyUI], ([generating, local]) => {
   if ((!generating || !local) && comfyStatusTimer) {
     window.clearInterval(comfyStatusTimer)
     comfyStatusTimer = null
+  }
+})
+
+watch(isGenerating, generating => {
+  if (generating && !generationProgressTimer) {
+    generationProgressNow.value = Date.now()
+    generationProgressTimer = window.setInterval(() => {
+      generationProgressNow.value = Date.now()
+    }, 1000)
+  }
+  if (!generating && generationProgressTimer) {
+    window.clearInterval(generationProgressTimer)
+    generationProgressTimer = null
+    generationProgressNow.value = Date.now()
   }
 })
 
@@ -433,11 +470,14 @@ async function refreshComfyStatus() {
         || comfyCheckpoints.value.find(name => !/audio|vocoder|vae|ltx/i.test(name))
         || comfyCheckpoints.value[0]
     }
-    comfyWorkflows.value = (workflowsResp.data?.workflows || []).filter((workflow: ComfyWorkflow) => workflow.category === 'image')
-    if (comfyWorkflows.value.length && !comfyWorkflows.value.some(workflow => workflow.id === selectedComfyWorkflow.value)) {
+    comfyWorkflows.value = workflowsResp.data?.workflows || []
+    if (imageComfyWorkflows.value.length && !imageComfyWorkflows.value.some(workflow => workflow.id === selectedComfyWorkflow.value)) {
       selectedComfyWorkflow.value =
-        comfyWorkflows.value.find(workflow => workflow.id === 'default-txt2img')?.id
-        || comfyWorkflows.value[0].id
+        imageComfyWorkflows.value.find(workflow => workflow.id === 'default-txt2img')?.id
+        || imageComfyWorkflows.value[0].id
+    }
+    if (videoComfyWorkflows.value.length && !videoComfyWorkflows.value.some(workflow => workflow.id === selectedVideoComfyWorkflow.value)) {
+      selectedVideoComfyWorkflow.value = videoComfyWorkflows.value[0].id
     }
     comfyStatus.value = 'online'
   } catch (e) {
@@ -588,6 +628,10 @@ function addImageReferenceUrl() {
 
 function assignVideoFrameReference(src: string, name = '视频参考图') {
   if (!src) return
+  if (isLocalComfyVideo.value) {
+    ElMessage.warning('本地 ComfyUI 视频 workflow 当前只接提示词，参考图先别塞。')
+    return
+  }
   if (videoMode.value === 'text') {
     videoMode.value = 'image'
   }
@@ -625,6 +669,10 @@ function removeVideoReference(kind: 'first' | 'last' | 'subject', id?: string) {
 }
 
 async function addVideoReferenceFiles(files: FileList | File[]) {
+  if (isLocalComfyVideo.value) {
+    ElMessage.warning('本地 ComfyUI 视频 workflow 当前只接提示词，参考图先别塞。')
+    return
+  }
   const imageFiles = Array.from(files).filter(file =>
     ['image/jpeg', 'image/png', 'image/webp'].includes(file.type),
   )
@@ -649,6 +697,10 @@ async function addVideoReferenceFiles(files: FileList | File[]) {
 }
 
 function addVideoFrameUrl(kind: 'first' | 'last' | 'subject') {
+  if (isLocalComfyVideo.value) {
+    ElMessage.warning('本地 ComfyUI 视频 workflow 当前只接提示词，参考图先别塞。')
+    return
+  }
   const source = kind === 'last' ? videoLastFrameUrl.value : kind === 'subject' ? videoSubjectUrl.value : videoFirstFrameUrl.value
   const url = source.trim()
   if (!url) return
@@ -764,6 +816,44 @@ function variationPromptFor(prompt: string, type: GenerationCategory) {
   return prompt
 }
 
+function estimateImageGenerationSeconds() {
+  if (selectedModel.value !== 'comfyui-local') return Math.max(45, selectedImageCount.value * 28)
+  const workflowName = comfyWorkflows.value.find(workflow => workflow.id === selectedComfyWorkflow.value)?.name || ''
+  const isErnie = /ernie/i.test(`${selectedComfyWorkflow.value} ${workflowName}`)
+  return Math.max(90, selectedImageCount.value * (isErnie ? 150 : 75))
+}
+
+function estimateGenerationSeconds(type: Message['type']) {
+  if (type === 'voice') return 60
+  if (type === 'music') return 180
+  if (type === 'video') return selectedModel.value === 'comfyui-local-video' ? 720 : 420
+  if (type === 'image') return estimateImageGenerationSeconds()
+  return 90
+}
+
+function formatElapsed(seconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(seconds))
+  const minutes = Math.floor(safeSeconds / 60)
+  const rest = safeSeconds % 60
+  return `${minutes}:${String(rest).padStart(2, '0')}`
+}
+
+function generationProgressFor(record: GenerationRecord) {
+  const elapsed = Math.max(0, (generationProgressNow.value - record.progressStartedAt) / 1000)
+  const target = Math.max(30, record.progressTargetSeconds)
+  const eased = 1 - Math.exp(-elapsed / Math.max(18, target * 0.45))
+  const percent = Math.min(98, Math.max(8, Math.round(eased * 100)))
+  let stage = '排队中'
+  if (percent >= 80) stage = '保存结果'
+  else if (percent >= 55) stage = '生成细节'
+  else if (percent >= 28) stage = '模型推理'
+  return {
+    percent,
+    elapsedLabel: formatElapsed(elapsed),
+    stage,
+  }
+}
+
 function loadingLabelFor(type: Message['type']) {
   if (type === 'voice') return 'AI 正在合成你的语音...'
   if (type === 'music') return 'AI 正在创作你的音乐...'
@@ -825,7 +915,7 @@ async function upscaleImage(url: string, record: GenerationRecord) {
   messages.value.push(userMsg)
   await saveMessages()
 
-  const placeholders = createPlaceholder('image')
+  const placeholders = createPlaceholder('image', 120)
   const placeholderId = placeholders.msg.id
   const controller = new AbortController()
   generationAbortController.value = controller
@@ -1204,11 +1294,23 @@ async function sendVideo(text: string) {
         : null,
       prompt_optimizer: videoPromptOptimizer.value,
       fast_pretreatment: videoFastPretreatment.value,
+      aspect_ratio: isLocalComfyVideo.value ? selectedAspect.value : null,
+      comfyui_workflow_id: isLocalComfyVideo.value ? selectedVideoComfyWorkflow.value || null : null,
     }, {
       signal: controller.signal,
     })
-    const data = resp.data as { task_id: string }
+    const data = resp.data as { task_id: string; video_url?: string }
     placeholders.msg.taskId = data.task_id
+    placeholders.msg.model = selectedModel.value
+
+    if (data.video_url) {
+      placeholders.msg.loading = false
+      placeholders.msg.results = [data.video_url]
+      placeholders.msg.type = 'video'
+      await saveAssistantResponse(placeholders.msg)
+      return
+    }
+
     placeholders.msg.loading = true
 
     // Poll for video completion
@@ -1257,15 +1359,18 @@ async function pollVideoStatus(msg: Message, taskId: string, signal?: AbortSigna
   msg.content = 'Video generation timed out'
 }
 
-function createPlaceholder(type: Message['type']): { msg: Message } {
+function createPlaceholder(type: Message['type'], progressTargetSeconds = estimateGenerationSeconds(type)): { msg: Message } {
+  const now = Date.now()
   return {
     msg: {
-      id: `assistant-${Date.now()}`,
+      id: `assistant-${now}`,
       role: 'assistant',
       type,
       content: '',
       loading: true,
-      createdAt: new Date(),
+      progressStartedAt: now,
+      progressTargetSeconds,
+      createdAt: new Date(now),
     },
   }
 }
@@ -1303,6 +1408,11 @@ async function loadFromHistory(item: HistoryItem) {
 
 async function goHome() {
   await router.push('/')
+}
+
+async function logout() {
+  auth.logout()
+  await router.replace('/login')
 }
 
 async function saveAssistantResponse(msg: Message) {
@@ -1343,7 +1453,7 @@ onMounted(async () => {
       selectedModel.value = modelNamesFor(firstCat)[0]
       console.log('[GenerateView] default category:', firstCat, 'model:', selectedModel.value)
     }
-    if (selectedModel.value === 'comfyui-local') {
+    if (selectedModel.value === 'comfyui-local' || selectedModel.value === 'comfyui-local-video') {
       await refreshComfyStatus()
     }
   } catch (e) {
@@ -1369,6 +1479,10 @@ onUnmounted(() => {
   if (comfyStatusTimer) {
     window.clearInterval(comfyStatusTimer)
     comfyStatusTimer = null
+  }
+  if (generationProgressTimer) {
+    window.clearInterval(generationProgressTimer)
+    generationProgressTimer = null
   }
 })
 </script>
@@ -1407,9 +1521,14 @@ onUnmounted(() => {
         <kbd>⌘ K</kbd>
       </label>
 
-      <button class="home-return" type="button" @click="goHome">
-        返回主页
-      </button>
+      <div class="topbar-actions">
+        <button class="home-return" type="button" @click="goHome">
+          返回主页
+        </button>
+        <button class="logout-return" type="button" @click="logout">
+          退出登录
+        </button>
+      </div>
     </header>
 
     <div class="workspace">
@@ -1490,8 +1609,16 @@ onUnmounted(() => {
             </header>
 
             <div v-if="record.loading" class="record-loading">
-              <div class="loading-dots"><span></span><span></span><span></span></div>
-              <span>{{ loadingLabelFor(record.type) }}</span>
+              <div class="record-loading-main">
+                <div class="loading-dots"><span></span><span></span><span></span></div>
+                <div class="loading-copy">
+                  <strong>{{ loadingLabelFor(record.type) }}</strong>
+                  <span>{{ generationProgressFor(record).stage }} · {{ generationProgressFor(record).elapsedLabel }}</span>
+                </div>
+              </div>
+              <div class="generation-progress" :aria-label="`生成进度 ${generationProgressFor(record).percent}%`">
+                <span :style="{ width: `${generationProgressFor(record).percent}%` }"></span>
+              </div>
               <button class="loading-cancel-btn" type="button" @click="cancelGeneration">
                 取消生成
               </button>
@@ -1501,7 +1628,11 @@ onUnmounted(() => {
               {{ record.error }}
             </div>
 
-            <div v-else-if="record.type === 'image' && record.results.length" class="record-images">
+            <div
+              v-else-if="record.type === 'image' && record.results.length"
+              class="record-images"
+              :class="{ single: record.results.length === 1, pair: record.results.length === 2, multi: record.results.length > 2 }"
+            >
               <figure v-for="(url, i) in record.results" :key="url" class="generated-tile">
                 <button
                   class="image-view-button"
@@ -1608,7 +1739,7 @@ onUnmounted(() => {
           class="upload-btn"
           type="button"
           :title="selectedCategory === 'video' ? '添加视频参考图' : '添加参考图'"
-          :disabled="selectedCategory === 'image' && isLocalComfyUI"
+          :disabled="(selectedCategory === 'image' && isLocalComfyUI) || (selectedCategory === 'video' && isLocalComfyVideo)"
           @click="openImageReferencePicker"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1623,7 +1754,7 @@ onUnmounted(() => {
           type="file"
           accept="image/jpeg,image/jpg,image/png,image/webp"
           multiple
-          :disabled="selectedCategory === 'image' && isLocalComfyUI"
+          :disabled="(selectedCategory === 'image' && isLocalComfyUI) || (selectedCategory === 'video' && isLocalComfyVideo)"
           @change="handleImageReferenceInput"
         />
         <textarea
@@ -1671,7 +1802,7 @@ onUnmounted(() => {
           <span>ComfyUI workflow</span>
           <select v-model="selectedComfyWorkflow">
             <option value="">默认代码工作流</option>
-            <option v-for="workflow in comfyWorkflows" :key="workflow.id" :value="workflow.id">
+            <option v-for="workflow in imageComfyWorkflows" :key="workflow.id" :value="workflow.id">
               {{ workflow.name }}
             </option>
           </select>
@@ -1869,7 +2000,34 @@ onUnmounted(() => {
       </div>
 
       <div v-if="selectedCategory === 'video'" class="video-panel">
-        <div class="video-mode-row" aria-label="视频生成模式">
+        <div v-if="isLocalComfyVideo" class="comfy-status-row" :class="comfyStatus">
+          <span class="status-dot"></span>
+          <span>本地 ComfyUI</span>
+          <strong>{{ comfyStatus === 'online' ? '在线' : comfyStatus === 'offline' ? '离线' : '检测中' }}</strong>
+          <small>{{ comfyVramLabel }}</small>
+          <small v-if="comfyTorchUsedGb">Torch {{ comfyTorchUsedGb.toFixed(1) }} GB</small>
+          <small v-if="comfyDeviceName">{{ comfyDeviceName }}</small>
+          <button type="button" @click="refreshComfyStatus">刷新</button>
+        </div>
+
+        <label v-if="isLocalComfyVideo" class="voice-field comfy-checkpoint-field">
+          <span>ComfyUI video workflow</span>
+          <select v-model="selectedVideoComfyWorkflow">
+            <option value="" disabled>选择视频工作流</option>
+            <option v-for="workflow in videoComfyWorkflows" :key="workflow.id" :value="workflow.id">
+              {{ workflow.name }}
+            </option>
+          </select>
+        </label>
+
+        <label v-if="isLocalComfyVideo" class="voice-field comfy-checkpoint-field">
+          <span>视频宽高比</span>
+          <select v-model="selectedAspect">
+            <option v-for="a in aspects" :key="a" :value="a">{{ a }}</option>
+          </select>
+        </label>
+
+        <div v-if="!isLocalComfyVideo" class="video-mode-row" aria-label="视频生成模式">
           <button
             v-for="mode in videoModes"
             :key="mode.id"
@@ -1881,7 +2039,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div v-if="videoMode === 'image' || videoMode === 'start-end'" class="image-reference-row">
+        <div v-if="!isLocalComfyVideo && (videoMode === 'image' || videoMode === 'start-end')" class="image-reference-row">
           <input
             v-model="videoFirstFrameUrl"
             type="url"
@@ -1891,7 +2049,7 @@ onUnmounted(() => {
           <button type="button" @click="addVideoFrameUrl('first')">首帧</button>
         </div>
 
-        <div v-if="videoMode === 'start-end'" class="image-reference-row">
+        <div v-if="!isLocalComfyVideo && videoMode === 'start-end'" class="image-reference-row">
           <input
             v-model="videoLastFrameUrl"
             type="url"
@@ -1901,7 +2059,7 @@ onUnmounted(() => {
           <button type="button" @click="addVideoFrameUrl('last')">尾帧</button>
         </div>
 
-        <div v-if="videoMode === 'subject'" class="image-reference-row">
+        <div v-if="!isLocalComfyVideo && videoMode === 'subject'" class="image-reference-row">
           <input
             v-model="videoSubjectUrl"
             type="url"
@@ -1914,11 +2072,11 @@ onUnmounted(() => {
         <details class="voice-advanced">
           <summary>视频高级设置</summary>
           <div class="advanced-grid video-settings-grid">
-            <label class="voice-check">
+            <label v-if="!isLocalComfyVideo" class="voice-check">
               <input v-model="videoPromptOptimizer" type="checkbox" />
               <span>官方 Prompt 优化</span>
             </label>
-            <label class="voice-check">
+            <label v-if="!isLocalComfyVideo" class="voice-check">
               <input v-model="videoFastPretreatment" type="checkbox" />
               <span>快速预处理</span>
             </label>
@@ -3022,8 +3180,15 @@ onUnmounted(() => {
   font-family: inherit;
 }
 
-.home-return {
+.topbar-actions {
   z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-return,
+.logout-return {
   height: 40px;
   min-width: 108px;
   display: inline-flex;
@@ -3040,10 +3205,23 @@ onUnmounted(() => {
   font-weight: 720;
 }
 
+.logout-return {
+  min-width: 92px;
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.08);
+  color: rgba(226, 232, 240, 0.76);
+}
+
 .home-return:hover {
   border-color: rgba(25, 201, 255, 0.42);
   background: rgba(25, 201, 255, 0.14);
   color: #fff;
+}
+
+.logout-return:hover {
+  border-color: rgba(244, 63, 94, 0.38);
+  background: rgba(244, 63, 94, 0.12);
+  color: #fecdd3;
 }
 
 .workspace {
@@ -3392,9 +3570,24 @@ onUnmounted(() => {
 
 .record-images {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 360px));
+  justify-content: start;
   gap: 12px;
   padding: 0 18px 16px;
+}
+
+.record-images.single {
+  grid-template-columns: minmax(0, min(620px, 100%));
+  justify-content: center;
+}
+
+.record-images.pair {
+  grid-template-columns: repeat(2, minmax(0, min(420px, calc((100vw - 96px) / 2))));
+  justify-content: center;
+}
+
+.record-images.multi {
+  align-items: start;
 }
 
 .generated-tile {
@@ -3409,7 +3602,7 @@ onUnmounted(() => {
 
 .image-view-button {
   width: 100%;
-  max-height: min(58vh, 620px);
+  height: clamp(220px, 20vw, 360px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3418,6 +3611,14 @@ onUnmounted(() => {
   background: rgba(2, 6, 12, 0.42);
   cursor: zoom-in;
   overflow: hidden;
+}
+
+.record-images.single .image-view-button {
+  height: min(36vh, 360px);
+}
+
+.record-images.pair .image-view-button {
+  height: min(34vh, 320px);
 }
 
 .image-view-button:focus-visible {
@@ -3494,14 +3695,57 @@ onUnmounted(() => {
   min-height: clamp(220px, 24vh, 320px);
   margin: 0 18px 16px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 14px;
   border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.1);
   background: rgba(15, 23, 42, 0.35);
   color: rgba(226, 232, 240, 0.62);
   font-size: 13px;
+}
+
+.record-loading-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.loading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: min(320px, calc(100vw - 96px));
+}
+
+.loading-copy strong {
+  color: rgba(248, 250, 252, 0.86);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.loading-copy span {
+  color: rgba(148, 163, 184, 0.72);
+  font-size: 12px;
+}
+
+.generation-progress {
+  width: min(420px, calc(100% - 36px));
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12);
+}
+
+.generation-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #19c9ff, #8b5cf6);
+  transition: width 0.6s ease;
 }
 
 .loading-cancel-btn {
@@ -4176,7 +4420,12 @@ onUnmounted(() => {
     width: min(100%, 260px);
   }
 
-  .home-return {
+  .topbar-actions {
+    gap: 8px;
+  }
+
+  .home-return,
+  .logout-return {
     min-width: 88px;
     padding-inline: 12px;
   }
@@ -4210,8 +4459,12 @@ onUnmounted(() => {
     flex-direction: column;
   }
 
-  .record-images {
+  .record-images,
+  .record-images.single,
+  .record-images.pair,
+  .record-images.multi {
     grid-template-columns: 1fr;
+    justify-content: stretch;
   }
 
   .record-prompt {
@@ -4220,6 +4473,12 @@ onUnmounted(() => {
 
   .generated-tile {
     aspect-ratio: auto;
+  }
+
+  .image-view-button,
+  .record-images.single .image-view-button,
+  .record-images.pair .image-view-button {
+    height: min(52vh, 420px);
   }
 
   .image-view-button img {
