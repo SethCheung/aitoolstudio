@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from api.auth import get_current_user, require_admin
 from models.user import User
-from services.comfyui import get_status, list_checkpoints
-from services.comfyui_workflows import delete_workflow, import_workflows_from_dir, list_workflows, upsert_workflow
+from services.comfyui import generate_sam_mask, get_status, list_checkpoints
+from services.comfyui_workflows import delete_workflow, import_workflows_from_dir, list_workflows, reorder_workflows, upsert_workflow
 from services.model_paths import delete_model_path, list_model_paths, upsert_model_path
 
 
@@ -34,6 +34,19 @@ class WorkflowRequest(BaseModel):
     notes: Optional[str] = ""
 
 
+class WorkflowReorderRequest(BaseModel):
+    category: str
+    workflow_ids: list[str]
+
+
+class SamMaskRequest(BaseModel):
+    source_image: str
+    x: float
+    y: float
+    dilation: int = 8
+    bbox_expansion: int = 20
+
+
 @router.get("/status")
 async def status(_: User = Depends(get_current_user)):
     """Return local ComfyUI service status."""
@@ -50,6 +63,23 @@ async def checkpoints(_: User = Depends(get_current_user)):
         return {"checkpoints": await list_checkpoints()}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"ComfyUI 模型列表读取失败: {exc}")
+
+
+@router.post("/sam-mask")
+async def sam_mask(req: SamMaskRequest, _: User = Depends(get_current_user)):
+    """Return a visible SAM mask preview for an image click target."""
+    if not 0 <= req.x <= 1 or not 0 <= req.y <= 1:
+        raise HTTPException(status_code=400, detail="x/y 必须是 0-1 的归一化坐标")
+    try:
+        return await generate_sam_mask(
+            source_image=req.source_image,
+            x=req.x,
+            y=req.y,
+            dilation=req.dilation,
+            bbox_expansion=req.bbox_expansion,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SAM 自动蒙版生成失败: {exc}")
 
 
 @router.get("/model-paths")
@@ -110,6 +140,13 @@ async def remove_workflow(workflow_id: str, _: User = Depends(require_admin)):
     if not delete_workflow(workflow_id):
         raise HTTPException(status_code=404, detail="Workflow not found")
     return {"ok": True}
+
+
+@router.post("/workflows/reorder")
+async def reorder_workflow_list(req: WorkflowReorderRequest, _: User = Depends(require_admin)):
+    if reorder_workflows(req.category, req.workflow_ids):
+        return {"ok": True}
+    raise HTTPException(status_code=400, detail="No workflows updated")
 
 
 @router.post("/workflows/import")

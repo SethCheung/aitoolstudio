@@ -53,12 +53,14 @@ async def optimize(
                 prompt=req.prompt,
                 model=req.model,
                 target=req.target,
+                generation_model=req.generation_model,
             )
         else:
             result = await http_optimize_prompt(
                 prompt=req.prompt,
                 model=req.model,
                 target=req.target,
+                generation_model=req.generation_model,
                 api_key=profile["api_key"],
                 base_url=profile.get("base_url", "https://api.minimax.io"),
             )

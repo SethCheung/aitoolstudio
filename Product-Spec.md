@@ -28,6 +28,7 @@
 | **ComfyUI 模型路径快捷管理** | 管理员可在 `/admin` 的 Paths 面板保存 SMB 模型目录和 195 服务器本地挂载路径备注，首个默认快捷路径指向 `smb://192.168.1.60/团队文件-SJM-MediaFile/Comfyui_Model/audio_encoders` |
 | **ComfyUI GPU 状态** | `comfyui-local` 状态条展示在线状态、VRAM 已用/总量、占用百分比和 Torch VRAM，生成中每 2 秒刷新，帮助用户判断本地 GPU 是否正在工作 |
 | **ComfyUI Upscale** | 图片结果中的 Upscale 按钮接入 ComfyUI 原生 `ImageScale` 工作流，默认 2x `lanczos` 放大，结果作为新生成记录展示 |
+| **Flux 局部重绘** | 用户选择 `Flux 局部重绘` workflow 后上传原图，默认在居中的图片画布上直接涂抹要修改的区域；也可切换为点选目标，由后端生成 SAM 提示遮罩后提交 ComfyUI |
 | **视频生成参数面板** | video 分类对齐 MiniMax 官方视频调试方案，支持文生视频、首帧图生视频、首尾帧视频、主体参考视频、官方 Prompt 优化、快速预处理、时长和分辨率 |
 | **语音生成参数面板** | voice 分类对齐 MiniMax 官方同步语音调试台，支持模型、音色、情绪、语速、音量、音调、格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典、声音效果和语气词标签 |
 | **音乐生成参数面板** | music 分类对齐 MiniMax 官方音乐调试台，支持歌曲模板、歌词结构标签、风格描述、歌词、纯音乐模式、AI 歌词优化、采样率、比特率、音频格式、返回格式、Seed 和 AI 音频水印 |
@@ -42,7 +43,7 @@
 | 模块 | 当前状态 |
 |------|----------|
 | **ComfyUI 工作流高级管理** | 当前已支持 API-format JSON 的保存、启停和生成页选择；完整节点参数映射、图生图/inpainting/ControlNet 专用表单和队列管理仍未完成 |
-| **ControlNet / LoRA / inpainting** | 属于规划能力，当前 UI/后端未形成完整闭环；Upscale 已完成第一版 ComfyUI ImageScale 放大 |
+| **ControlNet / LoRA** | 属于规划能力，当前 UI/后端未形成完整闭环；Upscale 已完成第一版 ComfyUI ImageScale 放大；Flux 局部重绘已完成第一版涂抹/点选交互 |
 | **图像理解/自动标签** | 规划中，当前未形成独立 API 和 UI 流程 |
 | **批量提示词任务、提示词库、收藏、下载 ZIP** | 规划中；当前只实现单 prompt 下的 `1x / 2x / 4x` 多图数量 |
 | **GPU 监控、系统日志、队列管理** | 规划中 |

@@ -10,8 +10,10 @@ DEFAULT_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 DEFAULT_BASE_URL = "https://api.minimax.io"
 
 
-def _optimizer_instruction_for(target: str) -> str:
+def _optimizer_instruction_for(target: str, generation_model: Optional[str] = None) -> str:
     normalized = target.lower().strip()
+    is_comfy = generation_model and "comfyui" in generation_model.lower()
+
     if normalized == "voice":
         return (
             "Optimize the input as text that will be spoken by a text-to-speech model. "
@@ -32,6 +34,15 @@ def _optimizer_instruction_for(target: str) -> str:
             "timing, atmosphere, motion, and production details. Keep it suitable for moving footage rather "
             "than a still image."
         )
+    
+    if is_comfy:
+        return (
+            "Optimize the input as an image generation prompt for Stable Diffusion / ComfyUI. "
+            "Use descriptive keywords, artistic styles, and technical terms (e.g., 'masterpiece', 'hyperrealistic', 'bokeh'). "
+            "The output should be a single coherent descriptive paragraph or a comma-separated list of tags "
+            "that captures the essence of the user's request with high visual fidelity."
+        )
+
     return (
         "Optimize the input as an image generation prompt. Include subject, composition, style, lighting, "
         "color palette, mood, and useful visual production details when they fit the request."
@@ -42,6 +53,7 @@ async def optimize_prompt(
     prompt: str,
     model: str = "MiniMax-M2.7",
     target: str = "image",
+    generation_model: Optional[str] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
 ) -> dict:
@@ -60,7 +72,7 @@ async def optimize_prompt(
     user_prompt = (
         f"Target generation type: {target}\n"
         f"User request: {prompt}\n\n"
-        f"{_optimizer_instruction_for(target)}\n"
+        f"{_optimizer_instruction_for(target, generation_model)}\n"
         "Write one concise, vivid prompt for that exact target type."
     )
 

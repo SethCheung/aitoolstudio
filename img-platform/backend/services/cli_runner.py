@@ -50,8 +50,10 @@ def _data_url_to_file(data_url: str, prefix: str = "ref") -> str:
     return str(output_path)
 
 
-def _optimizer_instruction_for(target: str) -> str:
+def _optimizer_instruction_for(target: str, generation_model: Optional[str] = None) -> str:
     normalized = target.lower().strip()
+    is_comfy = generation_model and "comfyui" in generation_model.lower()
+
     if normalized == "voice":
         return (
             "Optimize this as text for text-to-speech. Improve natural punctuation and pacing, preserve speech "
@@ -69,6 +71,14 @@ def _optimizer_instruction_for(target: str) -> str:
             "Optimize this as a video generation prompt with scene, subject, action, camera movement, timing, "
             "atmosphere, motion, and production details."
         )
+    
+    if is_comfy:
+        return (
+            "Optimize this as an image generation prompt for Stable Diffusion / ComfyUI. "
+            "Use descriptive keywords, artistic styles, and technical terms (e.g., 'masterpiece', 'hyperrealistic', 'bokeh'). "
+            "The output should be a single coherent descriptive paragraph or a comma-separated list of tags."
+        )
+
     return (
         "Optimize this as an image generation prompt with subject, composition, style, lighting, color palette, "
         "mood, and useful visual production details."
@@ -79,6 +89,7 @@ async def optimize_prompt(
     prompt: str,
     model: str = "MiniMax-M2.7",
     target: str = "image",
+    generation_model: Optional[str] = None,
 ) -> dict:
     """mmx text chat --message "..."; returns an OpenAI-like text payload."""
     message = (
@@ -86,7 +97,7 @@ async def optimize_prompt(
         "Preserve the user's intent. Return only the optimized prompt, no markdown or explanation.\n\n"
         f"Target: {target}\n"
         f"User request: {prompt}\n\n"
-        f"{_optimizer_instruction_for(target)}"
+        f"{_optimizer_instruction_for(target, generation_model)}"
     )
     system_prompt = (
         "You are a prompt engineer. Return only the optimized generation prompt, "

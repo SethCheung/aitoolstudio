@@ -76,6 +76,7 @@ async def generate(
 ):
     """文生图 — 按模型自动路由到对应 profile"""
     if req.model == "comfyui-local":
+        reference_images = [item.image_file for item in req.subject_reference]
         try:
             workflow = runtime_workflow(
                 workflow_id=req.comfyui_workflow_id,
@@ -96,10 +97,13 @@ async def generate(
                 seed=req.seed,
                 checkpoint=req.comfyui_checkpoint,
                 workflow=workflow,
+                source_image=reference_images[0] if reference_images else None,
+                mask_image=reference_images[1] if len(reference_images) > 1 else None,
+                mask_point=(req.sam_x, req.sam_y) if req.sam_x is not None and req.sam_y is not None else None,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("ComfyUI image generation failed")
-            raise HTTPException(status_code=502, detail="ComfyUI 生成失败，请检查本地服务和工作流")
+            raise HTTPException(status_code=502, detail=f"ComfyUI 生成失败：{exc}")
 
         data = result.get("data", {})
         image_urls = data.get("image_urls", [])

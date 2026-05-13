@@ -37,6 +37,8 @@ class ImageGenerateRequest(BaseModel):
     subject_reference: list[ImageSubjectReference] = Field(default_factory=list, max_length=4, description="参考图片列表")
     comfyui_checkpoint: Optional[str] = Field(default=None, description="ComfyUI checkpoint 文件名，仅 comfyui-local 生效")
     comfyui_workflow_id: Optional[str] = Field(default=None, description="ComfyUI workflow ID，仅 comfyui-local 生效")
+    sam_x: Optional[float] = Field(default=None, ge=0, le=1, description="局部重绘点击点 X，0-1 归一化坐标")
+    sam_y: Optional[float] = Field(default=None, ge=0, le=1, description="局部重绘点击点 Y，0-1 归一化坐标")
 
     @field_validator("aspect_ratio")
     @classmethod

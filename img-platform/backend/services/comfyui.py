@@ -1,7 +1,10 @@
 import asyncio
+import base64
 import os
 import random
+import struct
 import time
+import zlib
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -335,14 +338,83 @@ def _jpeg_dimensions(data: bytes) -> Optional[tuple[int, int]]:
     return None
 
 
+def _webp_dimensions(data: bytes) -> Optional[tuple[int, int]]:
+    if len(data) < 30 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return None
+    index = 12
+    while index + 8 <= len(data):
+        chunk_type = data[index:index + 4]
+        chunk_size = int.from_bytes(data[index + 4:index + 8], "little")
+        chunk_start = index + 8
+        chunk_end = chunk_start + chunk_size
+        if chunk_end > len(data):
+            return None
+        chunk = data[chunk_start:chunk_end]
+        if chunk_type == b"VP8X" and len(chunk) >= 10:
+            width = 1 + int.from_bytes(chunk[4:7], "little")
+            height = 1 + int.from_bytes(chunk[7:10], "little")
+            return width, height
+        if chunk_type == b"VP8L" and len(chunk) >= 5 and chunk[0] == 0x2F:
+            b1, b2, b3, b4 = chunk[1], chunk[2], chunk[3], chunk[4]
+            width = 1 + (b1 | ((b2 & 0x3F) << 8))
+            height = 1 + ((b2 >> 6) | (b3 << 2) | ((b4 & 0x0F) << 10))
+            return width, height
+        if chunk_type == b"VP8 " and len(chunk) >= 10 and chunk[3:6] == b"\x9d\x01\x2a":
+            width = int.from_bytes(chunk[6:8], "little") & 0x3FFF
+            height = int.from_bytes(chunk[8:10], "little") & 0x3FFF
+            return width, height
+        index = chunk_end + (chunk_size % 2)
+    return None
+
+
 def _image_dimensions(data: bytes) -> tuple[int, int]:
-    size = _png_dimensions(data) or _jpeg_dimensions(data)
+    size = _png_dimensions(data) or _jpeg_dimensions(data) or _webp_dimensions(data)
     if not size:
-        raise ValueError("Only PNG and JPEG images can be upscaled")
+        raise ValueError("Only PNG, JPEG, and WebP images are supported")
     return size
 
 
+def _png_chunk(chunk_type: bytes, payload: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(payload))
+        + chunk_type
+        + payload
+        + struct.pack(">I", zlib.crc32(chunk_type + payload) & 0xFFFFFFFF)
+    )
+
+
+def _click_mask_png(width: int, height: int, x: float, y: float) -> bytes:
+    cx = min(width - 1, max(0, int(round(x * (width - 1)))))
+    cy = min(height - 1, max(0, int(round(y * (height - 1)))))
+    radius = max(8, min(48, int(round(min(width, height) * 0.025))))
+    radius_sq = radius * radius
+    rows = bytearray()
+    for row in range(height):
+        rows.append(0)
+        dy = row - cy
+        for col in range(width):
+            dx = col - cx
+            rows.append(255 if dx * dx + dy * dy <= radius_sq else 0)
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", zlib.compress(bytes(rows))) + _png_chunk(b"IEND", b"")
+
+
 async def _source_image_bytes(source_url: str) -> tuple[bytes, str]:
+    if source_url.startswith("data:image/"):
+        header, _, payload = source_url.partition(",")
+        if not payload or ";base64" not in header:
+            raise ValueError("Unsupported data URL image format")
+        mime = header.split(";", 1)[0].removeprefix("data:")
+        extension = {
+            "image/jpeg": "jpg",
+            "image/jpg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp",
+        }.get(mime)
+        if not extension:
+            raise ValueError("Unsupported reference image type")
+        return base64.b64decode(payload), f"reference.{extension}"
+
     parsed = urlparse(source_url)
     path = unquote(parsed.path if parsed.scheme else source_url.split("?", 1)[0])
 
@@ -371,6 +443,72 @@ async def _upload_image(client: httpx.AsyncClient, base_url: str, image_bytes: b
     resp.raise_for_status()
     data = resp.json()
     return data.get("name") or safe_name
+
+
+def _contains_placeholder(value: object, placeholders: set[str]) -> bool:
+    if isinstance(value, str):
+        return any(placeholder in value for placeholder in placeholders)
+    if isinstance(value, list):
+        return any(_contains_placeholder(item, placeholders) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_placeholder(item, placeholders) for item in value.values())
+    return False
+
+
+def _replace_placeholders(value: object, replacements: dict[str, str]) -> object:
+    if isinstance(value, str):
+        next_value = value
+        for placeholder, replacement in replacements.items():
+            next_value = next_value.replace(placeholder, replacement)
+        return next_value
+    if isinstance(value, list):
+        return [_replace_placeholders(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {key: _replace_placeholders(item, replacements) for key, item in value.items()}
+    return value
+
+
+async def _patch_workflow_image_placeholders(
+    client: httpx.AsyncClient,
+    base_url: str,
+    workflow: dict,
+    source_image: Optional[str],
+    mask_image: Optional[str],
+    mask_point: Optional[tuple[float, float]],
+) -> None:
+    source_placeholders = {"{{image}}", "{{source_image}}", "{{input_image}}"}
+    mask_placeholders = {"{{sam_mask}}", "{{mask}}", "{{mask_image}}"}
+    needs_source = _contains_placeholder(workflow, source_placeholders)
+    needs_mask = _contains_placeholder(workflow, mask_placeholders)
+
+    replacements: dict[str, str] = {}
+    source_bytes: Optional[bytes] = None
+    source_name: Optional[str] = None
+    if needs_source:
+        if not source_image:
+            raise ValueError("ComfyUI workflow requires a source image")
+        source_bytes, source_name = await _source_image_bytes(source_image)
+        uploaded_source = await _upload_image(client, base_url, source_bytes, source_name)
+        replacements.update({placeholder: uploaded_source for placeholder in source_placeholders})
+
+    if needs_mask:
+        if mask_image:
+            mask_bytes, mask_name = await _source_image_bytes(mask_image)
+        elif source_image and mask_point:
+            if source_bytes is None:
+                source_bytes, source_name = await _source_image_bytes(source_image)
+            width, height = _image_dimensions(source_bytes)
+            mask_bytes = _click_mask_png(width, height, mask_point[0], mask_point[1])
+            mask_name = f"{Path(source_name or 'source').stem}_sam_mask.png"
+        else:
+            raise ValueError("ComfyUI workflow requires a mask image")
+        uploaded_mask = await _upload_image(client, base_url, mask_bytes, mask_name)
+        replacements.update({placeholder: uploaded_mask for placeholder in mask_placeholders})
+
+    if replacements:
+        patched = _replace_placeholders(workflow, replacements)
+        workflow.clear()
+        workflow.update(patched)
 
 
 async def upscale_image(
@@ -434,6 +572,112 @@ async def upscale_image(
     }
 
 
+async def generate_sam_mask(
+    source_image: str,
+    x: float,
+    y: float,
+    dilation: int = 8,
+    bbox_expansion: int = 20,
+    base_url: Optional[str] = None,
+) -> dict:
+    """Generate a visible SAM mask from a source image and normalized click point."""
+    url = _clean_base_url(base_url)
+    source_bytes, source_name = await _source_image_bytes(source_image)
+    width, height = _image_dimensions(source_bytes)
+    click_mask = _click_mask_png(width, height, x, y)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        uploaded_source = await _upload_image(client, url, source_bytes, source_name)
+        uploaded_click = await _upload_image(
+            client,
+            url,
+            click_mask,
+            f"{Path(source_name).stem or 'source'}_click_mask.png",
+        )
+        workflow = {
+            "1": {
+                "class_type": "LoadImage",
+                "inputs": {"image": uploaded_source},
+            },
+            "2": {
+                "class_type": "SAMLoader",
+                "inputs": {
+                    "model_name": "sam_vit_h_4b8939.pth",
+                    "device_mode": "Prefer GPU",
+                },
+            },
+            "3": {
+                "class_type": "LoadImage",
+                "inputs": {"image": uploaded_click},
+            },
+            "4": {
+                "class_type": "ImageToMask",
+                "inputs": {
+                    "image": ["3", 0],
+                    "channel": "red",
+                },
+            },
+            "5": {
+                "class_type": "MaskToSEGS",
+                "inputs": {
+                    "mask": ["4", 0],
+                    "combined": False,
+                    "crop_factor": 3,
+                    "bbox_fill": True,
+                    "drop_size": 10,
+                    "contour_fill": True,
+                },
+            },
+            "6": {
+                "class_type": "SAMDetectorCombined",
+                "inputs": {
+                    "sam_model": ["2", 0],
+                    "segs": ["5", 0],
+                    "image": ["1", 0],
+                    "detection_hint": "center-1",
+                    "dilation": dilation,
+                    "threshold": 0.5,
+                    "bbox_expansion": bbox_expansion,
+                    "mask_hint_threshold": 0.5,
+                    "mask_hint_use_negative": "Small",
+                },
+            },
+            "7": {
+                "class_type": "MaskToImage",
+                "inputs": {"mask": ["6", 0]},
+            },
+            "8": {
+                "class_type": "SaveImage",
+                "inputs": {
+                    "images": ["7", 0],
+                    "filename_prefix": "aitoolstudio_sam_mask",
+                },
+            },
+        }
+        prompt_id = await _queue_workflow(client, url, workflow)
+
+    async with httpx.AsyncClient(timeout=_comfyui_wait_timeout()) as client:
+        history = await _wait_for_history(client, url, prompt_id)
+        image_urls = await _download_outputs(client, url, prompt_id, history)
+
+    if not image_urls:
+        raise ValueError("SAM mask workflow finished but did not produce image output")
+
+    return {
+        "id": prompt_id,
+        "data": {"mask_url": image_urls[0], "image_urls": image_urls},
+        "metadata": {
+            "engine": "comfyui-sam-mask",
+            "source_url": source_image,
+            "x": x,
+            "y": y,
+            "dilation": dilation,
+            "bbox_expansion": bbox_expansion,
+        },
+        "base_resp": {"status_code": 0, "status_msg": "success"},
+    }
+
+
 async def generate_image(
     prompt: str,
     aspect_ratio: Optional[str] = "16:9",
@@ -443,6 +687,9 @@ async def generate_image(
     seed: Optional[int] = None,
     checkpoint: Optional[str] = None,
     workflow: Optional[dict] = None,
+    source_image: Optional[str] = None,
+    mask_image: Optional[str] = None,
+    mask_point: Optional[tuple[float, float]] = None,
     base_url: Optional[str] = None,
 ) -> dict:
     """Queue a ComfyUI workflow and return locally proxied output image URLs."""
@@ -459,6 +706,15 @@ async def generate_image(
             seed=seed,
             checkpoint=checkpoint,
         )
+        if workflow is not None:
+            await _patch_workflow_image_placeholders(
+                client=client,
+                base_url=url,
+                workflow=prompt_workflow,
+                source_image=source_image,
+                mask_image=mask_image,
+                mask_point=mask_point,
+            )
         if workflow is not None and n > 1 and not _workflow_uses_batch(prompt_workflow):
             base_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
             prompt_ids = [
@@ -473,6 +729,8 @@ async def generate_image(
         for prompt_id in prompt_ids:
             history = await _wait_for_history(client, url, prompt_id)
             image_urls.extend(await _download_outputs(client, url, prompt_id, history))
+    if not image_urls:
+        raise ValueError("ComfyUI workflow finished but did not produce image output")
 
     return {
         "id": ",".join(prompt_ids),

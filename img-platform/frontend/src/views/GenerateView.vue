@@ -73,13 +73,15 @@ interface ComfyWorkflow {
   id: string
   name: string
   description?: string
+  notes?: string
   category: string
   enabled: boolean
+  workflow_json?: Record<string, unknown>
 }
 
 // ── State ──────────────────────────────────────────────
 const selectedCategory = ref<GenerationCategory>('image')
-const selectedModel = ref('image-01')
+const selectedModel = ref('comfyui-local')
 const selectedStyle = ref('默认')
 const selectedAspect = ref('16:9')
 const selectedImageCount = ref(4)
@@ -92,14 +94,20 @@ const imageAigcWatermark = ref(false)
 const imageStyleWeight = ref(0.8)
 const imageReferenceItems = ref<ImageReferenceItem[]>([])
 const imageReferenceUrl = ref('')
+const inpaintMode = ref<'paint' | 'click'>('paint')
+const samClickX = ref<number | null>(null)
+const samClickY = ref<number | null>(null)
+const autoMaskUrl = ref('')
+const isAutoMasking = ref(false)
+const maskCanvas = ref<HTMLCanvasElement | null>(null)
+const isPaintingMask = ref(false)
+const maskHasPaint = ref(false)
 const comfyStatus = ref<'unknown' | 'online' | 'offline'>('unknown')
 const comfyDeviceName = ref('')
 const comfyVramUsedGb = ref(0)
 const comfyVramTotalGb = ref(0)
 const comfyVramPercent = ref(0)
 const comfyTorchUsedGb = ref(0)
-const comfyCheckpoints = ref<string[]>([])
-const selectedComfyCheckpoint = ref('')
 const comfyWorkflows = ref<ComfyWorkflow[]>([])
 const selectedComfyWorkflow = ref('')
 const selectedVideoComfyWorkflow = ref('')
@@ -299,6 +307,14 @@ const pronunciationTones = computed(() => {
 const canSubmitGeneration = computed(() => {
   if (isOptimizingPrompt.value) return false
   if (isLocalComfyVideo.value && !selectedVideoComfyWorkflow.value) return false
+  if (selectedCategory.value === 'image') {
+    if (!inputText.value.trim()) return false
+    if (localComfyNeedsSourceImage.value && imageReferenceItems.value.length < 1) return false
+    if (localComfyUsesClickMask.value && inpaintMode.value === 'paint' && !maskHasPaint.value) return false
+    if (localComfyUsesClickMask.value && inpaintMode.value === 'click' && (!autoMaskUrl.value || isAutoMasking.value)) return false
+    if (!localComfyUsesClickMask.value && localComfyNeedsMaskImage.value && imageReferenceItems.value.length < 2) return false
+    return true
+  }
   if (inputText.value.trim()) return true
   if (selectedCategory.value === 'video') {
     return Boolean(videoFirstFrameUrl.value || videoLastFrameUrl.value || videoSubjectReferences.value.length)
@@ -317,6 +333,34 @@ const isLocalComfyVideo = computed(() => selectedCategory.value === 'video' && s
 const isLocalComfyActive = computed(() => isLocalComfyUI.value || isLocalComfyVideo.value)
 const imageComfyWorkflows = computed(() => comfyWorkflows.value.filter(workflow => workflow.category === 'image'))
 const videoComfyWorkflows = computed(() => comfyWorkflows.value.filter(workflow => workflow.category === 'video'))
+const selectedImageComfyWorkflow = computed(() => imageComfyWorkflows.value.find(workflow => workflow.id === selectedComfyWorkflow.value))
+const selectedImageComfyWorkflowText = computed(() => {
+  const workflow = selectedImageComfyWorkflow.value
+  if (!workflow) return ''
+  return [
+    workflow.name,
+    workflow.description || '',
+    workflow.notes || '',
+    JSON.stringify(workflow.workflow_json || {}),
+  ].join(' ')
+})
+const localComfyNeedsSourceImage = computed(() => isLocalComfyUI.value && /\{\{(?:source_|input_)?image\}\}/i.test(selectedImageComfyWorkflowText.value))
+const localComfyNeedsMaskImage = computed(() => isLocalComfyUI.value && /\{\{(?:sam_)?mask(?:_image)?\}\}/i.test(selectedImageComfyWorkflowText.value))
+const localComfyUsesClickMask = computed(() => localComfyNeedsSourceImage.value && localComfyNeedsMaskImage.value)
+const localComfyAllowsImageReference = computed(() => localComfyNeedsSourceImage.value || localComfyNeedsMaskImage.value)
+const maxImageReferences = computed(() => {
+  if (!isLocalComfyUI.value) return 4
+  if (localComfyUsesClickMask.value) return 1
+  if (localComfyNeedsMaskImage.value) return 2
+  if (localComfyNeedsSourceImage.value) return 1
+  return 0
+})
+const imageReferenceUrlPlaceholder = computed(() => {
+  if (localComfyUsesClickMask.value) return '粘贴原图 URL，添加后直接涂抹要重绘的位置'
+  if (localComfyNeedsMaskImage.value) return '第 1 张填原图，第 2 张填遮罩图 URL'
+  if (localComfyNeedsSourceImage.value) return '粘贴原图 URL，或把图片直接拖进对话框'
+  return '粘贴参考图 URL，或把图片直接拖进对话框'
+})
 const comfyVramLabel = computed(() => {
   if (!comfyVramTotalGb.value) return 'VRAM --'
   return `VRAM ${comfyVramUsedGb.value.toFixed(1)} / ${comfyVramTotalGb.value.toFixed(1)} GB · ${comfyVramPercent.value}%`
@@ -325,7 +369,11 @@ const comfyVramLabel = computed(() => {
 watch(selectedCategory, () => {
   const models = currentModelList.value
   if (models.length && !models.includes(selectedModel.value)) {
-    selectedModel.value = models[0]
+    if (selectedCategory.value === 'image' && models.includes('comfyui-local')) {
+      selectedModel.value = 'comfyui-local'
+    } else {
+      selectedModel.value = models[0]
+    }
   }
   if (selectedCategory.value !== 'image') {
     imageReferenceUrl.value = ''
@@ -346,6 +394,19 @@ watch(selectedImageCount, value => {
   }
 })
 
+watch(selectedComfyWorkflow, () => {
+  samClickX.value = null
+  samClickY.value = null
+  autoMaskUrl.value = ''
+  isAutoMasking.value = false
+  clearPaintMask()
+  if (isLocalComfyUI.value && !localComfyAllowsImageReference.value) {
+    imageReferenceItems.value = []
+  } else if (isLocalComfyUI.value && imageReferenceItems.value.length > maxImageReferences.value) {
+    imageReferenceItems.value = imageReferenceItems.value.slice(0, maxImageReferences.value)
+  }
+})
+
 watch(selectedModel, value => {
   if (value !== 'image-01-live') {
     selectedStyle.value = '默认'
@@ -356,7 +417,9 @@ watch(selectedModel, value => {
   if (value === 'comfyui-local') {
     imagePromptOptimizer.value = false
     imageAigcWatermark.value = false
-    imageReferenceItems.value = []
+    if (imageReferenceItems.value.length > maxImageReferences.value) {
+      imageReferenceItems.value = imageReferenceItems.value.slice(0, maxImageReferences.value)
+    }
     void refreshComfyStatus()
   }
   if (value === 'comfyui-local-video') {
@@ -445,9 +508,8 @@ function isRequestCanceled(err: any) {
 
 async function refreshComfyStatus() {
   try {
-    const [statusResp, checkpointsResp, workflowsResp] = await Promise.all([
+    const [statusResp, workflowsResp] = await Promise.all([
       api.get('/api/comfyui/status'),
-      api.get('/api/comfyui/checkpoints'),
       api.get('/api/comfyui/workflows'),
     ])
     const devices = statusResp.data?.devices || []
@@ -463,13 +525,6 @@ async function refreshComfyStatus() {
     comfyVramUsedGb.value = used / 1024 / 1024 / 1024
     comfyTorchUsedGb.value = torchUsed / 1024 / 1024 / 1024
     comfyVramPercent.value = total ? Math.round((used / total) * 100) : 0
-    comfyCheckpoints.value = checkpointsResp.data?.checkpoints || []
-    if (comfyCheckpoints.value.length && !comfyCheckpoints.value.includes(selectedComfyCheckpoint.value)) {
-      selectedComfyCheckpoint.value =
-        comfyCheckpoints.value.find(name => name.toLowerCase().includes('dreamshaper'))
-        || comfyCheckpoints.value.find(name => !/audio|vocoder|vae|ltx/i.test(name))
-        || comfyCheckpoints.value[0]
-    }
     comfyWorkflows.value = workflowsResp.data?.workflows || []
     if (imageComfyWorkflows.value.length && !imageComfyWorkflows.value.some(workflow => workflow.id === selectedComfyWorkflow.value)) {
       selectedComfyWorkflow.value =
@@ -572,13 +627,19 @@ function openImageReferencePicker() {
 
 function addImageReference(src: string, name = '参考图') {
   if (!src) return
-  if (isLocalComfyUI.value) {
-    ElMessage.warning('本地 ComfyUI 默认工作流暂不吃参考图，先别塞。')
+  if (isLocalComfyUI.value && !localComfyAllowsImageReference.value) {
+    ElMessage.warning('当前 ComfyUI workflow 不需要参考图。要局部重绘，先选 Flux 局部重绘。')
     return
   }
   if (imageReferenceItems.value.some(item => item.src === src)) return
-  if (imageReferenceItems.value.length >= 4) {
-    ElMessage.warning('参考图最多添加 4 张，别贪多，模型也会迷糊。')
+  if (imageReferenceItems.value.length >= maxImageReferences.value) {
+    ElMessage.warning(
+      localComfyUsesClickMask.value
+        ? '局部重绘只需要 1 张原图，然后在图上点击要重绘的位置。'
+        : localComfyNeedsMaskImage.value
+          ? '局部重绘需要 2 张图：第 1 张原图，第 2 张遮罩图。'
+        : '参考图最多添加 4 张，别贪多，模型也会迷糊。',
+    )
     return
   }
   imageReferenceItems.value.push({
@@ -586,16 +647,140 @@ function addImageReference(src: string, name = '参考图') {
     name,
     src,
   })
+  if (localComfyUsesClickMask.value) {
+    samClickX.value = null
+    samClickY.value = null
+    autoMaskUrl.value = ''
+    nextTick(resetPaintMask)
+  }
 }
 
 function removeImageReference(id: string) {
   imageReferenceItems.value = imageReferenceItems.value.filter(item => item.id !== id)
+  if (!imageReferenceItems.value.length) {
+    samClickX.value = null
+    samClickY.value = null
+    autoMaskUrl.value = ''
+    clearPaintMask()
+  }
+}
+
+async function markSamClick(event: MouseEvent) {
+  if (!localComfyUsesClickMask.value || isAutoMasking.value) return
+  const sourceImage = imageReferenceItems.value[0]?.src
+  if (!sourceImage) return
+  const target = event.currentTarget as HTMLElement
+  const image = target.querySelector('img')
+  if (!image) return
+  const rect = image.getBoundingClientRect()
+  samClickX.value = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  samClickY.value = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+  autoMaskUrl.value = ''
+  isAutoMasking.value = true
+  try {
+    const resp = await api.post('/api/comfyui/sam-mask', {
+      source_image: sourceImage,
+      x: samClickX.value,
+      y: samClickY.value,
+      dilation: 8,
+      bbox_expansion: 20,
+    })
+    autoMaskUrl.value = resp.data?.data?.mask_url || ''
+    if (!autoMaskUrl.value) {
+      ElMessage.error('SAM 没返回蒙版图，换个位置再点。')
+    }
+  } catch (error: unknown) {
+    const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail
+    ElMessage.error(detail || 'SAM 自动蒙版失败，请检查 ComfyUI。')
+  } finally {
+    isAutoMasking.value = false
+  }
+}
+
+function resetPaintMask() {
+  const canvas = maskCanvas.value
+  if (!canvas) return
+  const image = canvas.parentElement?.querySelector('img')
+  const width = image instanceof HTMLImageElement && image.naturalWidth ? image.naturalWidth : 1024
+  const height = image instanceof HTMLImageElement && image.naturalHeight ? image.naturalHeight : 1024
+  canvas.width = width
+  canvas.height = height
+  clearPaintMask()
+}
+
+function clearPaintMask() {
+  const canvas = maskCanvas.value
+  const ctx = canvas?.getContext('2d')
+  if (!canvas || !ctx) {
+    maskHasPaint.value = false
+    return
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  maskHasPaint.value = false
+}
+
+function paintMaskAt(event: PointerEvent) {
+  const canvas = maskCanvas.value
+  const ctx = canvas?.getContext('2d')
+  if (!canvas || !ctx) return
+  const rect = canvas.getBoundingClientRect()
+  const x = ((event.clientX - rect.left) / rect.width) * canvas.width
+  const y = ((event.clientY - rect.top) / rect.height) * canvas.height
+  const radius = Math.max(24, Math.min(96, Math.round(Math.min(canvas.width, canvas.height) * 0.035)))
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.fillStyle = '#ff0000'
+  ctx.beginPath()
+  ctx.arc(x, y, radius, 0, Math.PI * 2)
+  ctx.fill()
+  maskHasPaint.value = true
+}
+
+function startPaintMask(event: PointerEvent) {
+  if (!localComfyUsesClickMask.value || inpaintMode.value !== 'paint') return
+  isPaintingMask.value = true
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+  paintMaskAt(event)
+}
+
+function continuePaintMask(event: PointerEvent) {
+  if (!isPaintingMask.value) return
+  paintMaskAt(event)
+}
+
+function stopPaintMask(event?: PointerEvent) {
+  if (event) {
+    ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  }
+  isPaintingMask.value = false
+}
+
+function paintedMaskDataUrl() {
+  if (!maskHasPaint.value || !maskCanvas.value) return null
+  return maskCanvas.value.toDataURL('image/png')
+}
+
+function imageSubjectReferences() {
+  const refs = imageReferenceItems.value.map(item => ({
+    type: 'character',
+    image_file: item.src,
+  }))
+  if (isLocalComfyUI.value && localComfyUsesClickMask.value && inpaintMode.value === 'paint') {
+    const mask = paintedMaskDataUrl()
+    if (mask && refs.length === 1) {
+      refs.push({ type: 'character', image_file: mask })
+    }
+  } else if (isLocalComfyUI.value && localComfyUsesClickMask.value && inpaintMode.value === 'click') {
+    if (autoMaskUrl.value && refs.length === 1) {
+      refs.push({ type: 'character', image_file: autoMaskUrl.value })
+    }
+  }
+  return refs
 }
 
 async function addImageReferenceFiles(files: FileList | File[]) {
-  const imageFiles = Array.from(files).filter(file => file.type === 'image/jpeg' || file.type === 'image/png')
+  const imageFiles = Array.from(files).filter(file => ['image/jpeg', 'image/png', 'image/webp'].includes(file.type))
   if (!imageFiles.length) {
-    ElMessage.warning('参考图只支持 JPG、PNG')
+    ElMessage.warning('参考图只支持 JPG、PNG、WebP')
     return
   }
   selectedCategory.value = 'image'
@@ -1100,15 +1285,13 @@ async function sendImage(prompt: string) {
       prompt_optimizer: imagePromptOptimizer.value,
       seed: imageSeed.value,
       aigc_watermark: imageAigcWatermark.value,
-      comfyui_checkpoint: isLocalComfyUI.value ? selectedComfyCheckpoint.value || null : null,
       comfyui_workflow_id: isLocalComfyUI.value ? selectedComfyWorkflow.value || null : null,
+      sam_x: localComfyUsesClickMask.value && inpaintMode.value === 'click' ? samClickX.value : null,
+      sam_y: localComfyUsesClickMask.value && inpaintMode.value === 'click' ? samClickY.value : null,
       style: selectedModel.value === 'image-01-live' && selectedStyle.value !== '默认'
         ? { style_type: selectedStyle.value, style_weight: imageStyleWeight.value }
         : null,
-      subject_reference: imageReferenceItems.value.map(item => ({
-        type: 'character',
-        image_file: item.src,
-      })),
+      subject_reference: imageSubjectReferences(),
     }, {
       signal: controller.signal,
     })
@@ -1121,7 +1304,7 @@ async function sendImage(prompt: string) {
       type: 'image',
       model: selectedModel.value,
       aspect: useCustomImageSize.value ? `${imageWidth.value}x${imageHeight.value}` : selectedAspect.value,
-      style: isLocalComfyUI.value ? selectedComfyCheckpoint.value || '默认' : selectedStyle.value,
+      style: selectedStyle.value,
     })
     if (updated) {
       await saveAssistantResponse(updated)
@@ -1153,6 +1336,7 @@ async function optimizePrompt() {
       prompt,
       model: 'MiniMax-M2.7',
       target: selectedCategory.value,
+      generation_model: selectedModel.value,
     })
     const data = resp.data as { optimized_prompt: string }
     if (data.optimized_prompt?.trim()) {
@@ -1446,13 +1630,23 @@ onMounted(async () => {
     console.log('[GenerateView] models resp.data:', resp.data)
     availableModels.value = resp.data as AvailableModels
     console.log('[GenerateView] models loaded:', availableModels.value)
-    const preferred: Array<keyof AvailableModels> = ['image', 'voice', 'music', 'video']
-    const firstCat = preferred.find(c => modelNamesFor(c).length)
-    if (firstCat) {
-      selectedCategory.value = firstCat as GenerationCategory
-      selectedModel.value = modelNamesFor(firstCat)[0]
-      console.log('[GenerateView] default category:', firstCat, 'model:', selectedModel.value)
+
+    // Default to image category, prioritize comfyui-local
+    const imageModels = modelNamesFor('image')
+    if (imageModels.length) {
+      selectedCategory.value = 'image'
+      selectedModel.value = imageModels.includes('comfyui-local') ? 'comfyui-local' : imageModels[0]
+    } else {
+      // Fallback: auto-detect first available category
+      const preferred: Array<keyof AvailableModels> = ['voice', 'music', 'video']
+      const firstCat = preferred.find(c => modelNamesFor(c).length)
+      if (firstCat) {
+        selectedCategory.value = firstCat as GenerationCategory
+        selectedModel.value = modelNamesFor(firstCat)[0]
+      }
     }
+    console.log('[GenerateView] default category:', selectedCategory.value, 'model:', selectedModel.value)
+
     if (selectedModel.value === 'comfyui-local' || selectedModel.value === 'comfyui-local-video') {
       await refreshComfyStatus()
     }
@@ -1711,11 +1905,66 @@ onUnmounted(() => {
       @drop="handleComposerDrop"
     >
       <div v-if="selectedCategory === 'image' && activeImageReferenceCount" class="reference-strip">
-        <figure v-for="item in imageReferenceItems" :key="item.id" class="reference-thumb">
+        <figure v-for="(item, index) in imageReferenceItems" :key="item.id" class="reference-thumb">
           <img :src="item.src" :alt="item.name" />
+          <figcaption v-if="isLocalComfyUI && localComfyAllowsImageReference">
+            {{ localComfyUsesClickMask ? '原图' : index === 0 ? '原图' : '遮罩' }}
+          </figcaption>
           <button type="button" title="移除参考图" @click="removeImageReference(item.id)">×</button>
         </figure>
-        <button class="reference-add" type="button" title="继续添加参考图" @click="openImageReferencePicker">+</button>
+        <button
+          v-if="imageReferenceItems.length < maxImageReferences"
+          class="reference-add"
+          type="button"
+          title="继续添加参考图"
+          @click="openImageReferencePicker"
+        >+</button>
+      </div>
+      <div v-if="selectedCategory === 'image' && localComfyUsesClickMask && imageReferenceItems[0]" class="inpaint-panel">
+        <div class="inpaint-mode-row" aria-label="局部重绘方式">
+          <button
+            type="button"
+            :class="{ active: inpaintMode === 'paint' }"
+            @click="inpaintMode = 'paint'"
+          >涂抹区域</button>
+          <button
+            type="button"
+            :class="{ active: inpaintMode === 'click' }"
+            @click="inpaintMode = 'click'"
+          >自动蒙版</button>
+          <button v-if="inpaintMode === 'paint'" type="button" class="inpaint-clear" @click="clearPaintMask">清除涂抹</button>
+          <button v-else-if="autoMaskUrl" type="button" class="inpaint-clear" @click="autoMaskUrl = ''">重选</button>
+        </div>
+
+        <div v-if="inpaintMode === 'paint'" class="inpaint-paint-stage">
+          <img :src="imageReferenceItems[0].src" :alt="imageReferenceItems[0].name" @load="resetPaintMask" />
+          <canvas
+            ref="maskCanvas"
+            @pointerdown.prevent="startPaintMask"
+            @pointermove.prevent="continuePaintMask"
+            @pointerup.prevent="stopPaintMask"
+            @pointerleave.prevent="stopPaintMask"
+          ></canvas>
+        </div>
+
+        <div v-else class="inpaint-click-stage" @click="markSamClick">
+          <img :src="imageReferenceItems[0].src" :alt="imageReferenceItems[0].name" />
+          <img v-if="autoMaskUrl" class="inpaint-auto-mask" :src="autoMaskUrl" alt="自动蒙版" />
+          <span
+            v-if="samClickX !== null && samClickY !== null"
+            class="inpaint-click-dot"
+            :style="{ left: `${samClickX * 100}%`, top: `${samClickY * 100}%` }"
+          ></span>
+          <span v-if="isAutoMasking" class="inpaint-mask-loading">正在生成蒙版</span>
+        </div>
+
+        <p>
+          {{
+            inpaintMode === 'paint'
+              ? (maskHasPaint ? '红色区域会被重绘，可继续补涂或清除重来。' : '直接在图上涂红要修改的区域。')
+              : (autoMaskUrl ? '蒙版已生成，红色高亮区域会被重绘；不准就点别的位置重选。' : (isAutoMasking ? 'SAM 正在圈选目标。' : '点击图片上的目标，先生成可见自动蒙版。'))
+          }}
+        </p>
       </div>
       <div v-if="selectedCategory === 'video' && activeVideoReferenceCount" class="reference-strip">
         <figure v-if="videoFirstFrameUrl" class="reference-thumb">
@@ -1739,7 +1988,7 @@ onUnmounted(() => {
           class="upload-btn"
           type="button"
           :title="selectedCategory === 'video' ? '添加视频参考图' : '添加参考图'"
-          :disabled="(selectedCategory === 'image' && isLocalComfyUI) || (selectedCategory === 'video' && isLocalComfyVideo)"
+          :disabled="(selectedCategory === 'image' && isLocalComfyUI && !localComfyAllowsImageReference) || (selectedCategory === 'video' && isLocalComfyVideo)"
           @click="openImageReferencePicker"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1754,7 +2003,7 @@ onUnmounted(() => {
           type="file"
           accept="image/jpeg,image/jpg,image/png,image/webp"
           multiple
-          :disabled="(selectedCategory === 'image' && isLocalComfyUI) || (selectedCategory === 'video' && isLocalComfyVideo)"
+          :disabled="(selectedCategory === 'image' && isLocalComfyUI && !localComfyAllowsImageReference) || (selectedCategory === 'video' && isLocalComfyVideo)"
           @change="handleImageReferenceInput"
         />
         <textarea
@@ -1789,16 +2038,6 @@ onUnmounted(() => {
         </div>
 
         <label v-if="isLocalComfyUI" class="voice-field comfy-checkpoint-field">
-          <span>ComfyUI checkpoint</span>
-          <select v-model="selectedComfyCheckpoint">
-            <option value="">自动选择图像模型</option>
-            <option v-for="checkpoint in comfyCheckpoints" :key="checkpoint" :value="checkpoint">
-              {{ checkpoint }}
-            </option>
-          </select>
-        </label>
-
-        <label v-if="isLocalComfyUI" class="voice-field comfy-checkpoint-field">
           <span>ComfyUI workflow</span>
           <select v-model="selectedComfyWorkflow">
             <option value="">默认代码工作流</option>
@@ -1808,11 +2047,11 @@ onUnmounted(() => {
           </select>
         </label>
 
-        <div v-else class="image-reference-row">
+        <div v-if="!isLocalComfyUI || localComfyAllowsImageReference" class="image-reference-row">
           <input
             v-model="imageReferenceUrl"
             type="url"
-            placeholder="粘贴参考图 URL，或把图片直接拖进对话框"
+            :placeholder="imageReferenceUrlPlaceholder"
             @keydown.enter.prevent="addImageReferenceUrl"
           />
           <button type="button" @click="addImageReferenceUrl">添加</button>
@@ -3907,6 +4146,19 @@ onUnmounted(() => {
   object-fit: cover;
 }
 
+.reference-thumb figcaption {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  max-width: calc(100% - 8px);
+  padding: 2px 5px;
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.76);
+  color: #f8fafc;
+  font-size: 10px;
+  line-height: 1;
+}
+
 .reference-thumb button {
   position: absolute;
   top: 3px;
@@ -3931,6 +4183,115 @@ onUnmounted(() => {
   color: rgba(226, 232, 240, 0.74);
   cursor: pointer;
   font-size: 24px;
+}
+
+.inpaint-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.inpaint-mode-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.inpaint-mode-row button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.78);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.inpaint-mode-row button.active {
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(22, 163, 74, 0.18);
+  color: #dcfce7;
+}
+
+.inpaint-mode-row .inpaint-clear {
+  margin-left: auto;
+  border-color: rgba(248, 113, 113, 0.32);
+  color: #fecaca;
+}
+
+.inpaint-paint-stage,
+.inpaint-click-stage {
+  display: grid;
+  position: relative;
+  overflow: hidden;
+  width: min(100%, 560px);
+  max-height: 340px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: #020617;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.inpaint-paint-stage img,
+.inpaint-paint-stage canvas,
+.inpaint-click-stage img {
+  grid-area: 1 / 1;
+  width: 100%;
+  max-height: 340px;
+  object-fit: contain;
+  display: block;
+}
+
+.inpaint-paint-stage canvas {
+  height: 100%;
+}
+
+.inpaint-auto-mask {
+  opacity: 0.58;
+  filter: sepia(1) saturate(12) hue-rotate(310deg);
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.inpaint-click-dot {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.24);
+  pointer-events: none;
+}
+
+.inpaint-mask-loading {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 7px 12px;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.82);
+  color: #dcfce7;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.inpaint-panel p {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.74);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .image-panel,

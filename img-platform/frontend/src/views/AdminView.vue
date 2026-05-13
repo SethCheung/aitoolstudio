@@ -40,6 +40,7 @@ interface ComfyWorkflow {
   enabled: boolean
   workflow_json: Record<string, any>
   notes?: string
+  sort_order?: number
   created_at?: string
   updated_at?: string
 }
@@ -180,6 +181,40 @@ const filteredWorkflows = computed(() => {
     [workflow.name, workflow.description || '', workflow.category, workflow.notes || '', workflow.id]
       .some((value) => value.toLowerCase().includes(query))
   )
+})
+
+const groupedWorkflows = computed(() => {
+  const query = workflowSearch.value.trim().toLowerCase()
+  const workflows = query
+    ? comfyWorkflows.value.filter((workflow) =>
+        [workflow.name, workflow.description || '', workflow.category, workflow.notes || '', workflow.id]
+          .some((value) => value.toLowerCase().includes(query))
+      )
+    : comfyWorkflows.value
+  const groups: Record<string, ComfyWorkflow[]> = {}
+  for (const wf of workflows) {
+    const cat = wf.category || 'uncategorized'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(wf)
+  }
+  // Sort each group by sort_order
+  for (const cat of Object.keys(groups)) {
+    groups[cat].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+  }
+  return groups
+})
+
+const categoryOrder = ['image', 'video', 'voice', 'music', 'text']
+const sortedCategories = computed(() => {
+  const cats = Object.keys(groupedWorkflows.value)
+  return cats.sort((a, b) => {
+    const ia = categoryOrder.indexOf(a)
+    const ib = categoryOrder.indexOf(b)
+    if (ia !== -1 && ib !== -1) return ia - ib
+    if (ia !== -1) return -1
+    if (ib !== -1) return 1
+    return a.localeCompare(b)
+  })
 })
 const enabledPathCount = computed(() => modelPaths.value.filter((path) => path.enabled).length)
 const modelPathCategoryCount = computed(() => new Set(modelPaths.value.map((path) => path.category)).size)
@@ -563,6 +598,27 @@ async function toggleWorkflow(workflow: ComfyWorkflow) {
   }
 }
 
+// --- Workflow Arrow Reordering ---
+function moveWorkflow(category: string, index: number, direction: -1 | 1) {
+  const group = groupedWorkflows.value[category]
+  const newIndex = index + direction
+  if (newIndex < 0 || newIndex >= group.length) return
+  const newGroup = [...group]
+  const item = newGroup[index]
+  newGroup.splice(index, 1)
+  newGroup.splice(newIndex, 0, item)
+  saveWorkflowOrder(category, newGroup.map((w) => w.id))
+}
+
+async function saveWorkflowOrder(category: string, workflowIds: string[]) {
+  try {
+    await api.post('/api/comfyui/workflows/reorder', { category, workflow_ids: workflowIds })
+    await fetchWorkflows()
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to reorder workflows'
+  }
+}
+
 function openAddUser() {
   editingUser.value = null
   userForm.value = { username: '', password: '', is_admin: false }
@@ -788,35 +844,52 @@ onMounted(() => {
             <button @click="openAddWorkflow">Add Workflow</button>
           </div>
 
-          <article
-            v-for="workflow in filteredWorkflows"
-            :key="workflow.id"
-            class="path-card"
-            :class="{ disabled: !workflow.enabled }"
-          >
-            <div class="profile-avatar">{{ workflow.category.slice(0, 2).toUpperCase() }}</div>
-
-            <div class="profile-main">
-              <div class="profile-title-row">
-                <h2>{{ workflow.name }}</h2>
-                <span class="status-pill" :class="{ on: workflow.enabled }">
-                  {{ workflow.enabled ? 'Enabled' : 'Disabled' }}
-                </span>
+          <div v-for="category in sortedCategories" :key="category" class="workflow-group">
+            <h3 class="workflow-group-title">{{ category }}</h3>
+            <article
+              v-for="(workflow, idx) in groupedWorkflows[category]"
+              :key="workflow.id"
+              class="path-card workflow-card"
+              :class="{ disabled: !workflow.enabled }"
+            >
+              <div class="workflow-order">
+                <button
+                  class="order-btn"
+                  :disabled="idx === 0"
+                  title="Move up"
+                  @click="moveWorkflow(category, idx, -1)"
+                >↑</button>
+                <button
+                  class="order-btn"
+                  :disabled="idx === groupedWorkflows[category].length - 1"
+                  title="Move down"
+                  @click="moveWorkflow(category, idx, 1)"
+                >↓</button>
               </div>
-              <p class="path-category">{{ workflow.category }} · {{ Object.keys(workflow.workflow_json || {}).length }} nodes</p>
-              <p v-if="workflow.description" class="user-meta">{{ workflow.description }}</p>
-              <p v-if="workflow.notes" class="user-meta">{{ workflow.notes }}</p>
-            </div>
+              <div class="profile-avatar">{{ workflow.category.slice(0, 2).toUpperCase() }}</div>
 
-            <div class="profile-actions" @click.stop>
-              <button class="primary-action" @click="toggleWorkflow(workflow)">
-                {{ workflow.enabled ? 'Disable' : 'Enable' }}
-              </button>
-              <button class="tool-button" title="Copy workflow JSON" @click="copyPath(formatWorkflowJson(workflow.workflow_json))">⧉</button>
-              <button class="tool-button" title="Edit workflow" @click="openEditWorkflow(workflow)">✎</button>
-              <button class="tool-button danger" title="Delete workflow" @click="deleteWorkflow(workflow)">⌫</button>
-            </div>
-          </article>
+              <div class="profile-main">
+                <div class="profile-title-row">
+                  <h2>{{ workflow.name }}</h2>
+                  <span class="status-pill" :class="{ on: workflow.enabled }">
+                    {{ workflow.enabled ? 'Enabled' : 'Disabled' }}
+                  </span>
+                </div>
+                <p class="path-category">{{ workflow.category }} · {{ Object.keys(workflow.workflow_json || {}).length }} nodes</p>
+                <p v-if="workflow.description" class="user-meta">{{ workflow.description }}</p>
+                <p v-if="workflow.notes" class="user-meta">{{ workflow.notes }}</p>
+              </div>
+
+              <div class="profile-actions" @click.stop>
+                <button class="primary-action" @click="toggleWorkflow(workflow)">
+                  {{ workflow.enabled ? 'Disable' : 'Enable' }}
+                </button>
+                <button class="tool-button" title="Copy workflow JSON" @click="copyPath(formatWorkflowJson(workflow.workflow_json))">⧉</button>
+                <button class="tool-button" title="Edit workflow" @click="openEditWorkflow(workflow)">✎</button>
+                <button class="tool-button danger" title="Delete workflow" @click="deleteWorkflow(workflow)">⌫</button>
+              </div>
+            </article>
+          </div>
         </section>
       </template>
 
@@ -1771,5 +1844,79 @@ onMounted(() => {
   .model-picker {
     grid-template-columns: 1fr;
   }
+}
+
+/* Workflow Drag & Drop */
+.workflow-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.workflow-group-title {
+  margin: 4px 0 2px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #eef6ff;
+  color: #1677ff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  align-self: flex-start;
+}
+.workflow-card {
+  display: grid;
+  grid-template-columns: 32px 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 1px solid #e1e4e8;
+  border-radius: 12px;
+  background: #fff;
+}
+.workflow-card .profile-title-row h2 {
+  font-size: 15px;
+}
+.workflow-card .path-category {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+.workflow-card .user-meta {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+.workflow-card .profile-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+.workflow-order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.order-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: #f0f0f3;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  line-height: 1;
+}
+.order-btn:hover:not(:disabled) {
+  background: #1677ff;
+  color: #fff;
+}
+.order-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
 }
 </style>

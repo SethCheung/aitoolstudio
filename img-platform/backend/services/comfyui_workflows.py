@@ -191,7 +191,7 @@ def _infer_workflow_category(path: Path, workflow_json: dict) -> str:
 def _load() -> dict:
     if not CONFIG_FILE.exists():
         now = _now()
-        defaults = [{**item, "created_at": now, "updated_at": now} for item in DEFAULT_WORKFLOWS]
+        defaults = [{**item, "created_at": now, "updated_at": now, "sort_order": 0} for item in DEFAULT_WORKFLOWS]
         data = {"workflows": defaults}
         _save(data)
         return data
@@ -203,7 +203,15 @@ def _load() -> dict:
     missing_defaults = [workflow for workflow in DEFAULT_WORKFLOWS if workflow["id"] not in existing_ids]
     if missing_defaults:
         now = _now()
-        data["workflows"].extend({**item, "created_at": now, "updated_at": now} for item in missing_defaults)
+        data["workflows"].extend({**item, "created_at": now, "updated_at": now, "sort_order": 0} for item in missing_defaults)
+        _save(data)
+    # Migrate: ensure all workflows have sort_order
+    needs_save = False
+    for wf in data.get("workflows", []):
+        if "sort_order" not in wf:
+            wf["sort_order"] = 0
+            needs_save = True
+    if needs_save:
         _save(data)
     return data
 
@@ -218,7 +226,7 @@ def list_workflows(include_disabled: bool = False) -> list[dict]:
     workflows = _load().get("workflows", [])
     if not include_disabled:
         workflows = [item for item in workflows if item.get("enabled", True)]
-    return sorted(workflows, key=lambda item: (item.get("category", ""), item.get("name", "")))
+    return sorted(workflows, key=lambda item: (item.get("category", ""), item.get("sort_order", 0), item.get("name", "")))
 
 
 def get_workflow(workflow_id: str, include_disabled: bool = False) -> Optional[dict]:
@@ -244,6 +252,7 @@ def upsert_workflow(workflow_data: dict, workflow_id: Optional[str] = None) -> d
         "enabled": bool(workflow_data.get("enabled", True)),
         "workflow_json": workflow_json,
         "notes": (workflow_data.get("notes") or "").strip(),
+        "sort_order": workflow_data.get("sort_order", 0),
         "updated_at": now,
     }
     if not normalized["name"]:
@@ -272,6 +281,21 @@ def delete_workflow(workflow_id: str) -> bool:
         return False
     _save({"workflows": next_workflows})
     return True
+
+
+def reorder_workflows(category: str, workflow_ids: list[str]) -> bool:
+    """Reorder workflows within a category by setting sort_order based on the given id list."""
+    data = _load()
+    workflows = data.get("workflows", [])
+    id_to_order = {wid: idx for idx, wid in enumerate(workflow_ids)}
+    updated = False
+    for wf in workflows:
+        if wf.get("category") == category and wf.get("id") in id_to_order:
+            wf["sort_order"] = id_to_order[wf["id"]]
+            updated = True
+    if updated:
+        _save({"workflows": workflows})
+    return updated
 
 
 def _workflow_from_file(path: Path) -> dict:
@@ -348,6 +372,23 @@ def runtime_workflow(
                 inputs[key] = value.replace("{{prompt}}", prompt)
                 prompt_patched = True
                 continue
+            if isinstance(value, str):
+                numeric_placeholders = {
+                    "{{width}}": image_width,
+                    "{{height}}": image_height,
+                    "{{seed}}": resolved_seed,
+                    "{{batch_size}}": n,
+                    "{{n}}": n,
+                }
+                if value in numeric_placeholders:
+                    inputs[key] = numeric_placeholders[value]
+                    continue
+                for placeholder, replacement in numeric_placeholders.items():
+                    if placeholder in value:
+                        inputs[key] = value.replace(placeholder, str(replacement))
+                        break
+                if inputs[key] != value:
+                    continue
             if (
                 not prompt_patched
                 and key_lower in PROMPT_INPUT_NAMES
