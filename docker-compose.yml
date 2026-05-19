@@ -1,0 +1,45 @@
+services:
+  frontend:
+    build:
+      context: ./img-platform/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./img-platform/backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - /vol3/@team/SJM-MediaFile/AI-Tool-Studio/outputs/uploads:/app/uploads
+      - ./data/config:/app/config
+      - /vol3/@team/SJM-MediaFile/AI-Tool-Studio/outputs/minimax-output:/root/minimax-output
+      - /vol3/@team/SJM-MediaFile/Comfyui_Workflows:/app/workflow-imports:ro
+    environment:
+      - DATABASE_URL=sqlite:///./data/img_platform.db
+      - IMAGES_DIR=/app/data/images
+      - UPLOAD_DIR=/app/uploads
+      - MINIMAX_OUTPUT_DIR=/root/minimax-output
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - FIRE_CANVAS_FRONTEND_TOKEN=${FIRE_CANVAS_FRONTEND_TOKEN:-fire-canvas-intranet}
+      - FIRE_CANVAS_API_KEY=${FIRE_CANVAS_API_KEY:-}
+      - COMFYUI_GENERATION_TIMEOUT=900
+      - COMFYUI_WORKFLOW_IMPORT_DIR=/app/workflow-imports
+    restart: unless-stopped
+
+  # Phase 3 添加 Redis 用于 Celery 任务队列
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+
+volumes:
+  redis_data:
