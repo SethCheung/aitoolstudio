@@ -768,7 +768,7 @@ async def _run_cascade(
                 urls = [u for u in urls if u]
                 gen = Generation(
                     type="image", prompt=workflow_prompt,
-                    image_urls=urls, image_model="comfyui-local",
+                    image_urls=urls, model="comfyui-local",
                     n_generated=len(urls) or 1,
                     mini_max_id=result.get("id", ""),
                     user_id=current_user.id,
