@@ -501,39 +501,6 @@ async function handleAssetFile(event: Event) {
   input.value = ''
 }
 
-function createOutputNodes(sourceNode: any, urls: string[]) {
-  if (!urls.length) return
-  const startX = safeNumber(sourceNode.position?.x, 420) + 460
-  const startY = safeNumber(sourceNode.position?.y, 180)
-  const newNodes = urls.map((url, index) => ({
-    id: uniqueId('media-result', index),
-    type: 'media',
-    position: { x: startX, y: startY + index * 250 },
-    data: {
-      title: resultKind(url) === 'video' ? 'Video Result' : 'Image Result',
-      body: '',
-      hint: '生成结果，可继续连接给下游 workflow',
-      assetUrl: url,
-      mode: 'Output',
-      model: sourceNode.data?.model || sourceNode.data?.title || 'ComfyUI',
-      status: 'success',
-      results: [url],
-    },
-  }))
-  const newEdges = newNodes.map((outputNode, index) => ({
-    id: `edge-${sourceNode.id}-${outputNode.id}`,
-    source: sourceNode.id,
-    target: outputNode.id,
-    type: 'smoothstep',
-    animated: false,
-    markerEnd: MarkerType.ArrowClosed,
-    style: { stroke: 'rgba(125,255,154,.62)', strokeWidth: 3 },
-    data: { imageOrder: index + 1 },
-  }))
-  nodes.value = [...nodes.value, ...newNodes]
-  edges.value = [...edges.value, ...newEdges]
-}
-
 function onOutputDragStart(event: DragEvent, img: { url: string; prompt?: string; generation_id?: number }) {
   event.dataTransfer?.setData('application/output-image', JSON.stringify(img))
   event.dataTransfer!.effectAllowed = 'copy'
