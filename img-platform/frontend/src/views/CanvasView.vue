@@ -705,6 +705,18 @@ async function hydrateCanvasFromServer() {
           merged = true
         }
       }
+      if (serverNode.type === 'llm') {
+        const localNode = nodes.value.find((n: any) => n.id === serverNode.id)
+        if (localNode) {
+          localNode.data = {
+            ...localNode.data,
+            outputText: serverNode.data?.outputText || localNode.data?.outputText || '',
+            status: serverNode.data?.status || localNode.data?.status || 'idle',
+            error: serverNode.data?.error || localNode.data?.error || '',
+          }
+          merged = true
+        }
+      }
     }
     if (merged) canvasSaveState.value = 'saved'
   } catch { /* best effort */ }
@@ -720,15 +732,16 @@ async function runSelectedNode() {
     return
   }
 
+  const isLLM = node.type === 'llm'
   const workflowId = node.data?.workflowId
-  if (!workflowId) {
+  if (!isLLM && !workflowId) {
     runError.value = '这个节点还没绑定真实 workflow。先从“工作流”里插入一个。'
     updateNodeData(node.id, { status: 'error', error: runError.value })
     return
   }
 
   const prompt = upstreamText(node)
-  if (!prompt) {
+  if (!isLLM && !prompt) {
     runError.value = '缺 prompt。把 Text 节点连到这个 workflow，或者直接在下方输入。'
     updateNodeData(node.id, { status: 'error', error: runError.value })
     return
@@ -752,13 +765,26 @@ async function runSelectedNode() {
       seed: seedDraft.value.trim() ? Number(seedDraft.value) : null,
       duration: 6,
     })
-    const urls = response.data?.urls || []
-    updateNodeData(node.id, {
-      body: response.data?.prompt || prompt,
-      status: urls.length ? 'success' : 'error',
-      error: urls.length ? '' : '接口没有返回结果地址',
-      results: urls,
-    })
+    const respData = response.data || {}
+    const urls = respData.urls || []
+    const resultType = respData.result_type || (urls.length ? 'media' : '')
+    if (resultType === 'text') {
+      const outputText = respData.output?.output_text || ''
+      updateNodeData(node.id, {
+        body: respData.prompt || prompt,
+        status: 'success',
+        error: '',
+        outputText,
+        results: [],
+      })
+    } else {
+      updateNodeData(node.id, {
+        body: respData.prompt || prompt,
+        status: urls.length ? 'success' : 'error',
+        error: urls.length ? '' : '接口没有返回结果地址',
+        results: urls,
+      })
+    }
     // Re-fetch document graph to get backend-written output node images
     await hydrateCanvasFromServer()
   } catch (error: any) {

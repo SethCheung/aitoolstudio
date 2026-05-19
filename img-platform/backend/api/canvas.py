@@ -92,13 +92,20 @@ def _save_graph(db: Session, document: CanvasDocument, payload: CanvasGraphSave)
 
     # Preserve backend-written output images before frontend overwrites them
     existing_output_images: dict[str, list[dict]] = {}
+    existing_llm_state: dict[str, dict] = {}
     for node in db.query(CanvasNode).filter(
         CanvasNode.document_id == document.id,
-        CanvasNode.type == "output",
+        CanvasNode.type.in_(["output", "llm"]),
     ).all():
         existing_data = dict(node.data or {})
-        if existing_data.get("images"):
+        if node.type == "output" and existing_data.get("images"):
             existing_output_images[node.node_id] = existing_data["images"]
+        if node.type == "llm":
+            existing_llm_state[node.node_id] = {
+                "outputText": existing_data.get("outputText", ""),
+                "status": existing_data.get("status", "idle"),
+                "error": existing_data.get("error", ""),
+            }
 
     db.query(CanvasNode).filter(CanvasNode.document_id == document.id).delete()
     db.query(CanvasEdge).filter(CanvasEdge.document_id == document.id).delete()
@@ -109,6 +116,13 @@ def _save_graph(db: Session, document: CanvasDocument, payload: CanvasGraphSave)
         # Merge preserved images for output nodes
         if node.type == "output" and node.id in existing_output_images:
             data["images"] = existing_output_images[node.id]
+        # Merge preserved LLM state
+        if node.type == "llm" and node.id in existing_llm_state:
+            llm_state = existing_llm_state[node.id]
+            if llm_state.get("outputText"):
+                data["outputText"] = llm_state["outputText"]
+            data["status"] = llm_state.get("status", data.get("status", "idle"))
+            data["error"] = llm_state.get("error", data.get("error", ""))
         db.add(CanvasNode(
             document_id=document.id,
             node_id=node.id,
@@ -271,7 +285,8 @@ async def _run_llm_node_impl(
     # Build user prompt from upstream text + image context
     user_prompt = upstream_text or str(target.data.get("userInput") or "Describe this.")
     if upstream_media:
-        user_prompt = f"[Image context: {len(upstream_media)} image(s) provided]\n{user_prompt}"
+        media_refs = "\n".join(f"[Image {i+1}]: {url}" for i, url in enumerate(upstream_media))
+        user_prompt = f"{user_prompt}\n\n参考图片：\n{media_refs}"
 
     if not user_prompt.strip():
         raise HTTPException(status_code=400, detail="LLM 节点缺输入。请连接上游 Text 节点或填写 userInput。")
