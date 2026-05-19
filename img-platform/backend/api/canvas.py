@@ -427,8 +427,13 @@ async def run_node(
                 content=f"Canvas 节点生成: {prompt[:120]}",
                 results=results_json,
                 model=workflow_id,
+                task_id=f"canvas_run:{run.id}",
             )
             db.add(msg)
+            # 同步更新 Conversation.updated_at，确保项目在列表中按最新活跃时间排序
+            conv = db.query(Conversation).filter(Conversation.id == document.conversation_id).first()
+            if conv:
+                conv.updated_at = func.now()
 
         run.status = "success"
         run.generation_id = generation.id
