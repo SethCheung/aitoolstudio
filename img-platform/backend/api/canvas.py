@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from models.canvas import CanvasDocument, CanvasEdge, CanvasNode, CanvasRun
+from models.conversation import Conversation
 from models.database import get_db
 from models.generation import Generation
 from models.user import User
@@ -73,6 +74,7 @@ def _graph_response(document: CanvasDocument) -> CanvasGraphResponse:
         id=document.id,
         title=document.title,
         description=document.description,
+        conversation_id=document.conversation_id,
         viewport=document.viewport or {},
         nodes=[_node_to_payload(node) for node in document.nodes],
         edges=[_edge_to_payload(edge) for edge in document.edges],
@@ -157,6 +159,44 @@ def _upstream_media(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePayloa
     ]
 
 
+@router.get("/documents/by-conversation/{conversation_id}", response_model=CanvasGraphResponse)
+def get_or_create_by_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get or create CanvasDocument for a conversation. Ownership validated."""
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.user_id == current_user.id)
+        .first()
+    )
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+
+    document = (
+        db.query(CanvasDocument)
+        .filter(
+            CanvasDocument.conversation_id == conversation_id,
+            CanvasDocument.user_id == current_user.id,
+        )
+        .first()
+    )
+    if document:
+        return _graph_response(document)
+
+    document = CanvasDocument(
+        user_id=current_user.id,
+        conversation_id=conversation_id,
+        title=conv.title or "流水线",
+        viewport={},
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    return _graph_response(document)
+
+
 @router.get("/documents", response_model=list[CanvasDocumentSummary])
 def list_documents(
     db: Session = Depends(get_db),
@@ -176,8 +216,20 @@ def create_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    conversation_id = None
+    if payload.conversation_id:
+        conv = (
+            db.query(Conversation)
+            .filter(Conversation.id == payload.conversation_id, Conversation.user_id == current_user.id)
+            .first()
+        )
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+        conversation_id = conv.id
+
     document = CanvasDocument(
         user_id=current_user.id,
+        conversation_id=conversation_id,
         title=payload.title or "流水线",
         description=payload.description,
         viewport={},

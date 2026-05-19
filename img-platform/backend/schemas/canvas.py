@@ -31,6 +31,7 @@ class CanvasEdgePayload(BaseModel):
 class CanvasDocumentCreate(BaseModel):
     title: str = Field(default="流水线", max_length=160)
     description: Optional[str] = None
+    conversation_id: Optional[int] = None
 
 
 class CanvasDocumentSummary(BaseModel):
@@ -54,6 +55,7 @@ class CanvasGraphResponse(BaseModel):
     id: int
     title: str
     description: Optional[str] = None
+    conversation_id: Optional[int] = None
     viewport: dict[str, Any] = Field(default_factory=dict)
     nodes: list[CanvasNodePayload] = Field(default_factory=list)
     edges: list[CanvasEdgePayload] = Field(default_factory=list)

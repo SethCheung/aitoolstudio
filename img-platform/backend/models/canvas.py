@@ -2,17 +2,20 @@ from sqlalchemy import Column, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import relationship
 
 from .database import BaseModel
+from .conversation import Conversation
 
 
 class CanvasDocument(BaseModel):
     __tablename__ = "canvas_documents"
 
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True, index=True)
     title = Column(String(160), nullable=False, default="流水线")
     description = Column(Text, nullable=True)
     viewport = Column(JSON, nullable=False, default=dict)
 
     user = relationship("User")
+    conversation = relationship("Conversation")
     nodes = relationship("CanvasNode", cascade="all, delete-orphan", back_populates="document")
     edges = relationship("CanvasEdge", cascade="all, delete-orphan", back_populates="document")
     runs = relationship("CanvasRun", cascade="all, delete-orphan", back_populates="document")

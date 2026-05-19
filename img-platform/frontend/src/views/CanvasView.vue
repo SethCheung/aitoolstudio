@@ -267,6 +267,16 @@ function scheduleRemoteSave() {
 
 async function loadOrCreateCanvasDocument() {
   try {
+    // If embedded in a project, use the conversation-bound endpoint
+    if (props.embeddedConversationId) {
+      const response = await api.get(
+        `/api/canvas/documents/by-conversation/${props.embeddedConversationId}`
+      )
+      applyRemoteGraph(response.data)
+      canvasSaveState.value = 'saved'
+      return
+    }
+
     const savedId = canvasDocumentId.value
     if (savedId) {
       const response = await api.get(`/api/canvas/documents/${savedId}`)
