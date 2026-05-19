@@ -70,7 +70,7 @@ def list_profiles() -> list[dict]:
     data = _load()
     profiles = []
     for name, profile in data.get("profiles", {}).items():
-        api_key = profile.get("api_key", "")
+        api_key = profile.get("api_key") or ""
         safe_profile = {k: v for k, v in profile.items() if k != "api_key"}
         safe_profile["name"] = name
         safe_profile["api_key_masked"] = "****" + api_key[-4:] if len(api_key) > 4 else "****"

@@ -82,6 +82,10 @@ function newProject() {
   router.push('/generate')
 }
 
+function openCanvas() {
+  router.push('/canvas')
+}
+
 async function logout() {
   auth.logout()
   await router.replace('/login')
@@ -153,6 +157,9 @@ onMounted(fetchProjects)
         <button class="logout-top-btn" type="button" @click="logout">
           退出登录
         </button>
+        <button class="canvas-top-btn" type="button" @click="openCanvas">
+          流水线
+        </button>
         <button class="new-top-btn" type="button" @click="newProject">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M12 5v14M5 12h14"/>
@@ -204,10 +211,10 @@ onMounted(fetchProjects)
       </div>
 
       <div v-else class="projects-grid" :class="{ list: viewMode === 'list' }">
-        <button class="create-card" type="button" @click="newProject">
+        <button class="create-card" type="button" @click="openCanvas">
           <span class="create-plus">+</span>
-          <strong>新建项目</strong>
-          <small>创建空白画布或使用模板开始</small>
+          <strong>新建流水线</strong>
+          <small>用画布节点、工作流和素材开始</small>
         </button>
 
         <div
@@ -337,6 +344,24 @@ onMounted(fetchProjects)
   font-size: 13px;
   font-weight: 720;
   cursor: pointer;
+}
+.canvas-top-btn {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid rgba(0,217,255,0.3);
+  border-radius: 9px;
+  background: rgba(0,217,255,0.1);
+  color: #8eeeff;
+  font-size: 13px;
+  font-weight: 760;
+  cursor: pointer;
+}
+.canvas-top-btn:hover {
+  background: rgba(0,217,255,0.16);
+  border-color: rgba(0,217,255,0.5);
+  color: #fff;
 }
 .logout-top-btn:hover {
   border-color: rgba(255,255,255,0.28);

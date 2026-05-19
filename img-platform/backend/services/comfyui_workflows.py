@@ -356,14 +356,23 @@ def runtime_workflow(
     if expected_category and workflow.get("category") != expected_category:
         raise ValueError(f"Workflow '{workflow.get('name')}' is not a {expected_category} workflow")
 
-    patched = copy.deepcopy(workflow["workflow_json"])
+    raw_workflow = copy.deepcopy(workflow["workflow_json"])
+    patched = {
+        str(node_id): node
+        for node_id, node in raw_workflow.items()
+        if isinstance(node, dict)
+        and isinstance(node.get("class_type"), str)
+        and isinstance(node.get("inputs"), dict)
+    }
+    if not patched:
+        raise ValueError("Workflow does not contain API-format ComfyUI nodes")
     image_width, image_height = _size_for(aspect_ratio, width, height)
     prompt_patched = False
     resolved_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
     resolved_fps = fps or 24
     resolved_frames = max(1, int((duration or 0) * resolved_fps)) if duration else None
 
-    for node in patched.values():
+    for node_id, node in patched.items():
         class_type = node.get("class_type")
         inputs = node.get("inputs", {})
         for key, value in list(inputs.items()):
@@ -379,6 +388,7 @@ def runtime_workflow(
                     "{{seed}}": resolved_seed,
                     "{{batch_size}}": n,
                     "{{n}}": n,
+                    "{{num_frames}}": resolved_frames or max(1, resolved_fps * 5),
                 }
                 if value in numeric_placeholders:
                     inputs[key] = numeric_placeholders[value]
@@ -415,6 +425,62 @@ def runtime_workflow(
                 inputs[key] = duration
             elif resolved_frames and key_lower in {"num_frames", "frames", "frame_count", "length", "video_length"}:
                 inputs[key] = resolved_frames
+
+        if class_type == "LTXVScheduler":
+            inputs.pop("model", None)
+            inputs.setdefault("stretch", True)
+            inputs.setdefault("terminal", 0.1)
+            inputs.setdefault("base_shift", 0.5)
+            inputs.setdefault("max_shift", 1.15)
+        elif class_type == "LTXAVTextEncoderLoader":
+            if "text_encoder_name" in inputs and "text_encoder" not in inputs:
+                inputs["text_encoder"] = inputs["text_encoder_name"]
+            if "ckpt_name" not in inputs:
+                for candidate in patched.values():
+                    candidate_inputs = candidate.get("inputs", {})
+                    if candidate.get("class_type") == "CheckpointLoaderSimple" and candidate_inputs.get("ckpt_name"):
+                        inputs["ckpt_name"] = candidate_inputs["ckpt_name"]
+                        break
+            inputs.setdefault("device", "default")
+        elif class_type == "LTXVBaseSampler":
+            if "frames" in inputs and "num_frames" not in inputs:
+                inputs["num_frames"] = inputs["frames"]
+            if "positive" in inputs and "guider" not in inputs:
+                inputs["guider"] = inputs["positive"]
+            inputs.pop("positive", None)
+            inputs.pop("negative", None)
+            inputs.pop("frames", None)
+            if "vae" not in inputs:
+                for candidate in patched.values():
+                    candidate_inputs = candidate.get("inputs", {})
+                    if candidate.get("class_type") == "VAEDecode" and candidate_inputs.get("samples") == [str(node_id), 0]:
+                        vae = candidate_inputs.get("vae")
+                        if vae:
+                            inputs["vae"] = vae
+                        break
+        elif class_type == "STGGuiderNode":
+            conditioning_ref = inputs.get("conditioning")
+            conditioning = (
+                patched.get(str(conditioning_ref[0]))
+                if isinstance(conditioning_ref, list) and conditioning_ref
+                else None
+            )
+            conditioning_inputs = conditioning.get("inputs", {}) if conditioning else {}
+            if "positive" not in inputs and conditioning_inputs.get("positive"):
+                inputs["positive"] = conditioning_inputs["positive"]
+            if "negative" not in inputs and conditioning_inputs.get("negative"):
+                inputs["negative"] = conditioning_inputs["negative"]
+            if "model" not in inputs:
+                for candidate in patched.values():
+                    candidate_inputs = candidate.get("inputs", {})
+                    if candidate.get("class_type") in {"LTXVBaseSampler", "LTXVScheduler"} and candidate_inputs.get("model"):
+                        inputs["model"] = candidate_inputs["model"]
+                        break
+            inputs.pop("conditioning", None)
+        elif class_type == "VHS_VideoCombine":
+            inputs.setdefault("pingpong", False)
+            inputs.setdefault("loop_count", 0)
+            inputs.setdefault("save_output", True)
 
     if not prompt_patched:
         raise ValueError("Workflow does not contain a supported prompt text input to patch")

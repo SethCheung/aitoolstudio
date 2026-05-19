@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 interface Profile {
   name: string
   api_key_masked?: string
+  auth_type?: string
   base_url?: string
   enabled: boolean
   priority: number
@@ -69,7 +70,7 @@ const modelCategories: Record<Exclude<Category, 'all' | 'users' | 'paths' | 'wor
   voice: ['speech-2.8-hd', 'speech-2.8-turbo', 'speech-2.6-hd', 'speech-2.6-turbo'],
   video: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'S2V-01'],
   music: ['music-2.6', 'music-2.5+', 'music-2.5'],
-  text: ['MiniMax-M2.7'],
+  text: ['MiniMax-M2.7', 'qwen2.5', 'qwen3', 'llama3.1'],
 }
 
 const profiles = ref<Profile[]>([])
@@ -99,6 +100,7 @@ const workflowFormError = ref('')
 const form = ref({
   name: '',
   api_key: '',
+  auth_type: 'http',
   base_url: 'https://api.minimax.io',
   enabled: true,
   priority: 1,
@@ -285,6 +287,7 @@ function openAdd() {
   form.value = {
     name: '',
     api_key: '',
+    auth_type: 'http',
     base_url: 'https://api.minimax.io',
     enabled: true,
     priority: Math.max(1, normalizedProfiles.value.length + 1),
@@ -299,6 +302,7 @@ function openEdit(profile: Profile) {
   form.value = {
     name: profile.name,
     api_key: '',
+    auth_type: profile.auth_type || 'http',
     base_url: profile.base_url || 'https://api.minimax.io',
     enabled: profile.enabled,
     priority: profile.priority,
@@ -313,8 +317,8 @@ async function saveProfile() {
     formError.value = 'Name is required'
     return
   }
-  if (!editingProfile.value && !form.value.api_key.trim()) {
-    formError.value = 'API key is required for new profiles'
+  if (!editingProfile.value && form.value.auth_type === 'http' && !form.value.api_key.trim()) {
+    formError.value = 'API key is required for MiniMax HTTP profiles'
     return
   }
 
@@ -809,6 +813,7 @@ onMounted(() => {
 
           <div class="profile-meta">
             <span>Priority {{ profile.priority }}</span>
+            <span>{{ profile.auth_type || 'http' }}</span>
             <span>{{ profile.api_key_masked || '****' }}</span>
           </div>
 
@@ -1016,11 +1021,19 @@ onMounted(() => {
         </label>
         <label>
           Base URL
-          <input v-model="form.base_url" placeholder="https://api.minimax.io" />
+          <input v-model="form.base_url" placeholder="https://api.minimax.io 或 http://192.168.1.60:11434/v1" />
+        </label>
+        <label>
+          Provider Type
+          <select v-model="form.auth_type">
+            <option value="http">MiniMax HTTP</option>
+            <option value="cli">MiniMax CLI</option>
+            <option value="openai-compatible">OpenAI Compatible / Local</option>
+          </select>
         </label>
         <label>
           API Key
-          <input v-model="form.api_key" type="password" placeholder="sk-..." />
+          <input v-model="form.api_key" type="password" placeholder="本地 OpenAI-compatible 可留空" />
         </label>
 
         <div class="form-row">

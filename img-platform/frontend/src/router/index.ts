@@ -22,6 +22,17 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/canvas',
+      name: 'canvas',
+      component: () => import('../views/CanvasView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/pipeline',
+      redirect: '/canvas',
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/history',
       name: 'history',
       component: () => import('../views/HistoryView.vue'),

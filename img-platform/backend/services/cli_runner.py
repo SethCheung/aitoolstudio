@@ -137,6 +137,44 @@ async def optimize_prompt(
     }
 
 
+async def chat_text(
+    prompt: str,
+    system_prompt: str,
+    model: str = "MiniMax-M2.7",
+) -> dict:
+    """通过 mmx CLI 调用通用文本聊天。"""
+    cmd = ["mmx", "text", "chat", "--system", system_prompt, "--message", prompt]
+    if model:
+        cmd.extend(["--model", model])
+    out = await asyncio.get_event_loop().run_in_executor(None, _run_sync, cmd, 120)
+    answer = out.strip()
+    try:
+        data = json.loads(answer)
+        content = data.get("content", "")
+        if isinstance(content, list):
+            answer = "\n".join(
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            ).strip()
+        elif isinstance(content, str):
+            answer = content.strip()
+    except json.JSONDecodeError:
+        pass
+
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": answer,
+                    "role": "assistant",
+                }
+            }
+        ],
+        "base_resp": {"status_code": 0, "status_msg": "success"},
+    }
+
+
 async def generate_image(
     prompt: str,
     model: str = "image-01",

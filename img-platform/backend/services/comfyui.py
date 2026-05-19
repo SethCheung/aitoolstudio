@@ -299,7 +299,11 @@ def _workflow_with_seed(workflow: dict, seed: int) -> dict:
 
 async def _queue_workflow(client: httpx.AsyncClient, base_url: str, workflow: dict) -> str:
     queue_resp = await client.post(f"{base_url}/prompt", json={"prompt": workflow})
-    queue_resp.raise_for_status()
+    try:
+        queue_resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = queue_resp.text[:2000] if queue_resp.text else str(exc)
+        raise ValueError(f"ComfyUI rejected workflow: {detail}") from exc
     queued = queue_resp.json()
     if "error" in queued:
         raise ValueError(str(queued.get("error")))

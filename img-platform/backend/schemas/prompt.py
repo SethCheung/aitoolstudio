@@ -13,3 +13,13 @@ class PromptOptimizeResponse(BaseModel):
     optimized_prompt: str
     model: str
     target: str
+
+
+class CanvasAgentRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=3000, description="画布状态和用户问题摘要")
+    model: str = Field(default="MiniMax-M2.7", description="用于流水线助手的文本模型")
+
+
+class CanvasAgentResponse(BaseModel):
+    answer: str
+    model: str

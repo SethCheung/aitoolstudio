@@ -27,6 +27,9 @@ services:
       - MINIMAX_OUTPUT_DIR=/root/minimax-output
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - COMFYUI_BASE_URL=${COMFYUI_BASE_URL:-http://192.168.1.195:8188}
+      - FIRE_CANVAS_FRONTEND_TOKEN=${FIRE_CANVAS_FRONTEND_TOKEN:-fire-canvas-intranet}
+      - FIRE_CANVAS_API_KEY=${FIRE_CANVAS_API_KEY:-}
       - COMFYUI_GENERATION_TIMEOUT=900
       - COMFYUI_WORKFLOW_IMPORT_DIR=/app/workflow-imports
     restart: unless-stopped

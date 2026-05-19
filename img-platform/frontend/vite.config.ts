@@ -22,12 +22,34 @@ export default defineConfig(() => {
           target: apiBaseUrl,
           changeOrigin: true,
         },
+        '/images': {
+          target: apiBaseUrl,
+          changeOrigin: true,
+        },
+        '/videos': {
+          target: apiBaseUrl,
+          changeOrigin: true,
+        },
+        '/chat': {
+          target: apiBaseUrl,
+          changeOrigin: true,
+        },
         '/minimax-output': {
           target: apiBaseUrl,
           changeOrigin: true,
           rewrite: (path) => path,
         },
         '/uploads': {
+          target: apiBaseUrl,
+          changeOrigin: true,
+          rewrite: (path) => path,
+        },
+        '/docs': {
+          target: apiBaseUrl,
+          changeOrigin: true,
+          rewrite: (path) => path,
+        },
+        '/openapi.json': {
           target: apiBaseUrl,
           changeOrigin: true,
           rewrite: (path) => path,

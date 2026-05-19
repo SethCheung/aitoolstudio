@@ -45,6 +45,67 @@
 - `DATABASE_URL` 已环境化，但 `create_engine` 仍无条件传 SQLite 专用 `connect_args`
 - Generate 页的“取消生成”目前主要中断前端请求等待；如果后端/模型已开始执行，仍需服务端任务取消能力才能真正停止外部生成
 
+## 当前迭代：RunningHub/RHTV 风格流水线画布
+
+**交付内容**：
+- 新增 `/canvas` 路由，提供黑色点阵无限画布、拖拽节点、缩放、连线和视图重置能力。
+- 左侧悬浮工具栏包含素材和工作流入口；“工作流”tab 打开模板库。
+- 工作流模板库不写死外部示例，必须读取现有 `/api/comfyui/workflows` enabled workflow，按 category 过滤并插入 Workflow 节点。
+- 支持 Text / Media / Workflow / Video 节点；选中节点后显示 RunningHub 风格底部生成输入框，可编辑 prompt、模式、模型、规格和数量；内网版本不展示计费或扣费。
+- 右下角新增 Agent 助手，通过 `/api/prompt/canvas-agent` + `MiniMax-M2.7` 读取画布状态并输出中文下一步搭建建议。
+- Canvas Agent 和 Prompt Enhance 除 MiniMax 外，必须支持管理员配置 OpenAI-compatible 本地文本模型，例如 `http://192.168.1.60:11434/v1` 的 Ollama/LM Studio/vLLM 服务。
+- 画布节点、边、运行状态和结果优先保存到 `/api/canvas/documents`，localStorage 只作为未登录或接口失败时的降级缓存。
+- Workflow / Video 节点通过服务端画布运行接口执行，后端负责收集上游 Text / Media、调用本地 ComfyUI workflow、写入 Generation / CanvasRun，并将输出作为可复用结果节点展示。
+- 统一入口使用 `http://192.168.1.60:5173`：开发时 Vite 代理 `/api`、`/uploads`、`/docs`，Docker/生产时 Nginx 反代后端，`/canvas/` 尾斜杠不得 404。
+- 内置第一版“电商套图模板”：产品信息 + 产品图 → 模特图 / 侧面展示 / 俯瞰展示。
+
+**关键文件**：
+- `img-platform/frontend/package.json`
+- `img-platform/frontend/src/router/index.ts`
+- `img-platform/frontend/src/views/HomeView.vue`
+- `img-platform/frontend/src/views/CanvasView.vue`
+- `img-platform/backend/api/canvas.py`
+- `img-platform/backend/models/canvas.py`
+- `img-platform/backend/schemas/canvas.py`
+
+**验收标准**：
+- `npm run build` 通过。
+- 登录后可访问 `/canvas`。
+- 访问 `http://192.168.1.60:5173/canvas/` 时仍加载同一个 Vue 页面，接口请求保持同源 `/api/...`。
+- 工作流 tab 能展示后端已有 enabled ComfyUI workflow，并可插入画布节点。
+- Text / Media 节点可连到 Workflow/Video 节点，运行时按连线顺序注入 prompt 和参考图。
+- Workflow 节点运行后能返回图片/视频 URL、更新节点状态，并在右侧生成可继续连线的结果 Media 节点。
+- 管理员可新增 OpenAI-compatible Profile，把本地文本模型加入 `text` 分类，Canvas Agent 可以不依赖 MiniMax 文本模型运行。
+
+---
+
+## 下一迭代：项目内对话 / Canvas 双模式切换
+
+**需求文档**：
+- `docs/project-workspace-canvas-chat-switch.md`
+
+**交付内容**：
+- 新增统一项目工作台路由 `/project/:conversationId`，通过 `mode=chat|canvas` 在对话模式和 Canvas 模式之间切换。
+- `CanvasDocument` 绑定 `conversation_id`，同一个项目默认拥有一个主 Canvas 文档。
+- 对话生成结果支持发送到 Canvas，作为 Media 节点继续连接 workflow。
+- Canvas 运行结果必须绑定当前项目历史，切回对话模式后能看到。
+- 保持旧 `/generate?convId=...` 和 `/canvas` 入口兼容，不要破坏已跑通链路。
+
+**任务拆分**：
+- Task 1：项目工作台路由和壳层。
+- Task 2：CanvasDocument 绑定 conversation。
+- Task 3：Canvas 运行结果写回项目历史。
+- Task 4：对话结果发送到 Canvas。
+- Task 5：兼容与回归验证。
+
+**验收标准**：
+- 首页项目卡片进入统一项目工作台。
+- 同一项目内可无损切换对话和 Canvas。
+- 每个项目拥有自己的 CanvasDocument。
+- 对话图片可发送为 Canvas Media 节点。
+- Canvas 结果可回到对话历史和首页缩略图。
+- `npm run build` 和 `python3 -m compileall api services models schemas main.py` 通过。
+
 ---
 
 ## Phase 1: 项目骨架（Vue 3 + FastAPI + SQLite）

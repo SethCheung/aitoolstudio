@@ -21,6 +21,9 @@ from api.prompt import router as prompt_router
 from api.generation import router as generation_router
 from api.conversation import router as conversation_router
 from api.comfyui import router as comfyui_router
+from api.canvas import router as canvas_router
+from api.compat import router as compat_router
+import models.canvas
 from models.database import init_db
 from services.storage import ensure_dir, get_minimax_output_root, get_upload_root
 
@@ -42,8 +45,9 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://192.168.1.60:5173",
     ],
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1|192\.168\.1\.\d+):\d+$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -68,6 +72,8 @@ app.include_router(prompt_router)
 app.include_router(generation_router)
 app.include_router(profiles_router)
 app.include_router(comfyui_router)
+app.include_router(canvas_router)
+app.include_router(compat_router)
 
 # 挂载静态文件（语音文件等）
 UPLOAD_DIR = ensure_dir(get_upload_root())

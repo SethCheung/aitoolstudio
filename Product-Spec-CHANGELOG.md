@@ -1,5 +1,50 @@
 # Product Spec 变更记录
 
+## v1.19 - 2026-05-19
+
+**规划项目内对话 / Canvas 双模式工作台**
+
+### 变更内容
+- 新增需求交接文档：`docs/project-workspace-canvas-chat-switch.md`。
+- 明确同一个项目下必须支持对话模式和 Canvas 模式切换。
+- 明确 `CanvasDocument` 应绑定 `conversation_id`，每个项目默认拥有自己的主 Canvas 文档。
+- 明确对话生成结果可发送到 Canvas 作为 Media 节点。
+- 明确 Canvas 运行结果必须回写到当前项目历史，切回对话模式后可见。
+
+### 设计原则
+- 本轮目标是打通上下文，不重写 Generate 和 Canvas 的核心生成逻辑。
+- 旧 `/generate` 和 `/canvas` 入口必须兼容，不能为了新工作台把已跑通链路拆坏。
+
+---
+
+## v1.18 - 2026-05-18
+
+**流水线画布接入服务端运行模型**
+
+### 变更内容
+- `/canvas` 从纯 localStorage 原型升级为服务端画布文档：节点、连线、运行状态和结果可通过 `/api/canvas/documents` 保存。
+- Workflow / Video 节点运行改为走 `/api/canvas/documents/{id}/nodes/{node_id}/run`，后端负责收集上游 Text / Media、注入现有 ComfyUI workflow、写入 Generation 和 CanvasRun 记录。
+- 新增电商套图模板：产品信息 + 产品图 + 三组提示词，一键生成模特图、侧面展示图、俯瞰展示图的工作流骨架。
+- 参考 huobao-canvas / Tapnow / AICON 的方向，但不直接复制代码：前端借鉴节点编排和结果节点，后端借鉴模板参数映射和运行记录。
+
+### 设计原则
+- 画布必须以本地 ComfyUI workflow 为执行基准，外部项目只提供产品结构启发。
+- 第一阶段只做单个 Workflow 节点的服务端执行闭环；真正的多节点 DAG 队列、参数映射 UI 和运行中 SSE 后续拆开做。
+
+## v1.17 - 2026-05-15
+
+**新增 RunningHub/RHTV 风格流水线画布**
+
+### 变更内容
+- 新增 `/canvas` 流水线无限画布需求，对标 RunningHub/RHTV 的画布、节点、连线、左侧 tab 和底部节点输入框交互。
+- “工作流”tab 必须结合现有 ComfyUI workflows：读取 `/api/comfyui/workflows` 的 enabled workflow，按 category 展示并插入 Workflow 节点。
+- 选中 Video / Workflow 节点后，下方展示生成输入框：模式标签、素材库入口、prompt 输入、模型/规格/数量和提交任务按钮；内网版本不展示计费或扣费。
+- 右下角新增流水线 Agent 助手：基于当前画布状态和现有 workflows，通过 `/api/prompt/canvas-agent` 调用 MiniMax 文本能力提示用户下一步应该怎么搭建，回答必须中文、短、具体。
+
+### 设计原则
+- RunningHub 只作为交互参照，数据源必须是本平台现有 workflow 管理体系。
+- 第一版先完成画布编辑和节点配置；跨节点执行 ComfyUI 编排后续单独做，不要假装已经全闭环。
+
 ## v1.16 - 2026-05-07
 
 **新增 ERNIE Image 内置 Workflow 模板**
@@ -319,6 +364,23 @@
 - 用户要的是“涂哪里改哪里”，不是学习 ComfyUI 的 mask 术语
 - 局部重绘入口必须以原图为中心，重绘方式要明确可切换
 - 报错必须能定位，笼统失败提示等于没提示
+
+---
+
+## v1.11 - 2026-05-19
+
+**统一 `/canvas` 内网入口并支持本地文本模型**
+
+### 变更内容
+- 明确 `http://192.168.1.60:5173` 是主站、`/canvas`、`/api`、`/uploads` 和 `/docs` 的统一入口。
+- `/canvas/` 尾斜杠路径在 Docker/Nginx 下回退到主 SPA，不再指向不存在的 `/canvas/index.html`。
+- Docker 后端显式读取 `COMFYUI_BASE_URL`，默认仍指向 `http://192.168.1.195:8188`。
+- Profile 新增 `openai-compatible` 类型，支持 Ollama / LM Studio / vLLM 等本地 `/v1/chat/completions` 服务。
+- Canvas Agent 和 Prompt Enhance 可使用本地文本模型，不再只能走 MiniMax 文本模型。
+
+### 设计原则
+- 入口必须同源，内网用户只记一个地址；别让浏览器自己猜 `localhost` 是谁。
+- 本地模型分两层：图片/视频生成走本地 ComfyUI workflow，文本助手走 OpenAI-compatible 本地 LLM。
 
 ---
 

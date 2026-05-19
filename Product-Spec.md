@@ -29,6 +29,9 @@
 | **ComfyUI GPU 状态** | `comfyui-local` 状态条展示在线状态、VRAM 已用/总量、占用百分比和 Torch VRAM，生成中每 2 秒刷新，帮助用户判断本地 GPU 是否正在工作 |
 | **ComfyUI Upscale** | 图片结果中的 Upscale 按钮接入 ComfyUI 原生 `ImageScale` 工作流，默认 2x `lanczos` 放大，结果作为新生成记录展示 |
 | **Flux 局部重绘** | 用户选择 `Flux 局部重绘` workflow 后上传原图，默认在居中的图片画布上直接涂抹要修改的区域；也可切换为点选目标，由后端生成 SAM 提示遮罩后提交 ComfyUI |
+| **流水线无限画布（进行中）** | 新增 RunningHub/RHTV 风格的 `/canvas` 流水线工作台，使用无限画布承载 Text / Media / Workflow / Video 节点；左侧“工作流”tab 必须读取平台现有 `/api/comfyui/workflows`，按已启用 ComfyUI workflow 生成可插入节点；画布文档、节点、连线、运行记录和结果由 `/api/canvas` 保存，不能和后台 workflow 管理割裂 |
+| **统一内网入口** | 主站、`/canvas`、`/api`、`/uploads`、`/docs` 必须可通过 `http://192.168.1.60:5173` 同源访问；开发环境由 Vite 代理后端，Docker/生产环境由 Nginx 反代后端，避免浏览器请求用户电脑自己的 `localhost` |
+| **项目内双模式工作台（待实现）** | 同一个项目中支持对话模式和 Canvas 模式切换；对话生成结果可发送到 Canvas 作为 Media 节点，Canvas 运行结果也必须回写到当前项目历史 |
 | **视频生成参数面板** | video 分类对齐 MiniMax 官方视频调试方案，支持文生视频、首帧图生视频、首尾帧视频、主体参考视频、官方 Prompt 优化、快速预处理、时长和分辨率 |
 | **语音生成参数面板** | voice 分类对齐 MiniMax 官方同步语音调试台，支持模型、音色、情绪、语速、音量、音调、格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典、声音效果和语气词标签 |
 | **音乐生成参数面板** | music 分类对齐 MiniMax 官方音乐调试台，支持歌曲模板、歌词结构标签、风格描述、歌词、纯音乐模式、AI 歌词优化、采样率、比特率、音频格式、返回格式、Seed 和 AI 音频水印 |
@@ -91,6 +94,10 @@
 |------|------|
 | **账号登录** | 管理员创建账号，用户输入用户名 + 密码登录后看到所有项目和个人历史 |
 | **工作流选择** | 下拉框选择管理员预设的工作流，显示工作流名称和简要说明 |
+| **流水线工作流选择** | 用户在 `/canvas` 左侧“工作流”tab 选择现有 ComfyUI workflow → 系统在画布中插入对应 Workflow 节点 → 节点展示分类、节点数量、说明和备注，并可与 Text / Media 节点连线；执行时后端读取节点绑定的 `workflow_id`、上游 Text 和 Media，提交本地 ComfyUI 并生成结果节点 |
+| **节点生成输入框** | 用户选中 Video / Workflow 节点后，画布下方展示 RunningHub 风格生成输入框：顶部模式标签（如“全能参考”“文生视频”）、素材库入口、中间 prompt 输入区、底部模型/规格/数量/提交任务按钮；输入框参数必须结合节点绑定的 workflow/category，并通过 `/api/canvas/documents/{id}/nodes/{node_id}/run` 写入运行记录。平台为公司内网使用，不展示计费或扣费逻辑 |
+| **电商套图模板** | 用户从工作流面板选择“电商套图模板” → 系统生成产品信息 Text、产品图 Media、模特/侧面/俯瞰提示词和三个 Workflow 节点 → 用户补产品图和文案后逐个运行节点，得到可继续接入下游的结果节点 |
+| **流水线 Agent 助手** | `/canvas` 右下角提供 Agent 助手入口，读取当前画布节点、连线、选中节点和可用 workflow 摘要，通过 `/api/prompt/canvas-agent` 调用 MiniMax 文本模型给用户下一步建议、prompt 改写方向和 workflow 选择提示；回答必须中文、短、具体 |
 | **参数调节** | 滑动条/输入框调整采样步数、CFG、种子等 ComfyUI 参数（可选显示） |
 | **生成队列** | 多用户同时生成时显示排队状态，预估等待时间 |
 | **下载/分享** | 单张或批量下载 PNG 格式，支持复制链接分享给团队成员 |
@@ -169,6 +176,13 @@
 3. 点击项目卡片进入 Generate 页面，继续生成或查看历史结果
 4. 在生成页点击任意图片缩略图可放大查看原图
 
+### 项目内对话 / Canvas 切换（待实现）
+1. 用户从首页点击某个项目，进入统一项目工作台
+2. 默认展示对话模式，用户可以继续使用原 Generate 工作台生成内容
+3. 用户点击 Canvas 模式，同一个项目下加载或创建对应 CanvasDocument
+4. 对话中的图片结果可一键发送到 Canvas，成为可继续连接 workflow 的 Media 节点
+5. Canvas 运行 workflow 后，结果保存回当前项目历史，切回对话模式后可看到
+
 ## AI 能力需求
 
 | 能力类型 | 用途说明 | 应用位置 |
@@ -180,6 +194,7 @@
 | **视频生成（MiniMax Hailuo）** | 使用 MiniMax 异步视频 API，支持 `MiniMax-Hailuo-2.3`、`MiniMax-Hailuo-2.3-Fast`、`MiniMax-Hailuo-02`、`S2V-01`，覆盖文本、首帧、首尾帧和主体参考模式 | 用户切换分类为 video 时调用；生成完成后下载到本地并展示播放器 |
 | **音乐生成（MiniMax Music）** | 使用 MiniMax 音乐生成 API，把歌词和风格描述转成完整音乐；支持 music-2.6 / music-cover / music-2.5+ / music-2.5、纯音乐、AI 歌词优化、Seed 复现、Hex/URL 返回 | 用户切换分类为 music 时调用；生成结果保存为本地音频并展示播放器 |
 | **图像生成（ComfyUI + 本地 GPU）** | 主力生图引擎；当前已支持默认文生图直连，后续扩展工作流、LoRA、ControlNet 等能力 | `comfyui-local` 模型入口；完整管理员预设工作流管理仍待实现 |
+| **本地文本模型（OpenAI-compatible）** | 可选用于 Canvas Agent 和 Prompt Enhance，连接 Ollama / LM Studio / vLLM 等本地 `/v1/chat/completions` 兼容服务 | 管理员在 Profile 中选择 `openai-compatible`，填写内网 Base URL 和模型 ID |
 
 ## 技术方向
 
@@ -220,7 +235,8 @@
 | 默认文生图 | `POST /api/image/generate`，模型为 `comfyui-local` | 后端构造默认 API-format 工作流，提交到 ComfyUI `/prompt` |
 | 图片放大 | `POST /api/image/upscale` → ComfyUI `LoadImage/ImageScale/SaveImage` | 当前为 2x `lanczos` 几何放大，不是 ESRGAN/模型超分 |
 | 结果归档 | 轮询 `/history/{prompt_id}`，再通过 `/view` 拉取输出图 | 图片保存到本平台 `/uploads/comfyui`，沿用现有生成记录流和原图预览 |
-| 暂不支持 | 参考图、inpainting、ControlNet、LoRA、管理员工作流上传和参数映射 | 这些必须等工作流管理闭环完成，别装成已经有 |
+| 流水线画布运行 | `POST /api/canvas/documents/{id}/nodes/{node_id}/run` | Workflow / Video 节点读取上游 Text 和 Media，提交本地 ComfyUI workflow，并把结果保存为可继续连线的 Media 节点 |
+| 暂不支持 | ControlNet、LoRA、完整参数映射和服务端队列取消 | 这些仍需后续工作流管理闭环，不装成已经有 |
 
 ### 性能要求
 | 指标 | 目标值 |

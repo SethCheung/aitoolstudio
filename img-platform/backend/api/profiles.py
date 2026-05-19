@@ -21,7 +21,8 @@ router = APIRouter(prefix="/api/profiles", tags=["Profile 管理"])
 
 class ProfileCreateRequest(BaseModel):
     name: str
-    api_key: str
+    api_key: str = ""
+    auth_type: str = "http"
     base_url: str = "https://api.minimax.io"
     enabled: bool = True
     priority: int = 99
@@ -34,6 +35,7 @@ class ProfileCreateRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
+    auth_type: Optional[str] = None
     base_url: Optional[str] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None
@@ -80,6 +82,7 @@ async def create(req: ProfileCreateRequest, _: User = Depends(require_admin)):
         profile = add_profile(req.name, {
             "name": req.name,
             "api_key": req.api_key,
+            "auth_type": req.auth_type,
             "base_url": req.base_url,
             "enabled": req.enabled,
             "priority": req.priority,

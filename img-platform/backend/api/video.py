@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 import sys, os, logging, httpx, uuid
 from pathlib import Path
 from urllib.parse import urlparse
+from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from core.security import decode_access_token
 from schemas.video import VideoGenerateRequest
 from schemas.generation import GenerationResponse
 from services.minimax import (
@@ -24,8 +27,41 @@ from api.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/video", tags=["视频生成"])
+optional_security = HTTPBearer(auto_error=False)
 
 UPLOAD_DIR = upload_category_dir("videos")
+
+
+def get_video_request_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """Accept normal JWTs plus the backend-owned Fire Canvas frontend token."""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authenticated",
+        )
+
+    token = credentials.credentials
+    fire_canvas_token = os.getenv("FIRE_CANVAS_FRONTEND_TOKEN", "")
+    if fire_canvas_token and token == fire_canvas_token:
+        return None
+
+    token_data = decode_access_token(token)
+    if token_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token 无效或已过期",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.id == token_data.user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户不存在",
+        )
+    return user
 
 
 def normalize_video_status(status: str | int | None) -> str:
@@ -69,7 +105,7 @@ async def save_video_from_url(download_url: str, filename: str = "") -> str:
 async def generate(
     req: VideoGenerateRequest,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: Optional[User] = Depends(get_video_request_user),
 ):
     """文生视频 — 按模型路由到对应 profile，返回 task_id（需轮询 /api/video/status）"""
     if req.model == "comfyui-local-video":
@@ -110,6 +146,7 @@ async def generate(
             video_duration=str(req.duration),
             n_generated=1,
             mini_max_id=result.get("id", ""),
+            user_id=_current_user.id if _current_user else None,
         )
         db.add(gen)
         db.commit()
@@ -120,6 +157,9 @@ async def generate(
             "type": "video",
             "task_id": result.get("id", ""),
             "status": "success",
+            "url": video_url,
+            "data": {"url": video_url},
+            "content": {"video_url": video_url},
             "prompt": req.prompt,
             "image_urls": [],
             "audio_url": None,
@@ -215,7 +255,7 @@ async def generate(
 async def video_status(
     task_id: str,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: Optional[User] = Depends(get_video_request_user),
 ):
     """轮询视频生成状态；成功后用 file_id 下载并归档到本地 uploads。"""
     gen = db.query(Generation).filter(Generation.mini_max_id == task_id).first()

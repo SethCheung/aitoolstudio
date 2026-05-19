@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
+from typing import Optional
 import sys, os, logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from core.security import decode_access_token
 from schemas.image import ImageGenerateRequest, ImageUpscaleRequest
 from schemas.generation import GenerationResponse
 from services.minimax import generate_image as http_generate_image
@@ -17,6 +20,39 @@ from api.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/image", tags=["图像生成"])
+optional_security = HTTPBearer(auto_error=False)
+
+
+def get_image_request_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """Accept normal JWTs plus the backend-owned Fire Canvas frontend token."""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authenticated",
+        )
+
+    token = credentials.credentials
+    fire_canvas_token = os.getenv("FIRE_CANVAS_FRONTEND_TOKEN", "")
+    if fire_canvas_token and token == fire_canvas_token:
+        return None
+
+    token_data = decode_access_token(token)
+    if token_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token 无效或已过期",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.id == token_data.user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户不存在",
+        )
+    return user
 
 
 @router.post("/upscale", response_model=GenerationResponse)
@@ -72,22 +108,30 @@ async def upscale(
 async def generate(
     req: ImageGenerateRequest,
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: Optional[User] = Depends(get_image_request_user),
 ):
     """文生图 — 按模型自动路由到对应 profile"""
     if req.model == "comfyui-local":
         reference_images = [item.image_file for item in req.subject_reference]
         try:
-            workflow = runtime_workflow(
-                workflow_id=req.comfyui_workflow_id,
-                prompt=req.prompt,
-                aspect_ratio=req.aspect_ratio,
-                width=req.width,
-                height=req.height,
-                n=req.n,
-                seed=req.seed,
-                checkpoint=req.comfyui_checkpoint,
-            ) if req.comfyui_workflow_id else None
+            workflow = None
+            if req.comfyui_workflow_id:
+                try:
+                    workflow = runtime_workflow(
+                        workflow_id=req.comfyui_workflow_id,
+                        prompt=req.prompt,
+                        aspect_ratio=req.aspect_ratio,
+                        width=req.width,
+                        height=req.height,
+                        n=req.n,
+                        seed=req.seed,
+                        checkpoint=req.comfyui_checkpoint,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Unknown ComfyUI workflow '%s'; falling back to default image workflow",
+                        req.comfyui_workflow_id,
+                    )
             result = await comfyui_generate_image(
                 prompt=req.prompt,
                 aspect_ratio=req.aspect_ratio,
@@ -114,7 +158,7 @@ async def generate(
             aspect_ratio=req.aspect_ratio,
             n_generated=len(image_urls),
             mini_max_id=result.get("id", ""),
-            user_id=_current_user.id,
+            user_id=_current_user.id if _current_user else None,
         )
         db.add(gen)
         db.commit()

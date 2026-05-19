@@ -10,6 +10,40 @@ DEFAULT_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 DEFAULT_BASE_URL = "https://api.minimax.io"
 
 
+def _clean_base_url(base_url: str) -> str:
+    return base_url.rstrip("/")
+
+
+async def chat_text_openai_compatible(
+    prompt: str,
+    system_prompt: str,
+    model: str,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> dict:
+    """Call a local or self-hosted OpenAI-compatible chat completion endpoint."""
+    url = _clean_base_url(base_url or os.getenv("LOCAL_TEXT_BASE_URL", "http://localhost:11434/v1"))
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        resp = await client.post(
+            f"{url}/chat/completions",
+            headers=headers,
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 def _optimizer_instruction_for(target: str, generation_model: Optional[str] = None) -> str:
     normalized = target.lower().strip()
     is_comfy = generation_model and "comfyui" in generation_model.lower()
@@ -88,6 +122,67 @@ async def optimize_prompt(
                 "messages": [
                     {"role": "system", "name": "prompt_engineer", "content": system_prompt},
                     {"role": "user", "name": "user", "content": user_prompt},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def optimize_prompt_openai_compatible(
+    prompt: str,
+    model: str = "qwen2.5",
+    target: str = "image",
+    generation_model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> dict:
+    system_prompt = (
+        "You are a prompt engineer for an internal creative AI platform. "
+        "Rewrite the user's short request into one polished prompt for the target generation model. "
+        "Preserve the user's intent and concrete details. Do not add unsafe, branded, or unrelated content. "
+        "Return only the optimized prompt, with no headings, quotes, markdown, or explanations."
+    )
+    user_prompt = (
+        f"Target generation type: {target}\n"
+        f"User request: {prompt}\n\n"
+        f"{_optimizer_instruction_for(target, generation_model)}\n"
+        "Write one concise, vivid prompt for that exact target type."
+    )
+    return await chat_text_openai_compatible(
+        prompt=user_prompt,
+        system_prompt=system_prompt,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+    )
+
+
+async def chat_text(
+    prompt: str,
+    system_prompt: str,
+    model: str = "MiniMax-M2.7",
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> dict:
+    """调用 MiniMax 文本模型返回通用文本回答。"""
+    key = api_key or DEFAULT_API_KEY
+    url = base_url or DEFAULT_BASE_URL
+    if not key:
+        raise ValueError("MINIMAX_API_KEY not configured")
+
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        resp = await client.post(
+            f"{url}/v1/text/chatcompletion_v2",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "name": "canvas_agent", "content": system_prompt},
+                    {"role": "user", "name": "user", "content": prompt},
                 ],
             },
         )
