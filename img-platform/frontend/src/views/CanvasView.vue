@@ -18,7 +18,7 @@ import {
 import '@vue-flow/core/dist/style.css'
 import api from '@/services/api'
 
-type CanvasNodeType = 'text' | 'media' | 'workflow' | 'video' | 'output'
+type CanvasNodeType = 'text' | 'media' | 'workflow' | 'video' | 'output' | 'llm'
 type RunStatus = 'idle' | 'running' | 'success' | 'error'
 
 interface ComfyWorkflow {
@@ -50,6 +50,13 @@ interface CanvasNodeData {
   error?: string
   results?: string[]
   images?: { url: string; run_id?: number; generation_id?: number; source_node_id?: string; prompt?: string; created_at?: string }[]
+  systemPrompt?: string
+  outputText?: string
+  sourceRunId?: number
+  sourceGenerationId?: number
+  sourceNodeId?: string
+  sourcePrompt?: string
+  sourceCreatedAt?: string
 }
 
 interface SavedCanvas {
@@ -135,7 +142,7 @@ const edges = ref<any[]>([
 
 const selectedNode = computed((): any => nodes.value.find((node) => node.id === selectedNodeId.value) || null)
 const selectedData = computed((): CanvasNodeData | undefined => selectedNode.value?.data)
-const selectedCanRun = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video')
+const selectedCanRun = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video' || selectedNode.value?.type === 'llm')
 const selectedIsMedia = computed(() => selectedNode.value?.type === 'media')
 const selectedIncomingPairs = computed(() => selectedNode.value ? incomingNodePairs(selectedNode.value.id) : [])
 const nodeStats = computed(() => ({
@@ -143,6 +150,7 @@ const nodeStats = computed(() => ({
   media: nodes.value.filter((node) => node.type === 'media').length,
   workflow: nodes.value.filter((node) => node.type === 'workflow' || node.type === 'video').length,
   output: nodes.value.filter((node) => node.type === 'output').length,
+  llm: nodes.value.filter((node) => node.type === 'llm').length,
   edges: edges.value.length,
 }))
 const resultHistory = computed(() => nodes.value
@@ -389,18 +397,20 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
         results: [],
       }
     : {
-        title: type === 'text' ? 'Text' : type === 'video' ? 'Video' : type === 'output' ? 'Output' : 'Media',
-        body: type === 'text' ? '输入提示词，连接到下游工作流。' : '',
-        hint: type === 'media' ? '上传或引用素材后连接到工作流节点' : type === 'output' ? '收集生成结果' : '选中节点后在下方配置并生成',
-        mode: type === 'video' ? '文生视频' : type === 'output' ? '结果容器' : '全能参考',
-        model: type === 'video' ? 'Seedance2.0' : type === 'output' ? '—' : 'ComfyUI',
-        spec: type === 'video' ? '480p / 5s / 是 / 自适应 / 否' : type === 'output' ? '—' : '默认参数',
+        title: type === 'text' ? 'Text' : type === 'video' ? 'Video' : type === 'output' ? 'Output' : type === 'llm' ? 'LLM' : 'Media',
+        body: type === 'text' ? '输入提示词，连接到下游工作流。' : type === 'llm' ? 'LLM 处理节点' : '',
+        hint: type === 'media' ? '上传或引用素材后连接到工作流节点' : type === 'output' ? '收集生成结果' : type === 'llm' ? '连接上游 Text/Media，运行后输出文本给下游' : '选中节点后在下方配置并生成',
+        mode: type === 'video' ? '文生视频' : type === 'output' ? '结果容器' : type === 'llm' ? 'LLM' : '全能参考',
+        model: type === 'video' ? 'Seedance2.0' : type === 'output' ? '—' : type === 'llm' ? 'MiniMax-M2.7' : 'ComfyUI',
+        spec: type === 'video' ? '480p / 5s / 是 / 自适应 / 否' : type === 'output' ? '—' : type === 'llm' ? 'Node 模式' : '默认参数',
         quantity: 1,
         aspectRatio: type === 'video' ? '16:9' : '1:1',
         seed: null,
         status: 'idle',
         results: [],
         images: type === 'output' ? [] : undefined,
+        systemPrompt: type === 'llm' ? 'You are a helpful assistant.' : undefined,
+        outputText: type === 'llm' ? '' : undefined,
       }
   nodes.value = [...nodes.value, { id, type, position: base, data }]
   selectNode(id)
@@ -948,6 +958,24 @@ watch([nodes, edges], persistCanvas, { deep: true })
           </div>
         </div>
       </template>
+
+      <template #node-llm="{ data, id, selected }">
+        <div class="flow-node llm-node" :class="{ selected }" @click.stop="selectNode(id)">
+          <Handle type="target" :position="Position.Left" />
+          <Handle type="source" :position="Position.Right" />
+          <div class="node-label">LLM</div>
+          <div class="node-card">
+            <span class="status-chip" :class="data.status || 'idle'">{{ data.status || 'idle' }}</span>
+            <strong>{{ data.title }}</strong>
+            <div v-if="data.outputText" class="llm-output">
+              <p>{{ data.outputText.slice(0, 180) }}{{ data.outputText.length > 180 ? '…' : '' }}</p>
+            </div>
+            <p v-else class="llm-empty">运行 LLM 节点后，输出文本会显示在这里，并可传下游 workflow。</p>
+            <p v-if="data.error" class="node-error">{{ data.error }}</p>
+            <small>{{ data.model || 'MiniMax-M2.7' }}</small>
+          </div>
+        </div>
+      </template>
     </VueFlow>
 
     <section v-if="!selectedNode && nodes.length <= 2" class="canvas-launcher">
@@ -956,6 +984,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
         <button type="button" @click="addNode('text')">文本节点</button>
         <button type="button" @click="addNode('media')">素材节点</button>
         <button type="button" @click="addNode('output')">输出收集</button>
+        <button type="button" @click="addNode('llm')">LLM 处理</button>
         <button type="button" @click="openTool('workflows')">选择工作流</button>
       </div>
     </section>
@@ -965,6 +994,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
       <button type="button" title="添加 Text 节点" @click="addNode('text')"><span>T</span></button>
       <button type="button" title="添加 Media 节点" @click="addNode('media')"><span>M</span></button>
       <button type="button" title="添加 Output 节点" @click="addNode('output')"><span>O</span></button>
+      <button type="button" title="添加 LLM 节点" @click="addNode('llm')"><span>L</span></button>
       <button type="button" :class="{ active: activeTool === 'workflows' }" title="工作流模板" @click="openTool('workflows')"><span>W</span></button>
     </aside>
 
@@ -983,6 +1013,11 @@ watch([nodes, edges], persistCanvas, { deep: true })
         <span>O</span>
         <strong>Output Collector</strong>
         <small>收集生成结果，可拖回画布作为素材</small>
+      </button>
+      <button type="button" @click="addNode('llm')">
+        <span>L</span>
+        <strong>LLM Processor</strong>
+        <small>调用 MiniMax 处理上游文本/图片，输出给下游 workflow</small>
       </button>
       <button type="button" @click="openTool('workflows')">
         <span>W</span>
@@ -1007,6 +1042,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
         <span>{{ nodeStats.media }} Media</span>
         <span>{{ nodeStats.workflow }} Flow</span>
         <span>{{ nodeStats.output }} Output</span>
+        <span>{{ nodeStats.llm }} LLM</span>
         <span>{{ nodeStats.edges }} Edge</span>
       </div>
     </section>
@@ -1402,6 +1438,30 @@ watch([nodes, edges], persistCanvas, { deep: true })
   color: rgba(255,255,255,.38);
   font-size: 13px;
   line-height: 1.6;
+}
+.llm-node .node-card {
+  width: 340px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.llm-output {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.06);
+}
+.llm-output p {
+  margin: 0;
+  color: rgba(200,255,220,.9);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.llm-empty {
+  margin-top: 12px;
+  color: rgba(255,255,255,.38);
+  font-size: 13px;
+  line-height: 1.5;
 }
 .preview-overlay {
   position: fixed;

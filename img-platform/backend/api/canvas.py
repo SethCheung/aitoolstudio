@@ -27,6 +27,7 @@ from schemas.canvas import (
 from services.comfyui import generate_image as comfyui_generate_image
 from services.comfyui import generate_video as comfyui_generate_video
 from services.comfyui_workflows import runtime_workflow
+from services.minimax import chat_text
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/canvas", tags=["流水线画布"])
@@ -157,6 +158,19 @@ def _upstream_prompt(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePaylo
     ]
     text_nodes.sort(key=lambda item: _safe_number(item[0].data.get("promptOrder"), item[1] + 1))
     parts = [str(node.data.get("body") or "").strip() for _, _, node in text_nodes]
+
+    # Also collect from LLM nodes' outputText
+    llm_nodes = [
+        (edge, index, node)
+        for edge, index, node in _incoming_pairs(nodes, edges, target.id)
+        if node.type == "llm"
+    ]
+    llm_nodes.sort(key=lambda item: _safe_number(item[0].data.get("promptOrder"), item[1] + 1))
+    for _, _, node in llm_nodes:
+        output_text = str(node.data.get("outputText") or "").strip()
+        if output_text:
+            parts.append(output_text)
+
     prompt = "\n\n".join(part for part in parts if part).strip()
     return prompt or str(target.data.get("body") or "").strip()
 
@@ -232,6 +246,118 @@ def _write_to_output_nodes(
         saved.data = data
         saved.status = "done"
         db.add(saved)
+
+
+async def _run_llm_node_impl(
+    db: Session,
+    document: CanvasDocument,
+    payload: CanvasNodeRunRequest,
+    target: CanvasNodePayload,
+    node_id: str,
+    current_user: User,
+):
+    """Run an LLM node: collect upstream, call model, save outputText."""
+    from datetime import datetime, timezone
+    import json as _json
+
+    # Collect upstream text
+    upstream_text = _upstream_prompt(payload.nodes, payload.edges, target)
+    # Also collect media URLs for context
+    upstream_media = _upstream_media(payload.nodes, payload.edges, target)
+
+    system_prompt = str(target.data.get("systemPrompt") or "You are a helpful assistant.")
+    model_name = str(target.data.get("model") or "MiniMax-M2.7")
+
+    # Build user prompt from upstream text + image context
+    user_prompt = upstream_text or str(target.data.get("userInput") or "Describe this.")
+    if upstream_media:
+        user_prompt = f"[Image context: {len(upstream_media)} image(s) provided]\n{user_prompt}"
+
+    if not user_prompt.strip():
+        raise HTTPException(status_code=400, detail="LLM 节点缺输入。请连接上游 Text 节点或填写 userInput。")
+
+    run = CanvasRun(
+        document_id=document.id,
+        node_id=node_id,
+        status="running",
+        prompt=user_prompt[:500],
+        request_payload=payload.model_dump(),
+        result_payload={},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    try:
+        llm_result = await chat_text(prompt=user_prompt, system_prompt=system_prompt, model=model_name)
+        # Extract reply text from MiniMax response
+        reply = ""
+        if isinstance(llm_result, dict):
+            choices = llm_result.get("choices") or []
+            if choices:
+                reply = choices[0].get("message", {}).get("content", "") or ""
+            # fallback
+            if not reply:
+                reply = llm_result.get("reply", "") or str(llm_result.get("data", "")) or ""
+        else:
+            reply = str(llm_result)
+
+        if not reply.strip():
+            raise ValueError("LLM returned empty response")
+
+        run.status = "success"
+        run.result_payload = {"output_text": reply, "model": model_name}
+
+        # Save to DB node
+        saved_node = db.query(CanvasNode).filter(
+            CanvasNode.document_id == document.id,
+            CanvasNode.node_id == node_id,
+        ).first()
+        if saved_node:
+            data = dict(saved_node.data or {})
+            data["outputText"] = reply
+            data["status"] = "success"
+            data["error"] = ""
+            saved_node.data = data
+            saved_node.status = "success"
+            saved_node.error = None
+
+        db.commit()
+        db.refresh(run)
+        return CanvasNodeRunResponse(
+            run_id=run.id,
+            generation_id=None,
+            node_id=node_id,
+            status="success",
+            prompt=user_prompt[:200],
+            urls=[],
+            result_type="text",
+            output={"output_text": reply},
+        )
+
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 400
+    except Exception as exc:
+        logger.exception("LLM node run failed")
+        message = f"LLM 调用失败：{exc}"
+        status_code = 502
+
+    run.status = "error"
+    run.error = message
+    saved_node = db.query(CanvasNode).filter(
+        CanvasNode.document_id == document.id,
+        CanvasNode.node_id == node_id,
+    ).first()
+    if saved_node:
+        data = dict(saved_node.data or {})
+        data["status"] = "error"
+        data["error"] = message
+        saved_node.data = data
+        saved_node.status = "error"
+        saved_node.error = message
+    db.commit()
+    raise HTTPException(status_code=status_code, detail=message)
 
 
 @router.get("/documents/by-conversation/{conversation_id}", response_model=CanvasGraphResponse)
@@ -392,8 +518,12 @@ async def run_node(
     target = next((node for node in payload.nodes if node.id == node_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="Canvas node not found")
-    if target.type not in {"workflow", "video"}:
-        raise HTTPException(status_code=400, detail="Only Workflow and Video nodes can run")
+    if target.type not in {"workflow", "video", "llm"}:
+        raise HTTPException(status_code=400, detail="Only Workflow, Video, and LLM nodes can run")
+
+    # === LLM node path ===
+    if target.type == "llm":
+        return await _run_llm_node_impl(db, document, payload, target, node_id, current_user)
 
     workflow_id = str(target.data.get("workflowId") or "").strip()
     if not workflow_id:
