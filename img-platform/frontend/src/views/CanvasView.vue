@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps<{
@@ -74,6 +74,14 @@ interface SavedCanvas {
 const STORAGE_KEY = 'aitoolstudio.pipeline.canvas.v1'
 
 const router = useRouter()
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+  document.addEventListener('click', closeContextMenu)
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('click', closeContextMenu)
+})
 const { fitView, zoomIn, zoomOut } = useVueFlow()
 
 const workflows = ref<ComfyWorkflow[]>([])
@@ -97,6 +105,10 @@ const agentLoading = ref(false)
 const agentQuestion = ref('下一步我该怎么搭这个流水线？')
 const agentAnswer = ref('选中一个节点后，我可以根据当前画布、连线和可用工作流，告诉你下一步该加什么、怎么填 prompt、该选哪个 workflow。')
 const canvasDocumentId = ref<number | null>(null)
+const contextMenu = ref<{ x: number; y: number; nodeId: string | null; visible: boolean }>({
+  x: 0, y: 0, nodeId: null, visible: false,
+})
+const selectedEdgeId = ref<string | null>(null)
 const canvasSaveState = ref<'local' | 'saving' | 'saved' | 'error'>('local')
 const isHydratingCanvas = ref(false)
 let canvasSaveTimer: number | null = null
@@ -373,6 +385,92 @@ function onConnect(params: Connection) {
       data: edgeData,
     },
   ]
+}
+
+function duplicateNode(nodeId: string) {
+  const source = nodes.value.find((n: any) => n.id === nodeId)
+  if (!source) return
+  const newId = uniqueId(source.type)
+  nodes.value = [
+    ...nodes.value,
+    {
+      ...JSON.parse(JSON.stringify(source)),
+      id: newId,
+      position: { x: source.position.x + 40, y: source.position.y + 40 },
+      data: { ...source.data, status: 'idle', error: '', results: [] },
+    },
+  ]
+  selectNode(newId)
+  nextTick(() => fitView({ padding: 0.18, duration: 350 }))
+}
+
+function deleteSelected() {
+  if (selectedEdgeId.value) {
+    edges.value = edges.value.filter((e: any) => e.id !== selectedEdgeId.value)
+    selectedEdgeId.value = null
+    return
+  }
+  if (contextMenu.value.visible && contextMenu.value.nodeId) {
+    const nid = contextMenu.value.nodeId
+    nodes.value = nodes.value.filter((n: any) => n.id !== nid)
+    edges.value = edges.value.filter((e: any) => e.source !== nid && e.target !== nid)
+    if (selectedNodeId.value === nid) selectedNodeId.value = null
+    closeContextMenu()
+    return
+  }
+  if (selectedNodeId.value) {
+    const nid = selectedNodeId.value
+    nodes.value = nodes.value.filter((n: any) => n.id !== nid)
+    edges.value = edges.value.filter((e: any) => e.source !== nid && e.target !== nid)
+    selectedNodeId.value = null
+  }
+}
+
+function onNodeContextMenu(event: any, node: any) {
+  event.preventDefault()
+  event.stopPropagation()
+  contextMenu.value = {
+    x: event.clientX,
+    y: event.clientY,
+    nodeId: node.id,
+    visible: true,
+  }
+  selectedEdgeId.value = null
+}
+
+function onEdgeClick(event: any, edge: any) {
+  event.stopPropagation()
+  selectedEdgeId.value = edge.id
+  selectedNodeId.value = null
+  closeContextMenu()
+}
+
+function closeContextMenu() {
+  contextMenu.value.visible = false
+}
+
+function onNodeDragStop() {
+  if (canvasDocumentId.value) persistCanvas()
+}
+
+function onPaneClick() {
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  closeContextMenu()
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault()
+    deleteSelected()
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+    e.preventDefault()
+    const nid = contextMenu.value.visible ? contextMenu.value.nodeId : selectedNodeId.value
+    if (nid) duplicateNode(nid)
+  }
 }
 
 function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
@@ -953,7 +1051,11 @@ watch([nodes, edges], persistCanvas, { deep: true })
       fit-view-on-init
       @connect="onConnect"
       @node-click="({ node }) => selectNode(node.id)"
-      @pane-click="selectedNodeId = null"
+      @node-contextmenu="(e: any) => onNodeContextMenu(e.event, e.node)"
+      @node-drag-stop="onNodeDragStop"
+      @edge-click="(e: any) => onEdgeClick(e.event, e.edge)"
+      @pane-click="onPaneClick"
+      @pane-contextmenu.prevent
       @drop="onCanvasDrop"
       @dragover.prevent
     >
@@ -1374,6 +1476,29 @@ watch([nodes, edges], persistCanvas, { deep: true })
     <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
       <video v-if="resultKind(previewImage) === 'video'" :src="previewImage" controls autoplay />
       <img v-else :src="previewImage" alt="Preview" />
+    </div>
+  </Teleport>
+
+  <!-- Context menu -->
+  <Teleport to="body">
+    <div
+      v-if="contextMenu.visible"
+      class="canvas-context-menu"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      @click.stop
+    >
+      <button @click="duplicateNode(contextMenu.nodeId!)">
+        <span>+</span>
+        <div><strong>Duplicate</strong><small>Ctrl+D</small></div>
+      </button>
+      <button @click="deleteSelected()" class="danger">
+        <span>×</span>
+        <div><strong>Delete</strong><small>Delete</small></div>
+      </button>
+      <button @click="contextMenu.visible = false; selectNode(contextMenu.nodeId!); fitView({ padding: 0.25, duration: 350 })">
+        <span>⊙</span>
+        <div><strong>Focus</strong><small>Center viewport</small></div>
+      </button>
     </div>
   </Teleport>
 </template>
@@ -2064,6 +2189,68 @@ watch([nodes, edges], persistCanvas, { deep: true })
   padding: 80px 24px;
   text-align: center;
   color: rgba(255,255,255,.64);
+}
+
+.canvas-context-menu {
+  position: fixed;
+  z-index: 9999;
+  width: 220px;
+  padding: 8px;
+  border: 1px solid rgba(34,57,98,.10);
+  border-radius: 16px;
+  background: rgba(255,255,255,.98);
+  box-shadow: 0 18px 44px rgba(34,57,98,.18);
+  backdrop-filter: blur(14px);
+}
+.canvas-context-menu button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 0 12px;
+  align-items: center;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #1f2a44;
+  cursor: pointer;
+}
+.canvas-context-menu button:hover {
+  background: #f3f6fb;
+}
+.canvas-context-menu button span {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: #edf2fb;
+  color: #355ce0;
+  font-size: 16px;
+  font-weight: 900;
+}
+.canvas-context-menu button.danger span {
+  background: #fce8e6;
+  color: #b42318;
+}
+.canvas-context-menu button.danger:hover {
+  background: #fef2f2;
+}
+.canvas-context-menu small {
+  display: block;
+  color: #8a94a6;
+  font-size: 11px;
+}
+.canvas-context-menu strong {
+  font-size: 13px;
+}
+
+:deep(.vue-flow__edge.selected .vue-flow__edge-path) {
+  stroke: #4b78ff !important;
+  stroke-width: 3.5 !important;
+  filter: drop-shadow(0 0 6px rgba(75,120,255,.35));
 }
 
 /* Studio shell: closer to huobao-canvas + AICON workbench */
