@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from models.canvas import CanvasDocument, CanvasEdge, CanvasNode, CanvasRun
-from models.conversation import Conversation
+from models.conversation import Conversation, ConversationMessage
 from models.database import get_db
 from models.generation import Generation
 from models.user import User
@@ -328,6 +328,7 @@ async def run_node(
                 n_generated=len(urls) or 1,
                 mini_max_id=result.get("id", ""),
                 user_id=current_user.id,
+                conversation_id=document.conversation_id,
             )
             result_type = "video"
         else:
@@ -362,6 +363,7 @@ async def run_node(
                 n_generated=len(urls),
                 mini_max_id=result.get("id", ""),
                 user_id=current_user.id,
+                conversation_id=document.conversation_id,
             )
             result_type = "image"
 
@@ -371,6 +373,21 @@ async def run_node(
         output = {"urls": urls, "result_type": result_type, "comfyui_prompt_id": result.get("id", "")}
         db.add(generation)
         db.flush()
+
+        # If this CanvasDocument belongs to a conversation, create a message
+        if document.conversation_id:
+            import json as _json
+            results_json = _json.dumps(urls)
+            msg = ConversationMessage(
+                conversation_id=document.conversation_id,
+                role="assistant",
+                type=result_type,
+                content=f"Canvas 节点生成: {prompt[:120]}",
+                results=results_json,
+                model=workflow_id,
+            )
+            db.add(msg)
+
         run.status = "success"
         run.generation_id = generation.id
         run.result_payload = output

@@ -36,6 +36,9 @@ def init_db():
     # 迁移: canvas_documents 加 conversation_id（安全幂等）
     _migrate_canvas_documents_conversation_id()
 
+    # 迁移: generations 加 conversation_id
+    _migrate_generations_conversation_id()
+
 
 def _migrate_canvas_documents_conversation_id():
     """给 canvas_documents 补 conversation_id 列，SQLite 安全幂等"""
@@ -54,6 +57,30 @@ def _migrate_canvas_documents_conversation_id():
             conn.commit()
     except Exception:
         pass  # 表不存在等情况，create_all 会处理
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_generations_conversation_id():
+    """给 generations 补 conversation_id 列，SQLite 安全幂等"""
+    import sqlite3
+    try:
+        conn = engine.raw_connection()
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(generations)")
+        columns = [row[1] for row in cur.fetchall()]
+        if "conversation_id" not in columns:
+            cur.execute("ALTER TABLE generations ADD COLUMN conversation_id INTEGER")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS ix_generations_conversation_id "
+                "ON generations(conversation_id)"
+            )
+            conn.commit()
+    except Exception:
+        pass
     finally:
         try:
             conn.close()

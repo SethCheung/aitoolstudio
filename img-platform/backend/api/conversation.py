@@ -94,6 +94,23 @@ async def list_conversations(
                 conv_type = "image"
                 break
 
+        # Also check Generations for Canvas results
+        if not thumb:
+            from models.generation import Generation as GenModel
+            gen = (
+                db.query(GenModel)
+                .filter(
+                    GenModel.conversation_id == c.id,
+                    GenModel.type == "image",
+                    GenModel.image_urls.isnot(None),
+                )
+                .order_by(GenModel.created_at.desc())
+                .first()
+            )
+            if gen and gen.image_urls:
+                thumb = gen.image_urls[0]
+                conv_type = "image"
+
         result.append(
             ConversationListItem(
                 id=c.id,

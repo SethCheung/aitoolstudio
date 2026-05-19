@@ -22,3 +22,4 @@ class Generation(BaseModel):
     n_generated = Column(Integer, nullable=True, default=1)
     mini_max_id = Column(String(100), nullable=True)  # MiniMax task ID
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True, index=True)
