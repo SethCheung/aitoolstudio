@@ -18,7 +18,7 @@ import {
 import '@vue-flow/core/dist/style.css'
 import api from '@/services/api'
 
-type CanvasNodeType = 'text' | 'media' | 'workflow' | 'video'
+type CanvasNodeType = 'text' | 'media' | 'workflow' | 'video' | 'output'
 type RunStatus = 'idle' | 'running' | 'success' | 'error'
 
 interface ComfyWorkflow {
@@ -77,6 +77,7 @@ const aspectDraft = ref('1:1')
 const quantityDraft = ref(1)
 const seedDraft = ref('')
 const runError = ref('')
+const previewImage = ref<string | null>(null)
 const agentOpen = ref(false)
 const agentLoading = ref(false)
 const agentQuestion = ref('下一步我该怎么搭这个流水线？')
@@ -140,6 +141,7 @@ const nodeStats = computed(() => ({
   text: nodes.value.filter((node) => node.type === 'text').length,
   media: nodes.value.filter((node) => node.type === 'media').length,
   workflow: nodes.value.filter((node) => node.type === 'workflow' || node.type === 'video').length,
+  output: nodes.value.filter((node) => node.type === 'output').length,
   edges: edges.value.length,
 }))
 const resultHistory = computed(() => nodes.value
@@ -386,17 +388,18 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
         results: [],
       }
     : {
-        title: type === 'text' ? 'Text' : type === 'video' ? 'Video' : 'Media',
+        title: type === 'text' ? 'Text' : type === 'video' ? 'Video' : type === 'output' ? 'Output' : 'Media',
         body: type === 'text' ? '输入提示词，连接到下游工作流。' : '',
-        hint: type === 'media' ? '上传或引用素材后连接到工作流节点' : '选中节点后在下方配置并生成',
-        mode: type === 'video' ? '文生视频' : '全能参考',
-        model: type === 'video' ? 'Seedance2.0' : 'ComfyUI',
-        spec: type === 'video' ? '480p / 5s / 是 / 自适应 / 否' : '默认参数',
+        hint: type === 'media' ? '上传或引用素材后连接到工作流节点' : type === 'output' ? '收集生成结果' : '选中节点后在下方配置并生成',
+        mode: type === 'video' ? '文生视频' : type === 'output' ? '结果容器' : '全能参考',
+        model: type === 'video' ? 'Seedance2.0' : type === 'output' ? '—' : 'ComfyUI',
+        spec: type === 'video' ? '480p / 5s / 是 / 自适应 / 否' : type === 'output' ? '—' : '默认参数',
         quantity: 1,
         aspectRatio: type === 'video' ? '16:9' : '1:1',
         seed: null,
         status: 'idle',
         results: [],
+        images: type === 'output' ? [] : undefined,
       }
   nodes.value = [...nodes.value, { id, type, position: base, data }]
   selectNode(id)
@@ -528,6 +531,44 @@ function createOutputNodes(sourceNode: any, urls: string[]) {
   }))
   nodes.value = [...nodes.value, ...newNodes]
   edges.value = [...edges.value, ...newEdges]
+}
+
+function onOutputDragStart(event: DragEvent, img: { url: string; prompt?: string; generation_id?: number }) {
+  event.dataTransfer?.setData('application/output-image', JSON.stringify(img))
+  event.dataTransfer!.effectAllowed = 'copy'
+}
+
+function onCanvasDrop(event: DragEvent) {
+  const raw = event.dataTransfer?.getData('application/output-image')
+  if (!raw) return
+  event.preventDefault()
+  try {
+    const img = JSON.parse(raw)
+    // Create a new media node at drop position
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    const pos = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+    addOutputImageNode(img, pos)
+  } catch { /* not our drag */ }
+}
+
+function addOutputImageNode(img: { url: string; prompt?: string; generation_id?: number }, pos: { x: number; y: number }) {
+  const id = uniqueId('media')
+  nodes.value = [...nodes.value, {
+    id,
+    type: 'media' as CanvasNodeType,
+    position: pos,
+    data: {
+      title: img.prompt ? img.prompt.slice(0, 40) : 'Image Result',
+      body: '',
+      hint: '从 Output 拖入，可连接下游 workflow',
+      assetUrl: img.url,
+      mode: '素材',
+      model: 'Output',
+      status: 'success',
+      results: [img.url],
+    },
+  }]
+  selectNode(id)
 }
 
 function makeWorkflowNode(workflow: ComfyWorkflow, id: string, x: number, y: number, title: string) {
@@ -812,6 +853,8 @@ watch([nodes, edges], persistCanvas, { deep: true })
       @connect="onConnect"
       @node-click="({ node }) => selectNode(node.id)"
       @pane-click="selectedNodeId = null"
+      @drop="onCanvasDrop"
+      @dragover.prevent
     >
       <template #node-text="{ data, id, selected }">
         <div class="flow-node text-node" :class="{ selected }" @click.stop="selectNode(id)">
@@ -878,6 +921,30 @@ watch([nodes, edges], persistCanvas, { deep: true })
           </div>
         </div>
       </template>
+
+      <template #node-output="{ data, id, selected }">
+        <div class="flow-node output-node" :class="{ selected }" @click.stop="selectNode(id)">
+          <Handle type="target" :position="Position.Left" />
+          <div class="node-label">Output</div>
+          <div class="node-card">
+            <span class="status-chip" :class="data.status || 'idle'">{{ data.status || 'idle' }}</span>
+            <strong>{{ data.title }}</strong>
+            <div v-if="data.images?.length" class="output-grid">
+              <template v-for="(img, i) in data.images" :key="i">
+                <img
+                  :src="img.url"
+                  :alt="img.prompt || ''"
+                  :title="img.prompt || ''"
+                  draggable="true"
+                  @dragstart="onOutputDragStart($event, img)"
+                  @click.stop="previewImage = img.url"
+                />
+              </template>
+            </div>
+            <p v-else class="output-empty">连接生成节点到此收集结果。结果可拖回画布作为素材节点。</p>
+          </div>
+        </div>
+      </template>
     </VueFlow>
 
     <section v-if="!selectedNode && nodes.length <= 2" class="canvas-launcher">
@@ -885,6 +952,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
       <div class="launcher-actions">
         <button type="button" @click="addNode('text')">文本节点</button>
         <button type="button" @click="addNode('media')">素材节点</button>
+        <button type="button" @click="addNode('output')">输出收集</button>
         <button type="button" @click="openTool('workflows')">选择工作流</button>
       </div>
     </section>
@@ -893,6 +961,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
       <button class="add-node" type="button" title="添加节点" @click="showNodeMenu = !showNodeMenu">+</button>
       <button type="button" title="添加 Text 节点" @click="addNode('text')"><span>T</span></button>
       <button type="button" title="添加 Media 节点" @click="addNode('media')"><span>M</span></button>
+      <button type="button" title="添加 Output 节点" @click="addNode('output')"><span>O</span></button>
       <button type="button" :class="{ active: activeTool === 'workflows' }" title="工作流模板" @click="openTool('workflows')"><span>W</span></button>
     </aside>
 
@@ -906,6 +975,11 @@ watch([nodes, edges], persistCanvas, { deep: true })
         <span>M</span>
         <strong>Media Asset</strong>
         <small>上传参考图或承接生成结果</small>
+      </button>
+      <button type="button" @click="addNode('output')">
+        <span>O</span>
+        <strong>Output Collector</strong>
+        <small>收集生成结果，可拖回画布作为素材</small>
       </button>
       <button type="button" @click="openTool('workflows')">
         <span>W</span>
@@ -929,6 +1003,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
         <span>{{ nodeStats.text }} Text</span>
         <span>{{ nodeStats.media }} Media</span>
         <span>{{ nodeStats.workflow }} Flow</span>
+        <span>{{ nodeStats.output }} Output</span>
         <span>{{ nodeStats.edges }} Edge</span>
       </div>
     </section>
@@ -1121,6 +1196,13 @@ watch([nodes, edges], persistCanvas, { deep: true })
       </div>
     </section>
   </main>
+
+  <!-- Preview overlay for output images -->
+  <Teleport to="body">
+    <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
+      <img :src="previewImage" alt="Preview" />
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1290,6 +1372,48 @@ watch([nodes, edges], persistCanvas, { deep: true })
   width: 100%;
   height: 100%;
   display: block;
+}
+.output-node .node-card {
+  width: 360px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.output-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.output-grid img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  object-fit: cover;
+  cursor: grab;
+  transition: transform .15s;
+}
+.output-grid img:hover { transform: scale(1.06); }
+.output-empty {
+  margin-top: 20px;
+  color: rgba(255,255,255,.38);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.82);
+  cursor: pointer;
+}
+.preview-overlay img {
+  max-width: 86vw;
+  max-height: 86vh;
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0,0,0,.5);
 }
 .side-toolbar {
   position: absolute;

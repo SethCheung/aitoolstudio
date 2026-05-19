@@ -161,6 +161,65 @@ def _upstream_media(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePayloa
     ]
 
 
+def _write_to_output_nodes(
+    db: Session,
+    document_id: int,
+    nodes: list[CanvasNodePayload],
+    edges: list[CanvasEdgePayload],
+    source_node_id: str,
+    result: dict,
+) -> None:
+    """Write generation results to all downstream Output nodes."""
+    url_list = result.get("urls") or []
+    if not url_list:
+        return
+
+    # BFS to find all downstream output nodes
+    adjacency: dict[str, list[str]] = {}
+    for edge in edges:
+        adjacency.setdefault(edge.source, []).append(edge.target)
+
+    visited: set[str] = set()
+    queue = [source_node_id]
+    while queue:
+        current = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        for neighbor in adjacency.get(current, []):
+            if neighbor not in visited:
+                queue.append(neighbor)
+
+    output_nodes = [n for n in nodes if n.id in visited and n.type == "output" and n.id != source_node_id]
+
+    for out_node in output_nodes:
+        saved = db.query(CanvasNode).filter(
+            CanvasNode.document_id == document_id,
+            CanvasNode.node_id == out_node.id,
+        ).first()
+        if not saved:
+            continue
+
+        data = dict(saved.data or {})
+        images: list[dict] = list(data.get("images") or [])
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        for url in url_list:
+            images.append({
+                "url": url,
+                "run_id": result.get("run_id"),
+                "generation_id": result.get("generation_id"),
+                "source_node_id": source_node_id,
+                "prompt": result.get("prompt", ""),
+                "created_at": now,
+            })
+        data["images"] = images
+        data["status"] = "done"
+        saved.data = data
+        saved.status = "done"
+        db.add(saved)
+
+
 @router.get("/documents/by-conversation/{conversation_id}", response_model=CanvasGraphResponse)
 def get_or_create_by_conversation(
     conversation_id: int,
@@ -451,6 +510,15 @@ async def run_node(
             saved_node.status = "success"
             saved_node.error = None
             saved_node.output = output
+
+        # Write results to downstream Output nodes
+        _write_to_output_nodes(db, document.id, payload.nodes, payload.edges, node_id, {
+            "urls": urls,
+            "result_type": result_type,
+            "generation_id": generation.id,
+            "run_id": run.id,
+            "prompt": prompt[:200],
+        })
 
         db.commit()
         db.refresh(run)
