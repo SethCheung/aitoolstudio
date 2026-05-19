@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -10,6 +10,13 @@ from api.auth import get_current_user, require_admin
 from models.user import User
 from services.comfyui import generate_sam_mask, get_status, list_checkpoints
 from services.comfyui_workflows import delete_workflow, import_workflows_from_dir, list_workflows, reorder_workflows, upsert_workflow
+from services.comfyui_workers import (
+    delete_worker,
+    get_worker,
+    get_workers_status,
+    list_workers,
+    upsert_worker,
+)
 from services.model_paths import delete_model_path, list_model_paths, upsert_model_path
 
 
@@ -46,6 +53,19 @@ class SamMaskRequest(BaseModel):
     y: float
     dilation: int = 8
     bbox_expansion: int = 20
+
+
+class WorkerRequest(BaseModel):
+    name: str
+    url: str
+    tier: str = "heavy"
+    gpu: Optional[str] = ""
+    vram_gb: int = 0
+    tags: list[str] = Field(default_factory=list)
+    model_root_uri: Optional[str] = ""
+    model_mount_path: Optional[str] = ""
+    enabled: bool = True
+    notes: Optional[str] = ""
 
 
 @router.get("/status")
@@ -153,3 +173,46 @@ async def reorder_workflow_list(req: WorkflowReorderRequest, _: User = Depends(r
 @router.post("/workflows/import")
 async def import_workflows(_: User = Depends(require_admin)):
     return import_workflows_from_dir()
+
+
+# ---------------------------------------------------------------------------
+# Worker Registry
+# ---------------------------------------------------------------------------
+
+
+@router.get("/workers")
+async def workers_list(_: User = Depends(get_current_user)):
+    """Return all configured ComfyUI workers."""
+    return {"workers": list_workers()}
+
+
+@router.post("/workers")
+async def workers_create(req: WorkerRequest, _: User = Depends(require_admin)):
+    """Register a new ComfyUI worker."""
+    try:
+        return upsert_worker(req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.put("/workers/{worker_id}")
+async def workers_update(worker_id: str, req: WorkerRequest, _: User = Depends(require_admin)):
+    """Update an existing ComfyUI worker."""
+    try:
+        return upsert_worker(req.model_dump(), worker_id=worker_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/workers/{worker_id}")
+async def workers_delete(worker_id: str, _: User = Depends(require_admin)):
+    """Remove a ComfyUI worker."""
+    if not delete_worker(worker_id):
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return {"ok": True}
+
+
+@router.get("/workers/status")
+async def workers_status(_: User = Depends(require_admin)):
+    """Health-check all workers. A single offline worker does not fail the endpoint."""
+    return {"workers": await get_workers_status()}
