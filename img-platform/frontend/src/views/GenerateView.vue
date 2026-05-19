@@ -5,6 +5,13 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
+
+const props = defineProps<{
+  embedded?: boolean
+  embeddedConversationId?: number | null
+}>()
+
+const route = useRoute()
 import {
   speechAudioFormats,
   speechBitrates,
@@ -24,7 +31,6 @@ import {
   musicTemplates,
 } from '@/lib/music-options'
 
-const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -1673,6 +1679,15 @@ onMounted(async () => {
       await loadFromHistory(item)
     }
   }
+
+  // If embedded, use the embeddedConversationId
+  if (props.embeddedConversationId) {
+    convId.value = props.embeddedConversationId
+    const item = history.value.find(h => h.id === props.embeddedConversationId)
+    if (item) {
+      await loadFromHistory(item)
+    }
+  }
 })
 
 onUnmounted(() => {
@@ -1689,8 +1704,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="generate-page" :class="`mode-${selectedCategory}`">
-    <header class="topbar">
+  <div class="generate-page" :class="[`mode-${selectedCategory}`, { embedded: props.embedded }]">
+    <header v-if="!props.embedded" class="topbar">
       <div class="project-brand">
         <svg class="brand-mark" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"/>

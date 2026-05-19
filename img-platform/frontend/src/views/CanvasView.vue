@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+
+const props = defineProps<{
+  embedded?: boolean
+  embeddedConversationId?: number | null
+}>()
+
 import {
   Handle,
   MarkerType,
@@ -765,8 +771,8 @@ watch([nodes, edges], persistCanvas, { deep: true })
 </script>
 
 <template>
-  <main class="pipeline-page">
-    <header class="pipeline-header">
+  <main class="pipeline-page" :class="{ embedded: props.embedded }">
+    <header v-if="!props.embedded" class="pipeline-header">
       <button class="brand" type="button" @click="router.push('/')">
         <span class="brand-mark">AI</span>
         <span>AI Tool Studio</span>
@@ -1117,6 +1123,10 @@ watch([nodes, edges], persistCanvas, { deep: true })
   background-image: radial-gradient(circle, rgba(255,255,255,.13) 1px, transparent 1px);
   background-size: 26px 26px;
   color: #f7f7f7;
+}
+.pipeline-page.embedded {
+  width: 100%;
+  height: 100%;
 }
 .pipeline-header {
   position: absolute;

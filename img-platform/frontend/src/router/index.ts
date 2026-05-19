@@ -16,6 +16,12 @@ const router = createRouter({
       component: () => import('../views/LoginView.vue'),
     },
     {
+      path: '/project/:conversationId',
+      name: 'project',
+      component: () => import('../views/ProjectWorkspaceView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/generate',
       name: 'generate',
       component: () => import('../views/GenerateView.vue'),

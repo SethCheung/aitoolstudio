@@ -49,6 +49,7 @@ docker-data/
 
 # OS
 .DS_Store
+._*
 Thumbs.db
 
 # Backups

@@ -75,7 +75,7 @@ const filteredProjects = computed(() => {
 })
 
 function openProject(id: number) {
-  router.push({ path: '/generate', query: { convId: String(id) } })
+  router.push({ path: `/project/${id}`, query: { mode: 'chat' } })
 }
 
 function canvasUrl() {
@@ -85,21 +85,37 @@ function canvasUrl() {
   return `${proto}//${host}:5173/canvas`
 }
 
-function newPipeline() {
-  window.location.href = canvasUrl()
+async function newPipeline() {
+  try {
+    const resp = await api.post('/api/conversations', { title: 'New Pipeline' })
+    const id = resp.data?.id
+    if (id) {
+      router.push({ path: `/project/${id}`, query: { mode: 'canvas' } })
+    } else {
+      window.location.href = canvasUrl()
+    }
+  } catch {
+    window.location.href = canvasUrl()
+  }
 }
 
-function openCanvas(_id: number, e: Event) {
+function openCanvas(id: number, e: Event) {
   e.stopPropagation()
-  localStorage.setItem('api-provider', 'comfyui')
-  localStorage.setItem('token', auth.token || '')
-  localStorage.setItem('api-keys-by-provider', JSON.stringify({ comfyui: 'fire-canvas-intranet' }))
-  localStorage.setItem('base-urls-by-provider', JSON.stringify({ comfyui: '' }))
-  window.location.href = canvasUrl()
+  router.push({ path: `/project/${id}`, query: { mode: 'canvas' } })
 }
 
-function newProject() {
-  router.push('/generate')
+async function newProject() {
+  try {
+    const resp = await api.post('/api/conversations', { title: 'New Project' })
+    const id = resp.data?.id
+    if (id) {
+      router.push({ path: `/project/${id}`, query: { mode: 'chat' } })
+    } else {
+      router.push('/generate')
+    }
+  } catch {
+    router.push('/generate')
+  }
 }
 
 async function logout() {

@@ -89,7 +89,7 @@ export default defineConfig(() => {
           rewrite: (path) => path,
         },
       },
-      configureServer(server) {
+      configureServer(server: any) {
         server.middlewares.use("/canvas", canvasMiddleware)
       },
     },
