@@ -13,6 +13,8 @@ from models.database import get_db
 from models.generation import Generation
 from models.user import User
 from schemas.canvas import (
+    CascadeIterationResult,
+    CanvasCascadeResponse,
     CanvasDocumentCreate,
     CanvasDocumentSummary,
     CanvasEdgePayload,
@@ -519,7 +521,7 @@ def save_graph(
     return _graph_response(document)
 
 
-@router.post("/documents/{document_id}/nodes/{node_id}/run", response_model=CanvasNodeRunResponse)
+
 async def _run_cascade(
     db: Session,
     document: CanvasDocument,
@@ -790,7 +792,7 @@ async def _run_cascade(
         failed_at_iteration=failed_iter,
     )
 
-
+@router.post("/documents/{document_id}/nodes/{node_id}/run", response_model=CanvasNodeRunResponse)
 async def run_node(
     document_id: int,
     node_id: str,
