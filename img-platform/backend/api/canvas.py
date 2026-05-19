@@ -187,6 +187,18 @@ def _upstream_prompt(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePaylo
         if output_text:
             parts.append(output_text)
 
+    # Also collect from Loop nodes' lastRendered
+    loop_nodes = [
+        (edge, index, node)
+        for edge, index, node in _incoming_pairs(nodes, edges, target.id)
+        if node.type == "loop"
+    ]
+    loop_nodes.sort(key=lambda item: _safe_number(item[0].data.get("promptOrder"), item[1] + 1))
+    for _, _, node in loop_nodes:
+        loop_text = str(node.data.get("lastRendered") or "").strip()
+        if loop_text:
+            parts.append(loop_text)
+
     prompt = "\n\n".join(part for part in parts if part).strip()
     return prompt or str(target.data.get("body") or "").strip()
 
@@ -203,6 +215,67 @@ def _upstream_media(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePayloa
         for _, _, node in media_nodes
         if str(node.data.get("assetUrl") or "").strip()
     ]
+
+
+def _render_loop_prompt(node: CanvasNodePayload, iteration: int) -> str:
+    """Render loop node prompt template with placeholders."""
+    count = max(1, int(node.data.get("count") or 1))
+    variable_prompt = str(node.data.get("variablePrompt") or "")
+    fixed_prompt = str(node.data.get("fixedPrompt") or "")
+    template = variable_prompt or fixed_prompt or "${seq}"
+    i1 = iteration + 1  # 1-based
+    replacements = {
+        "《计数》": str(i1),
+        "《总数》": str(count),
+        "《进度》": f"第{i1}/{count}批",
+    }
+    for placeholder, value in replacements.items():
+        template = template.replace(placeholder, value)
+    return template.strip()
+
+
+def _topological_sort(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePayload]) -> list[str]:
+    """Return node IDs in topological order (sources first) using Kahn's algorithm."""
+    node_ids = {n.id for n in nodes}
+    indegree: dict[str, int] = {nid: 0 for nid in node_ids}
+    adjacency: dict[str, list[str]] = {nid: [] for nid in node_ids}
+    for e in edges:
+        if e.source in node_ids and e.target in node_ids:
+            adjacency.setdefault(e.source, []).append(e.target)
+            indegree[e.target] = indegree.get(e.target, 0) + 1
+    queue = [nid for nid in node_ids if indegree.get(nid, 0) == 0]
+    result: list[str] = []
+    while queue:
+        current = queue.pop(0)
+        result.append(current)
+        for neighbor in adjacency.get(current, []):
+            indegree[neighbor] -= 1
+            if indegree[neighbor] == 0:
+                queue.append(neighbor)
+    return result
+
+
+def _upstream_nodes(target_id: str, nodes: list[CanvasNodePayload], edges: list[CanvasEdgePayload]) -> list[str]:
+    """BFS upstream from target_id, return all ancestor node IDs in topological order."""
+    reverse_adj: dict[str, list[str]] = {}
+    for e in edges:
+        reverse_adj.setdefault(e.target, []).append(e.source)
+    visited: set[str] = set()
+    queue = [target_id]
+    while queue:
+        current = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        for parent in reverse_adj.get(current, []):
+            if parent not in visited:
+                queue.append(parent)
+    visited.discard(target_id)
+    if not visited:
+        return []
+    ancestor_nodes = [n for n in nodes if n.id in visited]
+    ancestor_edges = [e for e in edges if e.source in visited and e.target in visited]
+    return _topological_sort(ancestor_nodes, ancestor_edges)
 
 
 def _write_to_output_nodes(
