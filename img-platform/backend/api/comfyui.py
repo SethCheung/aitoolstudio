@@ -56,6 +56,8 @@ class SamMaskRequest(BaseModel):
 
 
 class WorkerRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     name: str
     url: str
     tier: str = "heavy"

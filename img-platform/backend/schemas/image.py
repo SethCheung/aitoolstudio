@@ -37,6 +37,12 @@ class ImageGenerateRequest(BaseModel):
     subject_reference: list[ImageSubjectReference] = Field(default_factory=list, max_length=4, description="参考图片列表")
     comfyui_checkpoint: Optional[str] = Field(default=None, description="ComfyUI checkpoint 文件名，仅 comfyui-local 生效")
     comfyui_workflow_id: Optional[str] = Field(default=None, description="ComfyUI workflow ID，仅 comfyui-local 生效")
+    # Scheduling fields (Agent B — used by comfyui_scheduler.select_worker)
+    comfyui_job_class: str = Field(default="auto", description="调度优先级：auto / heavy / medium / light")
+    comfyui_required_tags: list[str] = Field(default_factory=list, description="调度要求 — worker 必须包含的全部标签")
+    comfyui_required_models: list[str] = Field(default_factory=list, description="调度要求 — worker 必须可见的 checkpoint 列表")
+    comfyui_required_nodes: list[str] = Field(default_factory=list, description="调度要求 — worker 必须支持的节点类型列表")
+    comfyui_estimated_vram_gb: Optional[float] = Field(default=None, description="调度要求 — 预估显存占用 (GB)")
     sam_x: Optional[float] = Field(default=None, ge=0, le=1, description="局部重绘点击点 X，0-1 归一化坐标")
     sam_y: Optional[float] = Field(default=None, ge=0, le=1, description="局部重绘点击点 Y，0-1 归一化坐标")
 
