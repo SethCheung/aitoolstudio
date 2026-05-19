@@ -49,6 +49,7 @@ interface CanvasNodeData {
   status?: RunStatus
   error?: string
   results?: string[]
+  images?: { url: string; run_id?: number; generation_id?: number; source_node_id?: string; prompt?: string; created_at?: string }[]
 }
 
 interface SavedCanvas {
