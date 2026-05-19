@@ -19,7 +19,7 @@ import '@vue-flow/core/dist/style.css'
 import api from '@/services/api'
 
 type CanvasNodeType = 'text' | 'media' | 'workflow' | 'video' | 'output' | 'llm' | 'loop'
-type RunStatus = 'idle' | 'running' | 'success' | 'error'
+type RunStatus = 'idle' | 'running' | 'success' | 'error' | 'done'
 
 interface ComfyWorkflow {
   id: string
@@ -57,6 +57,12 @@ interface CanvasNodeData {
   sourceNodeId?: string
   sourcePrompt?: string
   sourceCreatedAt?: string
+  count?: number
+  loopStart?: number
+  fixedPrompt?: string
+  variablePrompt?: string
+  lastRendered?: string
+  lastIteration?: number
 }
 
 interface SavedCanvas {
