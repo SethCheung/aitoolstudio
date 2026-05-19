@@ -80,6 +80,29 @@ class CanvasNodeRunResponse(BaseModel):
     output: dict[str, Any] = Field(default_factory=dict)
 
 
+
+class CascadeIterationResult(BaseModel):
+    iteration: int
+    loop_prompt: str = ""
+    llm_run_id: Optional[int] = None
+    llm_output: Optional[str] = None
+    workflow_run_id: Optional[int] = None
+    workflow_urls: list[str] = Field(default_factory=list)
+    output_images: list[dict[str, Any]] = Field(default_factory=list)
+    status: str = "success"
+    error: Optional[str] = None
+
+
+class CanvasCascadeResponse(BaseModel):
+    cascade_id: str
+    node_id: str
+    iterations: list[CascadeIterationResult] = Field(default_factory=list)
+    total_iterations: int = 0
+    status: str = "success"
+    failed_at_node: Optional[str] = None
+    failed_at_iteration: Optional[int] = None
+
+
 class CanvasMediaNodeCreate(BaseModel):
     asset_url: str
     title: str = "Image Result"

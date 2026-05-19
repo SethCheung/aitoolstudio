@@ -18,7 +18,7 @@ import {
 import '@vue-flow/core/dist/style.css'
 import api from '@/services/api'
 
-type CanvasNodeType = 'text' | 'media' | 'workflow' | 'video' | 'output' | 'llm'
+type CanvasNodeType = 'text' | 'media' | 'workflow' | 'video' | 'output' | 'llm' | 'loop'
 type RunStatus = 'idle' | 'running' | 'success' | 'error'
 
 interface ComfyWorkflow {
@@ -143,6 +143,7 @@ const edges = ref<any[]>([
 const selectedNode = computed((): any => nodes.value.find((node) => node.id === selectedNodeId.value) || null)
 const selectedData = computed((): CanvasNodeData | undefined => selectedNode.value?.data)
 const selectedCanRun = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video' || selectedNode.value?.type === 'llm')
+const canCascadeRun = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video')
 const selectedIsMedia = computed(() => selectedNode.value?.type === 'media')
 const selectedIncomingPairs = computed(() => selectedNode.value ? incomingNodePairs(selectedNode.value.id) : [])
 const nodeStats = computed(() => ({
@@ -151,6 +152,7 @@ const nodeStats = computed(() => ({
   workflow: nodes.value.filter((node) => node.type === 'workflow' || node.type === 'video').length,
   output: nodes.value.filter((node) => node.type === 'output').length,
   llm: nodes.value.filter((node) => node.type === 'llm').length,
+  loop: nodes.value.filter((node) => node.type === 'loop').length,
   edges: edges.value.length,
 }))
 const resultHistory = computed(() => nodes.value
@@ -397,12 +399,12 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
         results: [],
       }
     : {
-        title: type === 'text' ? 'Text' : type === 'video' ? 'Video' : type === 'output' ? 'Output' : type === 'llm' ? 'LLM' : 'Media',
-        body: type === 'text' ? '输入提示词，连接到下游工作流。' : type === 'llm' ? 'LLM 处理节点' : '',
-        hint: type === 'media' ? '上传或引用素材后连接到工作流节点' : type === 'output' ? '收集生成结果' : type === 'llm' ? '连接上游 Text/Media，运行后输出文本给下游' : '选中节点后在下方配置并生成',
-        mode: type === 'video' ? '文生视频' : type === 'output' ? '结果容器' : type === 'llm' ? 'LLM' : '全能参考',
-        model: type === 'video' ? 'Seedance2.0' : type === 'output' ? '—' : type === 'llm' ? 'MiniMax-M2.7' : 'ComfyUI',
-        spec: type === 'video' ? '480p / 5s / 是 / 自适应 / 否' : type === 'output' ? '—' : type === 'llm' ? 'Node 模式' : '默认参数',
+        title: type === 'text' ? 'Text' : type === 'video' ? 'Video' : type === 'output' ? 'Output' : type === 'llm' ? 'LLM' : type === 'loop' ? 'Loop' : 'Media',
+        body: type === 'text' ? '输入提示词，连接到下游工作流。' : type === 'llm' ? 'LLM 处理节点' : type === 'loop' ? '第《进度》批' : '',
+        hint: type === 'media' ? '上传或引用素材后连接到工作流节点' : type === 'output' ? '收集生成结果' : type === 'llm' ? '连接上游 Text/Media，运行后输出文本给下游' : type === 'loop' ? '设置循环次数、提示词模板。串联运行时每轮调用下游链。' : '选中节点后在下方配置并生成',
+        mode: type === 'video' ? '文生视频' : type === 'output' ? '结果容器' : type === 'llm' ? 'LLM' : type === 'loop' ? 'Loop' : '全能参考',
+        model: type === 'video' ? 'Seedance2.0' : type === 'output' ? '—' : type === 'llm' ? 'MiniMax-M2.7' : type === 'loop' ? 'Serial' : 'ComfyUI',
+        spec: type === 'video' ? '480p / 5s / 是 / 自适应 / 否' : type === 'output' ? '—' : type === 'llm' ? 'Node 模式' : type === 'loop' ? '《计数》《总数》《进度》' : '默认参数',
         quantity: 1,
         aspectRatio: type === 'video' ? '16:9' : '1:1',
         seed: null,
@@ -411,6 +413,12 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
         images: type === 'output' ? [] : undefined,
         systemPrompt: type === 'llm' ? 'You are a helpful assistant.' : undefined,
         outputText: type === 'llm' ? '' : undefined,
+        count: type === 'loop' ? 3 : undefined,
+        loopStart: type === 'loop' ? 1 : undefined,
+        fixedPrompt: type === 'loop' ? '生成第《计数》张图片' : undefined,
+        variablePrompt: type === 'loop' ? '第《进度》批生成：' : undefined,
+        lastRendered: type === 'loop' ? '' : undefined,
+        lastIteration: type === 'loop' ? 0 : undefined,
       }
   nodes.value = [...nodes.value, { id, type, position: base, data }]
   selectNode(id)
@@ -689,6 +697,71 @@ function addEcommerceTemplate(workflow: ComfyWorkflow) {
   workflowModalOpen.value = false
   selectNode(productInfoId)
   nextTick(() => fitView({ padding: 0.18, duration: 350 }))
+}
+
+async function runCascade() {
+  if (!selectedNode.value || !canCascadeRun.value) return
+  savePrompt()
+  const node = selectedNode.value
+
+  const workflowId = node.data?.workflowId
+  if (!workflowId) {
+    runError.value = '节点还没绑定 workflow'
+    updateNodeData(node.id, { status: 'error', error: runError.value })
+    return
+  }
+
+  runError.value = ''
+  updateNodeData(node.id, { status: 'running', error: '', results: [] })
+
+  try {
+    if (!canvasDocumentId.value) await loadOrCreateCanvasDocument()
+    if (!canvasDocumentId.value) throw new Error('画布文档创建失败')
+
+    const response = await api.post(`/api/canvas/documents/${canvasDocumentId.value}/nodes/${node.id}/run-cascade`, {
+      ...graphPayload(),
+      aspect_ratio: aspectDraft.value || '1:1',
+      quantity: Math.max(1, Math.min(9, Math.round(quantityDraft.value || 1))),
+      seed: seedDraft.value.trim() ? Number(seedDraft.value) : null,
+      duration: 6,
+    })
+
+    const cascadeData = response.data || {}
+    const iterations = cascadeData.iterations || []
+    const allUrls: string[] = []
+    for (const iter of iterations) {
+      if (iter.workflow_urls?.length) {
+        allUrls.push(...iter.workflow_urls)
+      }
+    }
+
+    updateNodeData(node.id, {
+      status: cascadeData.status === 'error' ? 'error' : 'success',
+      error: cascadeData.failed_at_node
+        ? `Failed at ${cascadeData.failed_at_node} (iter ${cascadeData.failed_at_iteration})`
+        : '',
+      results: allUrls.filter(Boolean),
+      // If LLM output exists in last iteration, store it
+      outputText: iterations[iterations.length - 1]?.llm_output || node.data?.outputText || '',
+    })
+
+    // Update loop node if present
+    const loopNode = nodes.value.find((n: any) => n.type === 'loop')
+    if (loopNode && iterations.length) {
+      const lastIter = iterations[iterations.length - 1]
+      updateNodeData(loopNode.id, {
+        lastRendered: lastIter.loop_prompt || '',
+        lastIteration: lastIter.iteration || iterations.length,
+        status: 'done',
+      })
+    }
+
+    await hydrateCanvasFromServer()
+  } catch (error: any) {
+    const message = error?.response?.data?.detail || error.message || '级联运行失败'
+    runError.value = message
+    updateNodeData(node.id, { status: 'error', error: message, results: [] })
+  }
 }
 
 async function hydrateCanvasFromServer() {
@@ -985,6 +1058,25 @@ watch([nodes, edges], persistCanvas, { deep: true })
         </div>
       </template>
 
+      <template #node-loop="{ data, id, selected }">
+        <div class="flow-node loop-node" :class="{ selected }" @click.stop="selectNode(id)">
+          <Handle type="target" :position="Position.Left" />
+          <Handle type="source" :position="Position.Right" />
+          <div class="node-label">Loop</div>
+          <div class="node-card">
+            <span class="status-chip" :class="data.status || 'idle'">{{ data.status || 'idle' }}</span>
+            <strong>{{ data.title || 'Loop' }}</strong>
+            <div class="loop-info">
+              <small>次数: {{ data.count || 1 }} · 模式: {{ data.mode || 'serial' }}</small>
+              <p v-if="data.lastRendered" class="loop-preview">最近: {{ data.lastRendered.slice(0, 80) }}{{ data.lastRendered.length > 80 ? '…' : '' }}</p>
+              <p v-else class="loop-empty">{{ data.hint || '连接上游 Text 和下游 LLM/Workflow，级联运行时逐次替换占位符。' }}</p>
+            </div>
+            <p v-if="data.error" class="node-error">{{ data.error }}</p>
+            <small>占位符: 《计数》《总数》《进度》</small>
+          </div>
+        </div>
+      </template>
+
       <template #node-llm="{ data, id, selected }">
         <div class="flow-node llm-node" :class="{ selected }" @click.stop="selectNode(id)">
           <Handle type="target" :position="Position.Left" />
@@ -1011,6 +1103,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
         <button type="button" @click="addNode('media')">素材节点</button>
         <button type="button" @click="addNode('output')">输出收集</button>
         <button type="button" @click="addNode('llm')">LLM 处理</button>
+        <button type="button" @click="addNode('loop')">Loop 循环</button>
         <button type="button" @click="openTool('workflows')">选择工作流</button>
       </div>
     </section>
@@ -1021,6 +1114,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
       <button type="button" title="添加 Media 节点" @click="addNode('media')"><span>M</span></button>
       <button type="button" title="添加 Output 节点" @click="addNode('output')"><span>O</span></button>
       <button type="button" title="添加 LLM 节点" @click="addNode('llm')"><span>L</span></button>
+      <button type="button" title="添加 Loop 节点" @click="addNode('loop')"><span>↻</span></button>
       <button type="button" :class="{ active: activeTool === 'workflows' }" title="工作流模板" @click="openTool('workflows')"><span>W</span></button>
     </aside>
 
@@ -1043,6 +1137,10 @@ watch([nodes, edges], persistCanvas, { deep: true })
       <button type="button" @click="addNode('llm')">
         <span>L</span>
         <strong>LLM Processor</strong>
+      </button>
+      <button type="button" @click="addNode('loop')">
+        <span>↻</span>
+        <strong>Loop Controller</strong>
         <small>调用 MiniMax 处理上游文本/图片，输出给下游 workflow</small>
       </button>
       <button type="button" @click="openTool('workflows')">
@@ -1069,6 +1167,7 @@ watch([nodes, edges], persistCanvas, { deep: true })
         <span>{{ nodeStats.workflow }} Flow</span>
         <span>{{ nodeStats.output }} Output</span>
         <span>{{ nodeStats.llm }} LLM</span>
+        <span>{{ nodeStats.loop }} Loop</span>
         <span>{{ nodeStats.edges }} Edge</span>
       </div>
     </section>
@@ -1167,6 +1266,17 @@ watch([nodes, edges], persistCanvas, { deep: true })
           <input v-model="seedDraft" type="number" placeholder="随机" @blur="savePrompt" />
         </label>
         <button type="button" class="submit-run" :disabled="selectedData?.status === 'running'" @click="runSelectedNode">
+        运行
+      </button>
+      <button
+        v-if="canCascadeRun"
+        type="button"
+        class="submit-run cascade"
+        :disabled="selectedData?.status === 'running'"
+        @click="runCascade"
+      >
+        级联运行
+
           <span>{{ selectedRunLabel }}</span>
           <strong>↑</strong>
         </button>
@@ -1483,6 +1593,36 @@ watch([nodes, edges], persistCanvas, { deep: true })
   line-height: 1.6;
   white-space: pre-wrap;
 }
+.loop-node .node-card {
+  width: 340px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.loop-info {
+  margin-top: 12px;
+}
+.loop-info small {
+  display: block;
+  color: rgba(255, 255, 255, .55);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.loop-preview {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(100, 150, 255, .12);
+  color: rgba(200, 220, 255, .9);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.loop-empty {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, .35);
+  font-size: 13px;
+  line-height: 1.5;
+}
 .llm-empty {
   margin-top: 12px;
   color: rgba(255,255,255,.38);
@@ -1779,6 +1919,15 @@ watch([nodes, edges], persistCanvas, { deep: true })
   background: linear-gradient(145deg, #555, #2b2b2d) !important;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.22);
   cursor: pointer;
+}
+.submit-run.cascade {
+  background: rgba(100, 149, 237, .25);
+  color: #a0c4ff;
+  border-color: rgba(100, 149, 237, .4);
+}
+.submit-run.cascade:hover:not(:disabled) {
+  background: rgba(100, 149, 237, .4);
+  color: #fff;
 }
 .submit-run:disabled { opacity: .58; cursor: wait; }
 .submit-run span { color: #7dff9a; }
