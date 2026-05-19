@@ -552,14 +552,15 @@ function onCanvasDrop(event: DragEvent) {
   } catch { /* not our drag */ }
 }
 
-function addOutputImageNode(img: { url: string; prompt?: string; generation_id?: number }, pos: { x: number; y: number }) {
+function addOutputImageNode(img: { url: string; prompt?: string; generation_id?: number; run_id?: number; source_node_id?: string; created_at?: string }, pos: { x: number; y: number }) {
   const id = uniqueId('media')
+  const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(img.url) || img.url.includes('video')
   nodes.value = [...nodes.value, {
     id,
     type: 'media' as CanvasNodeType,
     position: pos,
     data: {
-      title: img.prompt ? img.prompt.slice(0, 40) : 'Image Result',
+      title: img.prompt ? img.prompt.slice(0, 40) : (isVideo ? 'Video Result' : 'Image Result'),
       body: '',
       hint: '从 Output 拖入，可连接下游 workflow',
       assetUrl: img.url,
@@ -567,6 +568,11 @@ function addOutputImageNode(img: { url: string; prompt?: string; generation_id?:
       model: 'Output',
       status: 'success',
       results: [img.url],
+      sourceRunId: img.run_id,
+      sourceGenerationId: img.generation_id,
+      sourceNodeId: img.source_node_id,
+      sourcePrompt: img.prompt,
+      sourceCreatedAt: img.created_at,
     },
   }]
   selectNode(id)
@@ -708,6 +714,25 @@ function addEcommerceTemplate(workflow: ComfyWorkflow) {
   nextTick(() => fitView({ padding: 0.18, duration: 350 }))
 }
 
+async function hydrateCanvasFromServer() {
+  if (!canvasDocumentId.value) return
+  try {
+    const response = await api.get(`/api/canvas/documents/${canvasDocumentId.value}`)
+    const serverNodes: any[] = response.data?.nodes || []
+    let merged = false
+    for (const serverNode of serverNodes) {
+      if (serverNode.type === 'output' && serverNode.data?.images?.length) {
+        const localNode = nodes.value.find((n: any) => n.id === serverNode.node_id)
+        if (localNode) {
+          localNode.data = { ...localNode.data, images: serverNode.data.images, status: 'done' }
+          merged = true
+        }
+      }
+    }
+    if (merged) canvasSaveState.value = 'saved'
+  } catch { /* best effort */ }
+}
+
 async function runSelectedNode() {
   if (!selectedNode.value) return
   savePrompt()
@@ -751,15 +776,14 @@ async function runSelectedNode() {
       duration: 6,
     })
     const urls = response.data?.urls || []
-    if (urls.length) {
-      createOutputNodes(node, urls)
-    }
     updateNodeData(node.id, {
       body: response.data?.prompt || prompt,
       status: urls.length ? 'success' : 'error',
       error: urls.length ? '' : '接口没有返回结果地址',
       results: urls,
     })
+    // Re-fetch document graph to get backend-written output node images
+    await hydrateCanvasFromServer()
   } catch (error: any) {
     const message = error?.response?.data?.detail || error.message || '节点运行失败'
     runError.value = message
@@ -932,7 +956,18 @@ watch([nodes, edges], persistCanvas, { deep: true })
             <strong>{{ data.title }}</strong>
             <div v-if="data.images?.length" class="output-grid">
               <template v-for="(img, i) in data.images" :key="i">
+                <video
+                  v-if="resultKind(img.url) === 'video'"
+                  :src="img.url"
+                  muted
+                  loop
+                  :title="img.prompt || ''"
+                  draggable="true"
+                  @dragstart="onOutputDragStart($event, img)"
+                  @click.stop="previewImage = img.url"
+                />
                 <img
+                  v-else
                   :src="img.url"
                   :alt="img.prompt || ''"
                   :title="img.prompt || ''"

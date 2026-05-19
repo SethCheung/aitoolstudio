@@ -3,6 +3,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
@@ -88,12 +89,25 @@ def _save_graph(db: Session, document: CanvasDocument, payload: CanvasGraphSave)
         document.title = payload.title
     document.viewport = payload.viewport or {}
 
+    # Preserve backend-written output images before frontend overwrites them
+    existing_output_images: dict[str, list[dict]] = {}
+    for node in db.query(CanvasNode).filter(
+        CanvasNode.document_id == document.id,
+        CanvasNode.type == "output",
+    ).all():
+        existing_data = dict(node.data or {})
+        if existing_data.get("images"):
+            existing_output_images[node.node_id] = existing_data["images"]
+
     db.query(CanvasNode).filter(CanvasNode.document_id == document.id).delete()
     db.query(CanvasEdge).filter(CanvasEdge.document_id == document.id).delete()
 
     for node in payload.nodes:
         data = dict(node.data or {})
         output = data.pop("output", {}) if isinstance(data.get("output"), dict) else {}
+        # Merge preserved images for output nodes
+        if node.type == "output" and node.id in existing_output_images:
+            data["images"] = existing_output_images[node.id]
         db.add(CanvasNode(
             document_id=document.id,
             node_id=node.id,
