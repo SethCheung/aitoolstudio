@@ -689,7 +689,7 @@ async function hydrateCanvasFromServer() {
     let merged = false
     for (const serverNode of serverNodes) {
       if (serverNode.type === 'output' && serverNode.data?.images?.length) {
-        const localNode = nodes.value.find((n: any) => n.id === serverNode.node_id)
+        const localNode = nodes.value.find((n: any) => n.id === serverNode.id)
         if (localNode) {
           localNode.data = { ...localNode.data, images: serverNode.data.images, status: 'done' }
           merged = true
@@ -1200,10 +1200,11 @@ watch([nodes, edges], persistCanvas, { deep: true })
     </section>
   </main>
 
-  <!-- Preview overlay for output images -->
+  <!-- Preview overlay for output media (image/video) -->
   <Teleport to="body">
     <div v-if="previewImage" class="preview-overlay" @click="previewImage = null">
-      <img :src="previewImage" alt="Preview" />
+      <video v-if="resultKind(previewImage) === 'video'" :src="previewImage" controls autoplay />
+      <img v-else :src="previewImage" alt="Preview" />
     </div>
   </Teleport>
 </template>
