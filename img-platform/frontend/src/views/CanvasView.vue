@@ -1282,9 +1282,6 @@ watch([nodes, edges], persistCanvas, { deep: true })
         @click="runCascade"
       >
         级联运行
-
-          <span>{{ selectedRunLabel }}</span>
-          <strong>↑</strong>
         </button>
       </div>
       <div v-if="!selectedIsMedia" class="quick-prompts">
