@@ -1,4 +1,5 @@
 import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +17,7 @@ from schemas.canvas import (
     CanvasEdgePayload,
     CanvasGraphResponse,
     CanvasGraphSave,
+    CanvasMediaNodeCreate,
     CanvasNodePayload,
     CanvasNodeRunRequest,
     CanvasNodeRunResponse,
@@ -192,6 +194,46 @@ def get_or_create_by_conversation(
         viewport={},
     )
     db.add(document)
+    db.commit()
+    db.refresh(document)
+    return _graph_response(document)
+
+
+@router.post("/documents/{document_id}/media-nodes", response_model=CanvasGraphResponse)
+def create_media_node(
+    document_id: int,
+    payload: CanvasMediaNodeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a Media node from a conversation result."""
+    document = _get_document(db, document_id, current_user.id)
+
+    # Generate ID from the generation source if available
+    node_id = f"media-{payload.source_generation_id}" if payload.source_generation_id else f"media-{uuid.uuid4().hex[:8]}"
+
+    # Check if this node already exists (idempotent)
+    existing = (
+        db.query(CanvasNode)
+        .filter(CanvasNode.document_id == document.id, CanvasNode.node_id == node_id)
+        .first()
+    )
+    if existing:
+        data = dict(existing.data or {})
+        data["assetUrl"] = payload.asset_url
+        data["title"] = payload.title
+        existing.data = data
+    else:
+        node = CanvasNode(
+            document_id=document.id,
+            node_id=node_id,
+            type="media",
+            position_x=payload.position.x,
+            position_y=payload.position.y,
+            data={"assetUrl": payload.asset_url, "title": payload.title, "hint": "来自对话生成结果"},
+        )
+        db.add(node)
+
     db.commit()
     db.refresh(document)
     return _graph_response(document)

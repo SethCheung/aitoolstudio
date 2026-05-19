@@ -78,3 +78,11 @@ class CanvasNodeRunResponse(BaseModel):
     urls: list[str] = Field(default_factory=list)
     result_type: str = "image"
     output: dict[str, Any] = Field(default_factory=dict)
+
+
+class CanvasMediaNodeCreate(BaseModel):
+    asset_url: str
+    title: str = "Image Result"
+    source: str = "conversation"
+    source_generation_id: Optional[int] = None
+    position: CanvasPosition = Field(default_factory=CanvasPosition)

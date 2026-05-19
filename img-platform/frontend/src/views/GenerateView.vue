@@ -1601,10 +1601,39 @@ async function goHome() {
 }
 
 function goCanvas() {
-  // Force port 5173 for canvas — avoid fnOS (5666) misrouting
-  const proto = window.location.protocol
-  const host = window.location.hostname
-  window.location.href = `${proto}//${host}:5173/canvas`
+  if (convId.value) {
+    router.push({ path: `/project/${convId.value}`, query: { mode: 'canvas' } })
+  } else {
+    const proto = window.location.protocol
+    const host = window.location.hostname
+    window.location.href = `${proto}//${host}:5173/canvas`
+  }
+}
+
+async function sendToCanvas(url: string, record: any) {
+  if (!convId.value) return
+  try {
+    // Get or create the project's canvas document
+    const docResp = await api.get(`/api/canvas/documents/by-conversation/${convId.value}`)
+    const docId = docResp.data?.id
+    if (!docId) {
+      ElMessage.error('Canvas document not found')
+      return
+    }
+    // Create a media node with this image
+    await api.post(`/api/canvas/documents/${docId}/media-nodes`, {
+      asset_url: url,
+      title: `Result - ${record.prompt?.slice(0, 40) || 'Image'}`,
+      source: 'conversation',
+      source_generation_id: record.id,
+      position: { x: 200, y: 200 },
+    })
+    ElMessage.success('已发送到 Canvas')
+    // Switch to canvas mode
+    router.push({ path: `/project/${convId.value}`, query: { mode: 'canvas' } })
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '发送失败')
+  }
 }
 
 async function logout() {
@@ -1905,6 +1934,14 @@ onUnmounted(() => {
                       <path d="M7 10l5 5 5-5M12 15V3"/>
                     </svg>
                     下载
+                  </button>
+                  <button
+                    v-if="convId"
+                    type="button"
+                    title="发送到 Canvas"
+                    @click="sendToCanvas(url, record)"
+                  >
+                    ⬡ Canvas
                   </button>
                 </figcaption>
               </figure>
