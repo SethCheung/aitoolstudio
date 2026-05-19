@@ -178,12 +178,6 @@ const quickPrompts = [
   '侧面 45 度展示，保留材质细节，背景干净',
   '俯视角度产品展示，构图居中，高清细节',
 ]
-const selectedRunLabel = computed(() => {
-  if (!selectedNode.value) return '提交任务'
-  if (selectedData.value?.status === 'running') return '生成中'
-  if (!selectedCanRun.value) return '保存节点'
-  return '运行节点'
-})
 const categories = computed(() => {
   const values = workflows.value.map((workflow) => workflow.category || 'image')
   return ['all', ...Array.from(new Set(values))]
