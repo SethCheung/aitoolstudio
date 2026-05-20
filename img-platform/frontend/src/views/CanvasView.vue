@@ -490,10 +490,16 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
   const id = uniqueId(type)
   const nodeCount = workflow?.workflow_json ? Object.keys(workflow.workflow_json).length : undefined
   const data: CanvasNodeData = workflow
-    ? {
+    ? (() => {
+        const summary = (workflow as any).summary
+        const reqHints: string[] = []
+        if (summary?.required_inputs?.includes('source_image')) reqHints.push('需要上游图片节点')
+        if (summary?.required_inputs?.includes('mask_image')) reqHints.push('需要蒙版')
+        const autoHint = reqHints.length ? `⚠️ ${reqHints.join('、')}` : ''
+        return {
         title: workflow.name,
-        body: workflow.description || '选中节点后在下方配置并生成',
-        hint: workflow.notes || '使用现有 ComfyUI workflow',
+        body: workflow.description || autoHint || '选中节点后在下方配置并生成',
+        hint: workflow.notes || autoHint || '使用现有 ComfyUI workflow',
         workflowId: workflow.id,
         workflowCategory: workflow.category,
         workflowNotes: workflow.notes,
@@ -507,6 +513,7 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
         status: 'idle',
         results: [],
       }
+      })()
     : {
         title: type === 'text' ? 'Text' : type === 'video' ? 'Video' : type === 'output' ? 'Output' : type === 'llm' ? 'LLM' : type === 'loop' ? 'Loop' : 'Media',
         body: type === 'text' ? '输入提示词，连接到下游工作流。' : type === 'llm' ? 'LLM 处理节点' : type === 'loop' ? '第《进度》批' : '',
