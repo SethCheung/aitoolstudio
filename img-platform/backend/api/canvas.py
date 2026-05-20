@@ -105,7 +105,11 @@ def _save_graph(db: Session, document: CanvasDocument, payload: CanvasGraphSave)
         preserved: dict = {}
         data = dict(node.data or {})
         for field in ("results", "status", "error", "body", "lastRendered",
-                       "lastIteration", "outputText", "images", "content"):
+                       "lastIteration", "outputText", "images", "content",
+                       "runId", "generationId",
+                       "lastRunId", "lastGenerationId",
+                       "sourceRunId", "sourceGenerationId", "sourceNodeId",
+                       "sourcePrompt", "sourceCreatedAt"):
             if field in data and data[field]:
                 preserved[field] = data[field]
         if node.output:
