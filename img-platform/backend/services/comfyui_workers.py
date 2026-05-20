@@ -225,13 +225,13 @@ def upsert_worker(worker_data: dict, worker_id: Optional[str] = None) -> dict:
     )
 
     now = _now()
-    target_id = worker_id or str(worker_data.get("id") or "")
+    normalized = _normalize_worker_fields(worker_data, now)
+    target_id = worker_id or str(worker_data.get("id") or normalized["id"])
 
     if not target_id:
         raise ValueError("Worker id is required")
 
-    normalized = _normalize_worker_fields(worker_data, now)
-    normalized["id"] = target_id  # id comes from path param or explicit field
+    normalized["id"] = target_id  # id comes from path param, explicit field, or auto-generated
 
     # Validate tier
     if normalized["tier"] not in VALID_TIERS:

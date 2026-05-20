@@ -61,6 +61,7 @@ class SamMaskRequest(BaseModel):
 class WorkerRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
 
+    id: Optional[str] = ""
     name: str
     url: str
     tier: str = "heavy"
@@ -239,8 +240,11 @@ async def workers_update(worker_id: str, req: WorkerRequest, _: User = Depends(r
 @router.delete("/workers/{worker_id}")
 async def workers_delete(worker_id: str, _: User = Depends(require_admin)):
     """Remove a ComfyUI worker."""
-    if not delete_worker(worker_id):
-        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        if not delete_worker(worker_id):
+            raise HTTPException(status_code=404, detail="Worker not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
 
 
