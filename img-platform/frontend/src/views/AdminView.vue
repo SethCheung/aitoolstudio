@@ -74,9 +74,45 @@ interface WorkerStatus {
   last_health_error: string | null
 }
 
-type Category = 'all' | 'image' | 'voice' | 'video' | 'music' | 'text' | 'users' | 'paths' | 'workflows' | 'workers'
+interface DashboardData {
+  workers: {
+    total: number
+    online: number
+    offline: number
+    queue_pending_total: number
+    queue_running_total: number
+  }
+  workflows: {
+    total: number
+    enabled: number
+  }
+  generations_24h: {
+    success: number
+    failed: number
+  }
+  canvas_runs_24h: {
+    success: number
+    failed: number
+    cascade: number
+  }
+  comfyui: {
+    status: string
+    version: string | null
+    checkpoint_count: number
+    core_nodes_ok: boolean
+  }
+  recent_errors: Array<{
+    time: string
+    source: string
+    worker: string | null
+    error: string
+  }>
+}
+
+type Category = 'dashboard' | 'all' | 'image' | 'voice' | 'video' | 'music' | 'text' | 'users' | 'paths' | 'workflows' | 'workers'
 
 const categories: Array<{ key: Category; label: string; icon: string }> = [
+  { key: 'dashboard', label: 'Dashboard', icon: '📊' },
   { key: 'all', label: 'All', icon: 'A' },
   { key: 'image', label: 'Image', icon: 'I' },
   { key: 'voice', label: 'Voice', icon: 'V' },
@@ -94,7 +130,7 @@ const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, '')}/docs`
 const router = useRouter()
 const auth = useAuthStore()
 
-const modelCategories: Record<Exclude<Category, 'all' | 'users' | 'paths' | 'workflows' | 'workers'>, string[]> = {
+const modelCategories: Record<Exclude<Category, 'dashboard' | 'all' | 'users' | 'paths' | 'workflows' | 'workers'>, string[]> = {
   image: ['image-01'],
   voice: ['speech-2.8-hd', 'speech-2.8-turbo', 'speech-2.6-hd', 'speech-2.6-turbo'],
   video: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'S2V-01'],
@@ -108,7 +144,8 @@ const modelPaths = ref<ModelPath[]>([])
 const comfyWorkflows = ref<ComfyWorkflow[]>([])
 const workers = ref<ComfyWorker[]>([])
 const workerStatuses = ref<WorkerStatus[]>([])
-const activeCategory = ref<Category>('all')
+const dashboardData = ref<DashboardData | null>(null)
+const activeCategory = ref<Category>('dashboard')
 const selectedName = ref('')
 const userSearch = ref('')
 const pathSearch = ref('')
@@ -284,6 +321,17 @@ const modelPathCategoryCount = computed(() => new Set(modelPaths.value.map((path
 const enabledWorkflowCount = computed(() => comfyWorkflows.value.filter((workflow) => workflow.enabled).length)
 const workflowCategoryCount = computed(() => new Set(comfyWorkflows.value.map((workflow) => workflow.category)).size)
 const summaryStats = computed(() => {
+  if (activeCategory.value === 'dashboard') {
+    const d = dashboardData.value
+    return {
+      total: d?.workers?.online ?? '…',
+      totalLabel: 'Workers online',
+      second: d?.generations_24h?.success ?? '…',
+      secondLabel: '24h generations',
+      third: d?.workflows?.total ?? '…',
+      thirdLabel: 'Workflows',
+    }
+  }
   if (activeCategory.value === 'users') {
     return {
       total: users.value.length,
@@ -485,8 +533,19 @@ async function importWorkflowsFromFolder() {
   }
 }
 
+async function fetchDashboard() {
+  try {
+    const response = await api.get('/api/admin/dashboard')
+    dashboardData.value = response.data
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to load dashboard'
+  }
+}
+
 function refreshActive() {
-  if (activeCategory.value === 'users') {
+  if (activeCategory.value === 'dashboard') {
+    fetchDashboard()
+  } else if (activeCategory.value === 'users') {
     fetchUsers()
   } else if (activeCategory.value === 'paths') {
     fetchModelPaths()
@@ -912,6 +971,7 @@ async function logout() {
 }
 
 onMounted(() => {
+  fetchDashboard()
   fetchProfiles()
   fetchUsers()
   fetchModelPaths()
@@ -991,9 +1051,88 @@ onMounted(() => {
       </div>
     </section>
 
+    <!-- Dashboard View -->
+    <section v-if="activeCategory === 'dashboard'" class="dashboard-grid" aria-label="Dashboard">
+      <div v-if="!dashboardData" class="empty-state">Loading dashboard...</div>
+      <template v-else>
+        <!-- Row 1: Workers + Workflows -->
+        <div class="dash-row">
+          <article class="dash-card">
+            <h3 class="dash-card-title">🖥 Workers</h3>
+            <div class="dash-stat-grid">
+              <div class="dash-stat"><span class="dash-stat-num">{{ dashboardData.workers.total }}</span><span class="dash-stat-label">Total</span></div>
+              <div class="dash-stat ok"><span class="dash-stat-num">{{ dashboardData.workers.online }}</span><span class="dash-stat-label">Online</span></div>
+              <div class="dash-stat warn"><span class="dash-stat-num">{{ dashboardData.workers.offline }}</span><span class="dash-stat-label">Offline</span></div>
+              <div class="dash-stat"><span class="dash-stat-num">{{ dashboardData.workers.queue_pending_total + dashboardData.workers.queue_running_total }}</span><span class="dash-stat-label">Queue</span></div>
+            </div>
+          </article>
+          <article class="dash-card">
+            <h3 class="dash-card-title">📋 Workflows</h3>
+            <div class="dash-stat-grid">
+              <div class="dash-stat"><span class="dash-stat-num">{{ dashboardData.workflows.total }}</span><span class="dash-stat-label">Total</span></div>
+              <div class="dash-stat ok"><span class="dash-stat-num">{{ dashboardData.workflows.enabled }}</span><span class="dash-stat-label">Enabled</span></div>
+            </div>
+          </article>
+        </div>
+
+        <!-- Row 2: ComfyUI Status + Generations 24h + Canvas 24h -->
+        <div class="dash-row">
+          <article class="dash-card">
+            <h3 class="dash-card-title">🖼 ComfyUI</h3>
+            <div class="dash-stat-grid">
+              <div class="dash-stat" :class="dashboardData.comfyui.status === 'ok' ? 'ok' : dashboardData.comfyui.status === 'degraded' ? 'warn' : 'err'">
+                <span class="dash-stat-num">{{ dashboardData.comfyui.status }}</span>
+                <span class="dash-stat-label">Status</span>
+              </div>
+              <div class="dash-stat"><span class="dash-stat-num">{{ dashboardData.comfyui.checkpoint_count }}</span><span class="dash-stat-label">Checkpoints</span></div>
+              <div class="dash-stat" :class="dashboardData.comfyui.core_nodes_ok ? 'ok' : 'err'">
+                <span class="dash-stat-num">{{ dashboardData.comfyui.core_nodes_ok ? 'OK' : 'FAIL' }}</span>
+                <span class="dash-stat-label">Core nodes</span>
+              </div>
+            </div>
+          </article>
+          <article class="dash-card">
+            <h3 class="dash-card-title">⚡ 24h Generations</h3>
+            <div class="dash-stat-grid">
+              <div class="dash-stat ok"><span class="dash-stat-num">{{ dashboardData.generations_24h.success }}</span><span class="dash-stat-label">Success</span></div>
+              <div class="dash-stat" :class="dashboardData.generations_24h.failed > 0 ? 'warn' : 'ok'">
+                <span class="dash-stat-num">{{ dashboardData.generations_24h.failed }}</span>
+                <span class="dash-stat-label">Failed</span>
+              </div>
+            </div>
+          </article>
+          <article class="dash-card">
+            <h3 class="dash-card-title">🎨 24h Canvas</h3>
+            <div class="dash-stat-grid">
+              <div class="dash-stat ok"><span class="dash-stat-num">{{ dashboardData.canvas_runs_24h.success }}</span><span class="dash-stat-label">Success</span></div>
+              <div class="dash-stat" :class="dashboardData.canvas_runs_24h.failed > 0 ? 'warn' : 'ok'">
+                <span class="dash-stat-num">{{ dashboardData.canvas_runs_24h.failed }}</span>
+                <span class="dash-stat-label">Failed</span>
+              </div>
+              <div class="dash-stat"><span class="dash-stat-num">{{ dashboardData.canvas_runs_24h.cascade }}</span><span class="dash-stat-label">Cascade</span></div>
+            </div>
+          </article>
+        </div>
+
+        <!-- Row 3: Recent Errors -->
+        <article class="dash-card dash-card-full">
+          <h3 class="dash-card-title">⚠ Recent Errors</h3>
+          <div v-if="dashboardData.recent_errors.length === 0" class="empty-state dim">No recent errors</div>
+          <div v-else class="error-list">
+            <div v-for="(err, idx) in dashboardData.recent_errors" :key="idx" class="error-row">
+              <span class="error-time">{{ new Date(err.time).toLocaleString() }}</span>
+              <span class="error-source">{{ err.source }}</span>
+              <span v-if="err.worker" class="error-worker">{{ err.worker }}</span>
+              <span class="error-msg">{{ err.error }}</span>
+            </div>
+          </div>
+        </article>
+      </template>
+    </section>
+
     <section class="profile-list" aria-label="Profiles">
       <!-- Profile Management View -->
-      <template v-if="activeCategory !== 'users' && activeCategory !== 'paths' && activeCategory !== 'workflows' && activeCategory !== 'workers'">
+      <template v-if="activeCategory !== 'dashboard' && activeCategory !== 'users' && activeCategory !== 'paths' && activeCategory !== 'workflows' && activeCategory !== 'workers'">
         <div v-if="isLoading" class="empty-state">Loading profiles...</div>
         <div v-else-if="filteredProfiles.length === 0" class="empty-state">
           No profiles in this category.
@@ -2297,4 +2436,99 @@ onMounted(() => {
   opacity: 0.25;
   cursor: not-allowed;
 }
+
+/* ── Dashboard ── */
+.dashboard-grid {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+.dash-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.dash-card {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 0;
+}
+.dash-card-full {
+  flex: none;
+  width: 100%;
+}
+.dash-card-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dash-stat-grid {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.dash-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.dash-stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+.dash-stat-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 2px;
+  text-transform: uppercase;
+}
+.dash-stat.ok .dash-stat-num { color: #52c41a; }
+.dash-stat.warn .dash-stat-num { color: #faad14; }
+.dash-stat.err .dash-stat-num { color: #ff4d4f; }
+
+.error-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.error-row {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(255, 77, 79, 0.08);
+  border: 1px solid rgba(255, 77, 79, 0.15);
+}
+.error-time {
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.error-source {
+  color: #ff4d4f;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.error-worker {
+  color: rgba(255, 255, 255, 0.5);
+  flex-shrink: 0;
+}
+.error-msg {
+  color: rgba(255, 255, 255, 0.7);
+  word-break: break-all;
+}
+.dim { opacity: 0.4; }
 </style>

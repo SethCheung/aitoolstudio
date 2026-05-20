@@ -9,6 +9,12 @@ from core.security import hash_password
 from api.auth import require_admin
 from models.database import get_db
 from models.user import User
+from models.generation import Generation
+from models.canvas import CanvasRun
+from services.comfyui_workers import get_workers_status
+from services.comfyui_workflows import list_workflows
+from datetime import datetime, timedelta
+import logging
 
 router = APIRouter(tags=["Admin UI"])
 
@@ -114,6 +120,115 @@ async def delete_user(
     db.delete(user)
     db.commit()
     return {"ok": True}
+
+
+logger = logging.getLogger(__name__)
+
+
+@router.get("/api/admin/dashboard")
+async def dashboard(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    since = datetime.utcnow() - timedelta(hours=24)
+
+    # Workers
+    worker_statuses = await get_workers_status()
+    workers_total = len(worker_statuses)
+    workers_online = sum(1 for w in worker_statuses if w.get("online"))
+    workers_offline = workers_total - workers_online
+    queue_pending_total = sum(w.get("queue_pending", 0) or 0 for w in worker_statuses)
+    queue_running_total = sum(w.get("queue_running", 0) or 0 for w in worker_statuses)
+
+    # Workflows
+    workflows_data = list_workflows(include_disabled=True)
+    wf_total = len(workflows_data)
+    wf_enabled = sum(1 for w in workflows_data if w.get("enabled"))
+
+    # Generations 24h
+    gens = db.query(Generation).filter(Generation.created_at >= since).all()
+    gen_success = sum(
+        1 for g in gens
+        if (g.image_urls and len(g.image_urls) > 0)
+        or g.audio_url
+        or g.video_url
+    )
+    gen_failed = 0  # no status field to distinguish
+
+    # Canvas runs 24h
+    runs = db.query(CanvasRun).filter(CanvasRun.created_at >= since).all()
+    run_success = sum(1 for r in runs if r.status == "success")
+    run_failed = sum(1 for r in runs if r.status in ("failed", "error"))
+    run_cascade = 0  # can't distinguish cascade runs without schema change
+
+    # ComfyUI aggregate
+    comfyui_status = "offline"
+    comfyui_version = None
+    comfyui_ckpt = 0
+    comfyui_core_ok = False
+    online_workers = [w for w in worker_statuses if w.get("online")]
+    if online_workers:
+        comfyui_status = "degraded"
+        all_obj_ok = all(w.get("object_info_ok") for w in online_workers)
+        all_core_ok = all(w.get("has_required_core_nodes") for w in online_workers)
+        if all_obj_ok and all_core_ok:
+            comfyui_status = "ok"
+        best = online_workers[0]
+        sys_stats = best.get("system_stats") or {}
+        comfyui_version = sys_stats.get("comfyui_version") or best.get("version")
+        comfyui_ckpt = max((w.get("checkpoint_count", 0) or 0) for w in online_workers)
+        comfyui_core_ok = all_core_ok
+
+    # Recent errors
+    errors = []
+    for r in runs:
+        if r.error and r.status in ("failed", "error"):
+            errors.append({
+                "time": r.created_at.isoformat() if r.created_at else "",
+                "source": "canvas run",
+                "worker": None,
+                "error": r.error[:200],
+            })
+    for w in worker_statuses:
+        if w.get("last_health_error"):
+            errors.append({
+                "time": datetime.utcnow().isoformat(),
+                "source": "worker health",
+                "worker": w.get("id") or w.get("name"),
+                "error": str(w.get("last_health_error"))[:200],
+            })
+    errors.sort(key=lambda e: e["time"], reverse=True)
+    errors = errors[:5]
+
+    return {
+        "workers": {
+            "total": workers_total,
+            "online": workers_online,
+            "offline": workers_offline,
+            "queue_pending_total": queue_pending_total,
+            "queue_running_total": queue_running_total,
+        },
+        "workflows": {
+            "total": wf_total,
+            "enabled": wf_enabled,
+        },
+        "generations_24h": {
+            "success": gen_success,
+            "failed": gen_failed,
+        },
+        "canvas_runs_24h": {
+            "success": run_success,
+            "failed": run_failed,
+            "cascade": run_cascade,
+        },
+        "comfyui": {
+            "status": comfyui_status,
+            "version": comfyui_version,
+            "checkpoint_count": comfyui_ckpt,
+            "core_nodes_ok": comfyui_core_ok,
+        },
+        "recent_errors": errors,
+    }
 
 
 ADMIN_HTML = """<!doctype html>

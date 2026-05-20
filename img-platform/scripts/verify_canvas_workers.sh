@@ -186,16 +186,31 @@ check_contains "OpenAPI has /api/comfyui/workers/status" "$OAPI" "/api/comfyui/w
 check_contains "OpenAPI has run-cascade" "$OAPI" "run-cascade"
 check_contains "OpenAPI has canvas run" "$OAPI" "/api/canvas/documents/{document_id}/nodes/{node_id}/run"
 
-# ── A. Compileall ──
-echo "[A] Backend compileall"
+# ── A. Dashboard ──
+echo "[A] Admin Dashboard"
+DASHBOARD=$(curl -s "$API/api/admin/dashboard" -H "$AUTH")
+DASH_HTTP=$(curl -s -o /dev/null -w '%{http_code}' "$API/api/admin/dashboard" -H "$AUTH")
+check "GET /api/admin/dashboard returns 200" "$DASH_HTTP" "200"
+
+DASH_WORKERS=$(echo "$DASHBOARD" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('workers',{}).get('total',0))")
+check_gt "Dashboard has workers total" "$DASH_WORKERS" 0
+
+DASH_COMFY_STATUS=$(echo "$DASHBOARD" | python3 -c "import json,sys; print(json.load(sys.stdin).get('comfyui',{}).get('status',''))")
+check_contains "Dashboard comfyui status present" "$DASH_COMFY_STATUS" "ok\|degraded\|offline"
+
+check_contains "OpenAPI has /api/admin/dashboard" "$OAPI" "/api/admin/dashboard"
+check_contains "AdminView chunk has dashboard" "$ADMIN_CONTENT" "dashboard"
+
+# ── B. Compileall ──
+echo "[B] Backend compileall"
 COMPILE_OK="no"
 if command -v docker &>/dev/null && echo '12301230' | sudo -S docker exec aitoolstudio-backend-1 python -m compileall api services models schemas main.py &>/dev/null; then
     COMPILE_OK="yes"
 fi
 warn "  - compileall: $([ "$COMPILE_OK" = "yes" ] && echo '✓ passed' || echo '⚠ skipped (no docker access)')"
 
-# ── B. Worker CRUD ──
-echo "[B] Worker CRUD"
+# ── C. Worker CRUD ──
+echo "[C] Worker CRUD"
 TEST_ID="regression-test-$(date +%s)"
 CREATE=$(curl -s -X POST "$API/api/comfyui/workers" \
     -H "$AUTH" -H 'Content-Type: application/json' \
