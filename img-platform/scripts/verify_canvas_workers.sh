@@ -201,6 +201,32 @@ check_contains "Dashboard comfyui status present" "$DASH_COMFY_STATUS" "ok\|degr
 check_contains "OpenAPI has /api/admin/dashboard" "$OAPI" "/api/admin/dashboard"
 check_contains "AdminView chunk has dashboard" "$ADMIN_CONTENT" "dashboard"
 
+# ── A2. Record Fields (Task H) ──
+echo "[A2] Record standardization"
+DASH_CASCADE=$(echo "$DASHBOARD" | python3 -c "import json,sys; print(json.load(sys.stdin).get('canvas_runs_24h',{}).get('cascade',-1))")
+check_gt "Dashboard cascade count readable" "$DASH_CASCADE" -1
+
+# Verify DB columns exist
+if command -v docker &>/dev/null; then
+  GEN_COLS=$(echo '12301230' | sudo -S docker exec aitoolstudio-backend-1 python3 -c "
+import sqlite3; conn=sqlite3.connect('/app/data/img_platform.db')
+cur=conn.cursor(); cur.execute('PRAGMA table_info(generations)')
+print(','.join(row[1] for row in cur.fetchall()))
+conn.close()
+" 2>/dev/null)
+  check_contains "generations table has worker_id" "$GEN_COLS" "worker_id"
+  check_contains "generations table has run_type" "$GEN_COLS" "run_type"
+
+  RUN_COLS=$(echo '12301230' | sudo -S docker exec aitoolstudio-backend-1 python3 -c "
+import sqlite3; conn=sqlite3.connect('/app/data/img_platform.db')
+cur=conn.cursor(); cur.execute('PRAGMA table_info(canvas_runs)')
+print(','.join(row[1] for row in cur.fetchall()))
+conn.close()
+" 2>/dev/null)
+  check_contains "canvas_runs table has worker_id" "$RUN_COLS" "worker_id"
+  check_contains "canvas_runs table has run_type" "$RUN_COLS" "run_type"
+fi
+
 # ── B. Compileall ──
 echo "[B] Backend compileall"
 COMPILE_OK="no"
