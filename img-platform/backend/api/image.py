@@ -249,30 +249,26 @@ async def generate(
         entrypoint="POST /api/image/generate",
         error_source=None,
     )
-            run_type="direct_image",
-            entrypoint="POST /api/image/generate",
-            error_source=None,
-        )
-        db.add(gen)
-        db.commit()
-        db.refresh(gen)
+    db.add(gen)
+    db.commit()
+    db.refresh(gen)
 
-        return GenerationResponse(
-            id=gen.id,
-            type="image",
-            prompt=gen.prompt,
-            image_urls=gen.image_urls,
-            audio_url=None,
-            video_url=None,
-            model=gen.model,
-            aspect_ratio=gen.aspect_ratio,
-            voice_model=None,
-            voice_id=None,
-            video_model=None,
-            video_duration=None,
-            n_generated=gen.n_generated,
-            created_at=gen.created_at,
-        )
+    return GenerationResponse(
+        id=gen.id,
+        type="image",
+        prompt=gen.prompt,
+        image_urls=gen.image_urls,
+        audio_url=None,
+        video_url=None,
+        model=gen.model,
+        aspect_ratio=gen.aspect_ratio,
+        voice_model=None,
+        voice_id=None,
+        video_model=None,
+        video_duration=None,
+        n_generated=gen.n_generated,
+        created_at=gen.created_at,
+    )
 
     profile = get_profile_for_model(req.model)
     if not profile:
