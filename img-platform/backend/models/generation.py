@@ -23,3 +23,8 @@ class Generation(BaseModel):
     mini_max_id = Column(String(100), nullable=True)  # MiniMax task ID
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True, index=True)
+    # ── 可观测性字段 ──
+    worker_id = Column(String(80), nullable=True, index=True)
+    run_type = Column(String(40), nullable=True, index=True)
+    entrypoint = Column(String(200), nullable=True)
+    error_source = Column(String(40), nullable=True)

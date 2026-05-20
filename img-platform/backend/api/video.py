@@ -148,6 +148,10 @@ async def generate(
             n_generated=1,
             mini_max_id=result.get("id", ""),
             user_id=_current_user.id if _current_user else None,
+            worker_id=None,
+            run_type="direct_video",
+            entrypoint="POST /api/video/generate",
+            error_source=None,
         )
         db.add(gen)
         db.commit()
@@ -227,6 +231,10 @@ async def generate(
         video_duration=req.duration,
         n_generated=1,
         mini_max_id=task_id,
+        worker_id=None,
+        run_type="direct_video",
+        entrypoint="POST /api/video/generate",
+        error_source=None,
     )
     db.add(gen)
     db.commit()

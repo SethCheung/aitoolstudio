@@ -375,6 +375,10 @@ async def _run_llm_node_impl(
         prompt=user_prompt[:500],
         request_payload=payload.model_dump(),
         result_payload={},
+        worker_id=None,
+        run_type="canvas_llm",
+        entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{node_id}/run",
+        error_source=None,
     )
     db.add(run)
     db.commit()
@@ -666,6 +670,10 @@ async def _run_cascade(
                     document_id=document.id, node_id=llm_node.id,
                     status="running", prompt=combined_prompt[:500],
                     request_payload={}, result_payload={},
+                    worker_id=None,
+                    run_type="canvas_cascade",
+                    entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{target_node_id}/run-cascade",
+                    error_source=None,
                 )
                 db.add(llm_run)
                 db.commit()
@@ -730,6 +738,10 @@ async def _run_cascade(
                 document_id=document.id, node_id=target_node_id,
                 status="running", prompt=workflow_prompt,
                 request_payload=payload.model_dump(), result_payload={},
+                worker_id=selected.get("id"),
+                run_type="canvas_cascade",
+                entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{target_node_id}/run-cascade",
+                error_source=None,
             )
             db.add(wf_run)
             db.commit()
@@ -773,6 +785,10 @@ async def _run_cascade(
                     mini_max_id=result.get("id", ""),
                     user_id=current_user.id,
                     conversation_id=document.conversation_id,
+                    worker_id=selected.get("id") if selected else None,
+                    run_type="canvas_cascade",
+                    entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{target_node_id}/run-cascade",
+                    error_source=None,
                 )
             else:
                 media_urls = _upstream_media(nodes, edges, target)
@@ -814,6 +830,10 @@ async def _run_cascade(
                     mini_max_id=result.get("id", ""),
                     user_id=current_user.id,
                     conversation_id=document.conversation_id,
+                    worker_id=selected.get("id") if selected else None,
+                    run_type="canvas_cascade",
+                    entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{target_node_id}/run-cascade",
+                    error_source=None,
                 )
 
             db.add(gen)
@@ -962,6 +982,10 @@ async def run_node(
         prompt=prompt,
         request_payload=payload.model_dump(),
         result_payload={},
+        worker_id=None,  # set after scheduler selection
+        run_type="canvas_run",
+        entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{node_id}/run",
+        error_source=None,
     )
     db.add(run)
     db.commit()
@@ -1023,6 +1047,10 @@ async def run_node(
                 mini_max_id=result.get("id", ""),
                 user_id=current_user.id,
                 conversation_id=document.conversation_id,
+                worker_id=selected.get("id") if selected else None,
+                run_type="canvas_run",
+                entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{node_id}/run",
+                error_source=None,
             )
             result_type = "video"
         else:
@@ -1074,6 +1102,10 @@ async def run_node(
                 mini_max_id=result.get("id", ""),
                 user_id=current_user.id,
                 conversation_id=document.conversation_id,
+                worker_id=selected.get("id") if selected else None,
+                run_type="canvas_run",
+                entrypoint=f"POST /api/canvas/documents/{document.id}/nodes/{node_id}/run",
+                error_source=None,
             )
             result_type = "image"
 
@@ -1117,6 +1149,8 @@ async def run_node(
         run.status = "success"
         run.generation_id = generation.id
         run.result_payload = output
+        run.worker_id = selected.get("id") if selected else None
+        run.status = "success"
 
         saved_node = (
             db.query(CanvasNode)

@@ -114,6 +114,10 @@ async def fire_canvas_image_generations(
         n_generated=len(image_urls),
         mini_max_id=result.get("id", ""),
         user_id=current_user.id,
+        worker_id=None,
+        run_type="direct_image",
+        entrypoint="POST /api/compat/images/generations",
+        error_source=None,
     )
     db.add(gen)
     db.commit()

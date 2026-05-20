@@ -159,7 +159,7 @@ async def dashboard(
     runs = db.query(CanvasRun).filter(CanvasRun.created_at >= since).all()
     run_success = sum(1 for r in runs if r.status == "success")
     run_failed = sum(1 for r in runs if r.status in ("failed", "error"))
-    run_cascade = 0  # can't distinguish cascade runs without schema change
+    run_cascade = sum(1 for r in runs if r.run_type == "canvas_cascade")
 
     # ComfyUI aggregate
     comfyui_status = "offline"
@@ -179,14 +179,14 @@ async def dashboard(
         comfyui_ckpt = max((w.get("checkpoint_count", 0) or 0) for w in online_workers)
         comfyui_core_ok = all_core_ok
 
-    # Recent errors
+    # Recent errors — use record fields for richer detail
     errors = []
     for r in runs:
         if r.error and r.status in ("failed", "error"):
             errors.append({
                 "time": r.created_at.isoformat() if r.created_at else "",
-                "source": "canvas run",
-                "worker": None,
+                "source": r.error_source or "canvas run",
+                "worker": r.worker_id,
                 "error": r.error[:200],
             })
     for w in worker_statuses:

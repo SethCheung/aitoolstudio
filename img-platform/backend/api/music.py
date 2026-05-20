@@ -115,6 +115,10 @@ async def generate(
         voice_model=req.model,
         n_generated=1,
         mini_max_id=result.get("trace_id", ""),
+        worker_id=None,
+        run_type="direct_music",
+        entrypoint="POST /api/music/generate",
+        error_source=None,
     )
     db.add(gen)
     db.commit()

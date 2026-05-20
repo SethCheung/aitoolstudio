@@ -65,6 +65,11 @@ class CanvasRun(BaseModel):
     result_payload = Column(JSON, nullable=False, default=dict)
     error = Column(Text, nullable=True)
     generation_id = Column(Integer, ForeignKey("generations.id"), nullable=True)
+    # ── 可观测性字段 ──
+    worker_id = Column(String(80), nullable=True, index=True)
+    run_type = Column(String(40), nullable=True, index=True)
+    entrypoint = Column(String(200), nullable=True)
+    error_source = Column(String(40), nullable=True)
 
     document = relationship("CanvasDocument", back_populates="runs")
     generation = relationship("Generation")

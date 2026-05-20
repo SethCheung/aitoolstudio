@@ -118,6 +118,10 @@ async def upscale(
         n_generated=len(image_urls),
         mini_max_id=result.get("id", ""),
         user_id=current_user.id,
+        worker_id=selected.get("id"),
+        run_type="upscale",
+        entrypoint="POST /api/image/upscale",
+        error_source=None,
     )
     db.add(gen)
     db.commit()
@@ -232,14 +236,22 @@ async def generate(
 
         data = result.get("data", {})
         image_urls = data.get("image_urls", [])
-        gen = Generation(
-            prompt=req.prompt,
-            image_urls=image_urls,
-            model=req.model,
-            aspect_ratio=req.aspect_ratio,
-            n_generated=len(image_urls),
-            mini_max_id=result.get("id", ""),
-            user_id=_current_user.id if _current_user else None,
+    gen = Generation(
+        prompt=req.prompt,
+        image_urls=result_d.get("image_urls", []) if isinstance(result_d, dict) else [],
+        model=req.model,
+        aspect_ratio=req.aspect_ratio,
+        n_generated=result_n,
+        mini_max_id=result_id,
+        user_id=current_user.id if current_user else None,
+        worker_id=None,
+        run_type="direct_image",
+        entrypoint="POST /api/image/generate",
+        error_source=None,
+    )
+            run_type="direct_image",
+            entrypoint="POST /api/image/generate",
+            error_source=None,
         )
         db.add(gen)
         db.commit()
