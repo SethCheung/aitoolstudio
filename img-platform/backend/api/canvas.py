@@ -28,6 +28,7 @@ from schemas.canvas import (
 )
 from services.comfyui import generate_image as comfyui_generate_image
 from services.comfyui import generate_video as comfyui_generate_video
+from services.comfyui_scheduler import SchedulerError, SchedulerJob, select_worker
 from services.comfyui_workflows import runtime_workflow
 from services.minimax import chat_text
 
@@ -92,39 +93,40 @@ def _save_graph(db: Session, document: CanvasDocument, payload: CanvasGraphSave)
         document.title = payload.title
     document.viewport = payload.viewport or {}
 
-    # Preserve backend-written output images before frontend overwrites them
-    existing_output_images: dict[str, list[dict]] = {}
-    existing_llm_state: dict[str, dict] = {}
+    # Preserve ALL backend-written fields before delete+reinsert
+    # Previously only preserved output.images and llm state — workflow/video nodes'
+    # results/status/error/body would be clobbered by stale frontend payloads.
+    existing_state: dict[str, dict] = {}
     for node in db.query(CanvasNode).filter(
         CanvasNode.document_id == document.id,
-        CanvasNode.type.in_(["output", "llm"]),
     ).all():
-        existing_data = dict(node.data or {})
-        if node.type == "output" and existing_data.get("images"):
-            existing_output_images[node.node_id] = existing_data["images"]
-        if node.type == "llm":
-            existing_llm_state[node.node_id] = {
-                "outputText": existing_data.get("outputText", ""),
-                "status": existing_data.get("status", "idle"),
-                "error": existing_data.get("error", ""),
-            }
+        preserved: dict = {}
+        data = dict(node.data or {})
+        for field in ("results", "status", "error", "body", "lastRendered",
+                       "lastIteration", "outputText", "images", "content"):
+            if field in data:
+                preserved[field] = data[field]
+        if node.output:
+            preserved["_output"] = dict(node.output) if isinstance(node.output, dict) else node.output
+        if node.status:
+            preserved["_status"] = node.status
+        if node.error:
+            preserved["_error"] = node.error
+        if preserved:
+            existing_state[node.node_id] = preserved
 
     db.query(CanvasNode).filter(CanvasNode.document_id == document.id).delete()
     db.query(CanvasEdge).filter(CanvasEdge.document_id == document.id).delete()
 
     for node in payload.nodes:
         data = dict(node.data or {})
-        output = data.pop("output", {}) if isinstance(data.get("output"), dict) else {}
-        # Merge preserved images for output nodes
-        if node.type == "output" and node.id in existing_output_images:
-            data["images"] = existing_output_images[node.id]
-        # Merge preserved LLM state
-        if node.type == "llm" and node.id in existing_llm_state:
-            llm_state = existing_llm_state[node.id]
-            if llm_state.get("outputText"):
-                data["outputText"] = llm_state["outputText"]
-            data["status"] = llm_state.get("status", data.get("status", "idle"))
-            data["error"] = llm_state.get("error", data.get("error", ""))
+        payload_output = data.pop("output", {}) if isinstance(data.get("output"), dict) else {}
+        preserved = existing_state.get(node.id, {})
+        output = preserved.pop("_output", payload_output)
+        db_status = preserved.pop("_status", None)
+        db_error = preserved.pop("_error", None)
+        # Merge preserved fields into data (preserved wins over payload)
+        data.update(preserved)
         db.add(CanvasNode(
             document_id=document.id,
             node_id=node.id,
@@ -134,8 +136,8 @@ def _save_graph(db: Session, document: CanvasDocument, payload: CanvasGraphSave)
             width=node.width,
             height=node.height,
             data=data,
-            status=str(data.get("status") or "idle"),
-            error=data.get("error"),
+            status=db_status or str(data.get("status") or "idle"),
+            error=db_error or data.get("error"),
             output=output,
         ))
 
@@ -173,13 +175,13 @@ def _upstream_prompt(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePaylo
         if node.type == "text"
     ]
     text_nodes.sort(key=lambda item: _safe_number(item[0].data.get("promptOrder"), item[1] + 1))
-    parts = [str(node.data.get("body") or "").strip() for _, _, node in text_nodes]
+    parts = [str(node.data.get("body") or node.data.get("content") or "").strip() for _, _, node in text_nodes]
 
-    # Also collect from LLM nodes' outputText
+    # Also collect from LLM nodes' outputText (including llmConfig from Huobao Canvas)
     llm_nodes = [
         (edge, index, node)
         for edge, index, node in _incoming_pairs(nodes, edges, target.id)
-        if node.type == "llm"
+        if node.type in ("llm", "llmConfig")
     ]
     llm_nodes.sort(key=lambda item: _safe_number(item[0].data.get("promptOrder"), item[1] + 1))
     for _, _, node in llm_nodes:
@@ -612,13 +614,21 @@ async def _run_cascade(
     target = node_map.get(target_node_id)
     if not target:
         raise HTTPException(status_code=404, detail="Target node not found")
-    if target.type not in ("workflow", "video"):
+    # Normalize Huobao Canvas node types for type gating
+    _cascade_ok = ("workflow", "video", "imageConfig", "videoConfig", "llmConfig")
+    if target.type not in _cascade_ok:
         raise HTTPException(status_code=400, detail="Cascade target must be a Workflow or Video node")
 
     ancestor_ids = _upstream_nodes(target_node_id, nodes, edges)
     loop_nodes = [node_map[nid] for nid in ancestor_ids if node_map[nid].type == "loop"]
-    llm_nodes_ids = [nid for nid in ancestor_ids if node_map[nid].type == "llm"]
+    # Accept both ATS "llm" and Huobao "llmConfig"
+    llm_nodes_ids = [nid for nid in ancestor_ids if node_map[nid].type in ("llm", "llmConfig")]
     text_node_ids = [nid for nid in ancestor_ids if node_map[nid].type == "text"]
+
+    # Normalize Huobao target type for downstream dispatch
+    if target.type in ("imageConfig", "videoConfig", "llmConfig"):
+        _norm = {"imageConfig": "workflow", "videoConfig": "video", "llmConfig": "llm"}
+        target.type = _norm[target.type]
 
     loop_count = 1
     if loop_nodes:
@@ -638,7 +648,8 @@ async def _run_cascade(
 
         base_parts = []
         for tid in text_node_ids:
-            body = str(node_map[tid].data.get("body") or "").strip()
+            node_data = node_map[tid].data
+            body = str(node_data.get("body") or node_data.get("content") or "").strip()
             if body:
                 base_parts.append(body)
         base_text = "\n".join(base_parts)
@@ -710,7 +721,7 @@ async def _run_cascade(
 
         # Run workflow
         try:
-            workflow_id = str(target.data.get("workflowId") or "").strip()
+            workflow_id = str(target.data.get("workflowId") or target.data.get("model") or "").strip()
             if not workflow_id:
                 raise ValueError("Workflow node has no workflowId")
 
@@ -734,7 +745,22 @@ async def _run_cascade(
                     width=None, height=None, n=1, seed=payload.seed, checkpoint=None,
                     expected_category="video", duration=payload.duration, fps=payload.fps,
                 )
-                result = await comfyui_generate_video(prompt=workflow_prompt, workflow=wf)
+                # ── Scheduler: select worker for cascade video run ──
+                try:
+                    job = SchedulerJob(
+                        job_class="auto",
+                        required_tags=["video"],
+                        reason=f"canvas cascade video {workflow_id}",
+                    )
+                    selected = await select_worker(job)
+                except SchedulerError as exc:
+                    logger.warning("Scheduler could not find worker for cascade video: %s", exc)
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"无可用 ComfyUI Worker 处理级联视频任务. {exc}",
+                    )
+
+                result = await comfyui_generate_video(prompt=workflow_prompt, workflow=wf, base_url=selected["url"])
                 urls_data = result.get("data", {})
                 urls = urls_data.get("video_urls") or [urls_data.get("video_url")]
                 urls = [u for u in urls if u]
@@ -756,6 +782,20 @@ async def _run_cascade(
                     aspect_ratio=payload.aspect_ratio or str(target.data.get("aspectRatio") or "1:1"),
                     width=None, height=None, n=quantity, seed=payload.seed, checkpoint=None,
                 )
+                # ── Scheduler: select worker for cascade image run ──
+                try:
+                    job = SchedulerJob(
+                        job_class="auto",
+                        reason=f"canvas cascade image {workflow_id}",
+                    )
+                    selected = await select_worker(job)
+                except SchedulerError as exc:
+                    logger.warning("Scheduler could not find worker for cascade image: %s", exc)
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"无可用 ComfyUI Worker 处理级联生图任务. {exc}",
+                    )
+
                 result = await comfyui_generate_image(
                     prompt=workflow_prompt,
                     aspect_ratio=payload.aspect_ratio or str(target.data.get("aspectRatio") or "1:1"),
@@ -763,6 +803,7 @@ async def _run_cascade(
                     workflow=wf,
                     source_image=media_urls[0] if media_urls else None,
                     mask_image=media_urls[1] if len(media_urls) > 1 else None,
+                    base_url=selected["url"],
                 )
                 urls = result.get("data", {}).get("image_urls") or [result.get("data", {}).get("image_url")]
                 urls = [u for u in urls if u]
@@ -781,7 +822,18 @@ async def _run_cascade(
             generation_id = gen.id
 
             wf_run.status = "success"
-            wf_run.result_payload = {"urls": urls, "generation_id": generation_id}
+            wf_run.result_payload = {
+                "urls": urls,
+                "generation_id": generation_id,
+                "comfyui_prompt_id": result.get("id", ""),
+                "worker_id": selected.get("id"),
+                "worker_url": selected.get("url", "N/A"),
+                "worker_tier": selected.get("tier"),
+                "scheduler_job_class": job.job_class,
+                "scheduler_required_tags": job.required_tags,
+                "scheduler_required_models": job.required_models,
+                "scheduler_required_nodes": job.required_nodes,
+            }
             wf_run.generation_id = generation_id
             iter_result.workflow_run_id = wf_run.id
             iter_result.workflow_urls = urls
@@ -879,14 +931,14 @@ async def run_node(
     target = next((node for node in payload.nodes if node.id == node_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="Canvas node not found")
-    if target.type not in {"workflow", "video", "llm"}:
+    if target.type not in {"workflow", "video", "llm", "imageConfig", "videoConfig", "llmConfig"}:
         raise HTTPException(status_code=400, detail="Only Workflow, Video, and LLM nodes can run")
 
     # === LLM node path ===
-    if target.type == "llm":
+    if target.type in ("llm", "llmConfig"):
         return await _run_llm_node_impl(db, document, payload, target, node_id, current_user)
 
-    workflow_id = str(target.data.get("workflowId") or "").strip()
+    workflow_id = str(target.data.get("workflowId") or target.data.get("model") or "").strip()
     if not workflow_id:
         raise HTTPException(status_code=400, detail="这个节点还没绑定 ComfyUI workflow")
 
@@ -894,7 +946,15 @@ async def run_node(
     if not prompt:
         raise HTTPException(status_code=400, detail="缺 prompt。请连接 Text 节点或在节点中填写描述")
 
-    category = str(target.data.get("workflowCategory") or ("video" if target.type == "video" else "image"))
+    # Normalize Huobao Canvas types for category detection
+    normalized_type = target.type
+    if normalized_type == "imageConfig":
+        normalized_type = "workflow"
+    elif normalized_type == "videoConfig":
+        normalized_type = "video"
+    elif normalized_type == "llmConfig":
+        normalized_type = "llm"
+    category = str(target.data.get("workflowCategory") or ("video" if normalized_type == "video" else "image"))
     run = CanvasRun(
         document_id=document.id,
         node_id=node_id,
@@ -922,9 +982,37 @@ async def run_node(
                 duration=payload.duration,
                 fps=payload.fps,
             )
-            result = await comfyui_generate_video(prompt=prompt, workflow=workflow)
+            # ── Scheduler: select worker for canvas video run ──
+            try:
+                job = SchedulerJob(
+                    job_class="auto",
+                    required_tags=["video"],
+                    reason=f"canvas run_node video {workflow_id}",
+                )
+                selected = await select_worker(job)
+                worker_url = selected["url"]
+            except SchedulerError as exc:
+                logger.warning("Scheduler could not find worker for canvas video: %s", exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"无可用 ComfyUI Worker 处理视频任务. {exc}",
+                )
+
+            result = await comfyui_generate_video(prompt=prompt, workflow=workflow, base_url=worker_url)
             urls = result.get("data", {}).get("video_urls") or [result.get("data", {}).get("video_url")]
             urls = [url for url in urls if url]
+            output = {
+                "urls": urls,
+                "result_type": result_type,
+                "comfyui_prompt_id": result.get("id", ""),
+                "worker_id": selected.get("id"),
+                "worker_url": worker_url,
+                "worker_tier": selected.get("tier"),
+                "scheduler_job_class": job.job_class,
+                "scheduler_required_tags": job.required_tags,
+                "scheduler_required_models": job.required_models,
+                "scheduler_required_nodes": job.required_nodes,
+            }
             generation = Generation(
                 type="video",
                 prompt=prompt,
@@ -950,6 +1038,21 @@ async def run_node(
                 seed=payload.seed,
                 checkpoint=None,
             )
+            # ── Scheduler: select worker for canvas image run ──
+            try:
+                job = SchedulerJob(
+                    job_class="auto",
+                    reason=f"canvas run_node image {workflow_id}",
+                )
+                selected = await select_worker(job)
+                worker_url = selected["url"]
+            except SchedulerError as exc:
+                logger.warning("Scheduler could not find worker for canvas image: %s", exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"无可用 ComfyUI Worker 处理生图任务. {exc}",
+                )
+
             result = await comfyui_generate_image(
                 prompt=prompt,
                 aspect_ratio=payload.aspect_ratio or str(target.data.get("aspectRatio") or "1:1"),
@@ -958,6 +1061,7 @@ async def run_node(
                 workflow=workflow,
                 source_image=media_urls[0] if media_urls else None,
                 mask_image=media_urls[1] if len(media_urls) > 1 else None,
+                base_url=worker_url,
             )
             urls = result.get("data", {}).get("image_urls") or []
             generation = Generation(
@@ -976,7 +1080,18 @@ async def run_node(
         if not urls:
             raise ValueError("ComfyUI workflow did not return output URLs")
 
-        output = {"urls": urls, "result_type": result_type, "comfyui_prompt_id": result.get("id", "")}
+        output = {
+            "urls": urls,
+            "result_type": result_type,
+            "comfyui_prompt_id": result.get("id", ""),
+            "worker_id": selected.get("id"),
+            "worker_url": worker_url,
+            "worker_tier": selected.get("tier"),
+            "scheduler_job_class": job.job_class,
+            "scheduler_required_tags": job.required_tags,
+            "scheduler_required_models": job.required_models,
+            "scheduler_required_nodes": job.required_nodes,
+        }
         db.add(generation)
         db.flush()
 

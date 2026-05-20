@@ -10,6 +10,12 @@ from schemas.image import ImageGenerateRequest, ImageUpscaleRequest
 from schemas.generation import GenerationResponse
 from services.minimax import generate_image as http_generate_image
 from services.comfyui import generate_image as comfyui_generate_image, upscale_image as comfyui_upscale_image
+from services.comfyui_scheduler import (
+    SchedulerError,
+    SchedulerJob,
+    build_job_from_image_request,
+    select_worker,
+)
 from services.comfyui_workflows import runtime_workflow
 from services.cli_runner import generate_image as cli_generate_image
 from services.profile_manager import get_profile_for_model
@@ -63,13 +69,44 @@ async def upscale(
 ):
     """ComfyUI 图片放大 — 当前使用 ImageScale 2x/4x 等比例放大"""
     try:
+        # ── Scheduler: select a worker for upscale ──
+        job = SchedulerJob(
+            job_class="medium",
+            required_tags=["upscale"],
+            estimated_vram_gb=8,
+            reason="image upscale",
+        )
+        try:
+            selected = await select_worker(job)
+        except SchedulerError as exc:
+            logger.warning("Scheduler could not find worker for upscale: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"无可用 ComfyUI Worker 处理放大任务. {exc}",
+            )
+
+        logger.info(
+            "Scheduler selected worker %s (tier=%s) for upscale",
+            selected.get("id"), selected.get("tier"),
+        )
         result = await comfyui_upscale_image(
             source_url=req.source_url,
             scale=req.scale,
             method=req.method,
+            base_url=selected["url"],
         )
+        logger.info(
+            "Upscale dispatched — worker=%s url=%s tier=%s job_class=%s tags=%s models=%s nodes=%s",
+            selected.get("id"), selected["url"], selected.get("tier"),
+            job.job_class, job.required_tags, job.required_models, job.required_nodes,
+        )
+    except HTTPException:
+        raise
     except Exception:
-        logger.exception("ComfyUI upscale failed")
+        logger.exception(
+            "ComfyUI upscale failed — worker=%s url=%s tier=%s",
+            selected.get("id"), selected.get("url", "N/A"), selected.get("tier"),
+        )
         raise HTTPException(status_code=502, detail="ComfyUI 放大失败，请检查源图和本地服务")
 
     image_urls = result.get("data", {}).get("image_urls", [])
@@ -132,6 +169,39 @@ async def generate(
                         "Unknown ComfyUI workflow '%s'; falling back to default image workflow",
                         req.comfyui_workflow_id,
                     )
+
+            # ── Scheduler: select best worker for this job ──
+            job = build_job_from_image_request(req, workflow=workflow)
+            if req.comfyui_checkpoint:
+                job.required_models.append(req.comfyui_checkpoint)
+            # Merge workflow scheduling fields (if workflow carries them)
+            if workflow and isinstance(workflow, dict):
+                wf_meta = workflow.get("_scheduler") or {}
+                if wf_meta.get("required_worker_tier"):
+                    job.job_class = wf_meta["required_worker_tier"]
+                for field in ("required_worker_tags", "required_models", "required_nodes"):
+                    extras = wf_meta.get(field) or []
+                    existing = getattr(job, field, [])
+                    merged = list({*[str(v).lower() for v in existing], *[str(v).lower() for v in extras]})
+                    setattr(job, field, merged)
+                if wf_meta.get("estimated_vram_gb"):
+                    job.estimated_vram_gb = max(job.estimated_vram_gb, float(wf_meta["estimated_vram_gb"]))
+
+            try:
+                selected = await select_worker(job)
+            except SchedulerError as exc:
+                logger.warning("Scheduler could not find worker: %s", exc)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"无可用 ComfyUI Worker. {exc}",
+                )
+
+            worker_url = selected["url"]
+            logger.info(
+                "Scheduler selected worker %s (tier=%s) for image generation",
+                selected.get("id"), selected.get("tier"),
+            )
+
             result = await comfyui_generate_image(
                 prompt=req.prompt,
                 aspect_ratio=req.aspect_ratio,
@@ -144,9 +214,20 @@ async def generate(
                 source_image=reference_images[0] if reference_images else None,
                 mask_image=reference_images[1] if len(reference_images) > 1 else None,
                 mask_point=(req.sam_x, req.sam_y) if req.sam_x is not None and req.sam_y is not None else None,
+                base_url=worker_url,
             )
+            logger.info(
+                "Image generation dispatched — worker=%s url=%s tier=%s job_class=%s tags=%s models=%s nodes=%s",
+                selected.get("id"), worker_url, selected.get("tier"),
+                job.job_class, job.required_tags, job.required_models, job.required_nodes,
+            )
+        except HTTPException:
+            raise
         except Exception as exc:
-            logger.exception("ComfyUI image generation failed")
+            logger.exception(
+                "ComfyUI image generation failed — worker=%s url=%s tier=%s",
+                selected.get("id"), worker_url, selected.get("tier"),
+            )
             raise HTTPException(status_code=502, detail=f"ComfyUI 生成失败：{exc}")
 
         data = result.get("data", {})

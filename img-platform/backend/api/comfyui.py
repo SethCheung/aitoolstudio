@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from api.auth import get_current_user, require_admin
 from models.user import User
 from services.comfyui import generate_sam_mask, get_status, list_checkpoints
+from services.comfyui_scheduler import SchedulerError, SchedulerJob, select_worker
 from services.comfyui_workflows import delete_workflow, import_workflows_from_dir, list_workflows, reorder_workflows, upsert_workflow
 from services.comfyui_workers import (
     delete_worker,
@@ -19,6 +21,7 @@ from services.comfyui_workers import (
 )
 from services.model_paths import delete_model_path, list_model_paths, upsert_model_path
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/comfyui", tags=["ComfyUI"])
 
@@ -94,14 +97,41 @@ async def sam_mask(req: SamMaskRequest, _: User = Depends(get_current_user)):
     if not 0 <= req.x <= 1 or not 0 <= req.y <= 1:
         raise HTTPException(status_code=400, detail="x/y 必须是 0-1 的归一化坐标")
     try:
+        # ── Scheduler: select a worker with SAMLoader node ──
+        job = SchedulerJob(
+            job_class="medium",
+            required_nodes=["SAMLoader"],
+            required_tags=["sam", "preprocess"],
+            reason="sam mask generation",
+        )
+        try:
+            selected = await select_worker(job)
+        except SchedulerError as exc:
+            logger.warning("Scheduler could not find worker for SAM mask: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"无可用 ComfyUI Worker 处理 SAM 蒙版任务. {exc}",
+            )
+
+        logger.info(
+            "Scheduler selected worker %s (tier=%s) for SAM mask",
+            selected.get("id"), selected.get("tier"),
+        )
         return await generate_sam_mask(
             source_image=req.source_image,
             x=req.x,
             y=req.y,
             dilation=req.dilation,
             bbox_expansion=req.bbox_expansion,
+            base_url=selected["url"],
         )
+    except HTTPException:
+        raise
     except Exception as exc:
+        logger.exception(
+            "SAM mask generation failed — worker=%s url=%s tier=%s",
+            selected.get("id"), selected.get("url", "N/A"), selected.get("tier"),
+        )
         raise HTTPException(status_code=502, detail=f"SAM 自动蒙版生成失败: {exc}")
 
 
