@@ -44,7 +44,6 @@ def _size_to_dimensions(size: Optional[str]) -> tuple[Optional[int], Optional[in
 
 @router.get("/api/fire-canvas/bootstrap.js")
 async def fire_canvas_bootstrap():
-    """Inject backend-managed Fire Canvas API settings without exposing provider keys."""
     frontend_token = os.getenv("FIRE_CANVAS_FRONTEND_TOKEN", "")
     if not frontend_token:
         raise HTTPException(status_code=503, detail="Fire Canvas 后台配置未启用")
@@ -61,7 +60,11 @@ async def fire_canvas_bootstrap():
     apiKeys.comfyui = {frontend_token!r};
     baseUrls.comfyui = "";
     localStorage.setItem("api-provider", "comfyui");
-    localStorage.setItem("token", {frontend_token!r});
+    // Don't overwrite an existing ATS JWT with the intranet placeholder
+    var currentToken = localStorage.getItem("token") || "";
+    if (!currentToken || currentToken === "null" || currentToken === "undefined") {{
+      localStorage.setItem("token", {frontend_token!r});
+    }}
     localStorage.setItem("api-keys-by-provider", JSON.stringify(apiKeys));
     localStorage.setItem("base-urls-by-provider", JSON.stringify(baseUrls));
     localStorage.setItem("fire-canvas-backend-config", "1");
@@ -83,7 +86,6 @@ async def fire_canvas_image_generations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Compatibility endpoint for huobao-canvas image generation calls."""
     width, height, aspect_ratio = _size_to_dimensions(req.size)
     try:
         result = await comfyui_generate_image(
