@@ -43,6 +43,12 @@ interface ComfyWorkflow {
   sort_order?: number
   created_at?: string
   updated_at?: string
+  summary?: {
+    node_count: number
+    output_types: string[]
+    required_inputs: string[]
+    patchable_inputs: string[]
+  }
 }
 
 interface ComfyWorker {
@@ -169,6 +175,8 @@ const formError = ref('')
 const userFormError = ref('')
 const pathFormError = ref('')
 const workflowFormError = ref('')
+const workflowValidating = ref(false)
+const workflowValidateResult = ref<{ ok: boolean; summary?: any } | null>(null)
 const workerFormError = ref('')
 const form = ref({
   name: '',
@@ -657,6 +665,7 @@ function openAddWorkflow() {
     notes: '',
   }
   workflowFormError.value = ''
+  workflowValidateResult.value = null
   showWorkflowForm.value = true
 }
 
@@ -671,6 +680,7 @@ function openEditWorkflow(workflow: ComfyWorkflow) {
     notes: workflow.notes || '',
   }
   workflowFormError.value = ''
+  workflowValidateResult.value = null
   showWorkflowForm.value = true
 }
 
@@ -753,6 +763,36 @@ async function saveWorkflowOrder(category: string, workflowIds: string[]) {
     await fetchWorkflows()
   } catch (error: any) {
     loadError.value = error?.response?.data?.detail || error.message || 'Failed to reorder workflows'
+  }
+}
+
+async function validateCurrentWorkflowJson() {
+  workflowValidateResult.value = null
+  workflowFormError.value = ''
+  try {
+    const parsed = JSON.parse(workflowForm.value.workflow_json_text)
+    workflowValidating.value = true
+    const response = await api.post('/api/comfyui/workflows/validate', { workflow_json: parsed })
+    workflowValidateResult.value = {
+      ok: true,
+      summary: response.data?.summary || response.data,
+    }
+  } catch (error: any) {
+    workflowValidateResult.value = {
+      ok: false,
+      summary: error?.response?.data?.detail || error.message || error,
+    }
+  } finally {
+    workflowValidating.value = false
+  }
+}
+
+async function duplicateWorkflow(workflow: ComfyWorkflow) {
+  try {
+    await api.post(`/api/comfyui/workflows/${workflow.id}/duplicate`)
+    await fetchWorkflows()
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to duplicate workflow'
   }
 }
 
@@ -1234,7 +1274,14 @@ onMounted(() => {
                     {{ workflow.enabled ? 'Enabled' : 'Disabled' }}
                   </span>
                 </div>
-                <p class="path-category">{{ workflow.category }} · {{ Object.keys(workflow.workflow_json || {}).length }} nodes</p>
+                <p class="path-category">{{ workflow.category }}</p>
+                <div v-if="workflow.summary" class="workflow-summary-badges">
+                  <span class="summary-badge" title="Node count">📦 {{ workflow.summary.node_count }} nodes</span>
+                  <span v-if="workflow.summary.output_types.length" class="summary-badge" title="Output types">{{ workflow.summary.output_types.join(', ') }}</span>
+                  <span v-if="workflow.summary.required_inputs.length" class="summary-badge require" title="Required inputs">{{ workflow.summary.required_inputs.map(i => i === 'source_image' ? '🖼' : i === 'mask_image' ? '🎭' : i).join(' ') }}</span>
+                  <span v-if="workflow.summary.patchable_inputs.length" class="summary-badge ok" title="Patchable params">✏️ {{ workflow.summary.patchable_inputs.join(', ') }}</span>
+                </div>
+                <p v-else class="path-category">{{ Object.keys(workflow.workflow_json || {}).length }} nodes</p>
                 <p v-if="workflow.description" class="user-meta">{{ workflow.description }}</p>
                 <p v-if="workflow.notes" class="user-meta">{{ workflow.notes }}</p>
               </div>
@@ -1244,6 +1291,7 @@ onMounted(() => {
                   {{ workflow.enabled ? 'Disable' : 'Enable' }}
                 </button>
                 <button class="tool-button" title="Copy workflow JSON" @click="copyPath(formatWorkflowJson(workflow.workflow_json))">⧉</button>
+                <button class="tool-button" title="Duplicate workflow" @click="duplicateWorkflow(workflow)">⧲</button>
                 <button class="tool-button" title="Edit workflow" @click="openEditWorkflow(workflow)">✎</button>
                 <button class="tool-button danger" title="Delete workflow" @click="deleteWorkflow(workflow)">⌫</button>
               </div>
@@ -1545,8 +1593,21 @@ onMounted(() => {
         </label>
 
         <p v-if="workflowFormError" class="form-error">{{ workflowFormError }}</p>
+        <div v-if="workflowValidateResult" class="validate-result" :class="{ ok: workflowValidateResult.ok, fail: !workflowValidateResult.ok }">
+          <template v-if="workflowValidateResult.ok && workflowValidateResult.summary">
+            ✅ Valid — {{ workflowValidateResult.summary.node_count }} nodes,
+            outputs: {{ (workflowValidateResult.summary.output_types || []).join(', ') || 'none' }},
+            required: {{ (workflowValidateResult.summary.required_inputs || []).join(', ') || 'none' }},
+            patchable: {{ (workflowValidateResult.summary.patchable_inputs || []).join(', ') || 'none' }}
+          </template>
+          <template v-else-if="workflowValidateResult.ok">✅ Valid</template>
+          <template v-else>❌ {{ workflowValidateResult.summary }}</template>
+        </div>
         <div class="modal-actions">
           <button type="button" class="secondary-button" @click="showWorkflowForm = false">Cancel</button>
+          <button type="button" class="secondary-button" @click="validateCurrentWorkflowJson" :disabled="workflowValidating">
+            {{ workflowValidating ? 'Validating...' : 'Validate JSON' }}
+          </button>
           <button type="submit" class="save-button">Save</button>
         </div>
       </form>
@@ -2102,6 +2163,47 @@ onMounted(() => {
   color: #168a45;
   font-size: 13px;
   font-weight: 800;
+}
+.workflow-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.summary-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f0f0f0;
+  color: #555;
+}
+.summary-badge.require {
+  background: #fff3cd;
+  color: #856404;
+}
+.summary-badge.ok {
+  background: #d4edda;
+  color: #155724;
+}
+.validate-result {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.validate-result.ok {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+.validate-result.fail {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
 }
 .tool-button.danger {
   color: #dc2626;
