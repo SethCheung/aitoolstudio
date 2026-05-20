@@ -236,39 +236,39 @@ async def generate(
 
         data = result.get("data", {})
         image_urls = data.get("image_urls", [])
-    gen = Generation(
-        prompt=req.prompt,
-        image_urls=result_d.get("image_urls", []) if isinstance(result_d, dict) else [],
-        model=req.model,
-        aspect_ratio=req.aspect_ratio,
-        n_generated=result_n,
-        mini_max_id=result_id,
-        user_id=current_user.id if current_user else None,
-        worker_id=None,
-        run_type="direct_image",
-        entrypoint="POST /api/image/generate",
-        error_source=None,
-    )
-    db.add(gen)
-    db.commit()
-    db.refresh(gen)
+        gen = Generation(
+            prompt=req.prompt,
+            image_urls=image_urls,
+            model=req.model,
+            aspect_ratio=req.aspect_ratio,
+            n_generated=len(image_urls),
+            mini_max_id=result.get("id", ""),
+            user_id=_current_user.id if _current_user else None,
+            worker_id=selected.get("id"),
+            run_type="direct_image",
+            entrypoint="POST /api/image/generate",
+            error_source=None,
+        )
+        db.add(gen)
+        db.commit()
+        db.refresh(gen)
 
-    return GenerationResponse(
-        id=gen.id,
-        type="image",
-        prompt=gen.prompt,
-        image_urls=gen.image_urls,
-        audio_url=None,
-        video_url=None,
-        model=gen.model,
-        aspect_ratio=gen.aspect_ratio,
-        voice_model=None,
-        voice_id=None,
-        video_model=None,
-        video_duration=None,
-        n_generated=gen.n_generated,
-        created_at=gen.created_at,
-    )
+        return GenerationResponse(
+            id=gen.id,
+            type="image",
+            prompt=gen.prompt,
+            image_urls=gen.image_urls,
+            audio_url=None,
+            video_url=None,
+            model=gen.model,
+            aspect_ratio=gen.aspect_ratio,
+            voice_model=None,
+            voice_id=None,
+            video_model=None,
+            video_duration=None,
+            n_generated=gen.n_generated,
+            created_at=gen.created_at,
+        )
 
     profile = get_profile_for_model(req.model)
     if not profile:
@@ -337,6 +337,11 @@ async def generate(
         aspect_ratio=req.aspect_ratio,
         n_generated=len(image_urls),
         mini_max_id=result.get("id", ""),
+        user_id=_current_user.id if _current_user else None,
+        worker_id=None,
+        run_type="direct_image",
+        entrypoint="POST /api/image/generate",
+        error_source=None,
     )
     db.add(gen)
     db.commit()

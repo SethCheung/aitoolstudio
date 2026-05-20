@@ -39,6 +39,9 @@ def init_db():
     # 迁移: generations 加 conversation_id
     _migrate_generations_conversation_id()
 
+    # 迁移: 可观测性字段（Task H — worker_id / run_type / entrypoint / error_source）
+    _migrate_observability_columns()
+
 
 def _migrate_canvas_documents_conversation_id():
     """给 canvas_documents 补 conversation_id 列，SQLite 安全幂等"""
@@ -79,6 +82,38 @@ def _migrate_generations_conversation_id():
                 "ON generations(conversation_id)"
             )
             conn.commit()
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_observability_columns():
+    """补 generations / canvas_runs 的可观测性列，SQLite 安全幂等"""
+    import sqlite3
+    try:
+        conn = engine.raw_connection()
+        cur = conn.cursor()
+
+        for table in ("generations", "canvas_runs"):
+            cur.execute(f"PRAGMA table_info({table})")
+            columns = [row[1] for row in cur.fetchall()]
+            for col in ("worker_id", "run_type", "entrypoint", "error_source"):
+                if col not in columns:
+                    cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+            # Indexes for worker_id and run_type
+            for idx_col in ("worker_id", "run_type"):
+                idx_name = f"ix_{table}_{idx_col}"
+                try:
+                    cur.execute(
+                        f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({idx_col})"
+                    )
+                except Exception:
+                    pass
+        conn.commit()
     except Exception:
         pass
     finally:
