@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -13,6 +13,8 @@ from models.database import get_db
 from models.generation import Generation
 from models.user import User
 from schemas.canvas import (
+    CanvasRunSummary,
+    CanvasRunDetail,
     CascadeIterationResult,
     CanvasCascadeResponse,
     CanvasDocumentCreate,
@@ -104,7 +106,7 @@ def _save_graph(db: Session, document: CanvasDocument, payload: CanvasGraphSave)
         data = dict(node.data or {})
         for field in ("results", "status", "error", "body", "lastRendered",
                        "lastIteration", "outputText", "images", "content"):
-            if field in data:
+            if field in data and data[field]:
                 preserved[field] = data[field]
         if node.output:
             preserved["_output"] = dict(node.output) if isinstance(node.output, dict) else node.output
@@ -209,7 +211,7 @@ def _upstream_media(nodes: list[CanvasNodePayload], edges: list[CanvasEdgePayloa
     media_nodes = [
         (edge, index, node)
         for edge, index, node in _incoming_pairs(nodes, edges, target.id)
-        if node.type == "media"
+        if node.type in ("media", "image")
     ]
     media_nodes.sort(key=lambda item: _safe_number(item[0].data.get("imageOrder"), item[1] + 1))
     return [
@@ -993,6 +995,7 @@ async def run_node(
 
     try:
         if category == "video":
+            media_urls = _upstream_media(payload.nodes, payload.edges, target)
             workflow = runtime_workflow(
                 workflow_id=workflow_id,
                 prompt=prompt,
@@ -1022,7 +1025,7 @@ async def run_node(
                     detail=f"无可用 ComfyUI Worker 处理视频任务. {exc}",
                 )
 
-            result = await comfyui_generate_video(prompt=prompt, workflow=workflow, base_url=worker_url)
+            result = await comfyui_generate_video(prompt=prompt, workflow=workflow, base_url=worker_url, source_image=media_urls[0] if media_urls else None)
             urls = result.get("data", {}).get("video_urls") or [result.get("data", {}).get("video_url")]
             urls = [url for url in urls if url]
             output = {
@@ -1227,3 +1230,74 @@ async def run_cascade_endpoint(
     _save_graph(db, document, payload)
     return await _run_cascade(db, document, payload, node_id, current_user)
 
+
+
+# ── Run history endpoints ──────────────────────────────────────────────
+
+@router.get("/documents/{document_id}/runs", response_model=list[CanvasRunSummary])
+def list_document_runs(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all runs for a canvas document (most recent first)."""
+    document = _get_document(db, document_id, current_user.id)
+    runs = (
+        db.query(CanvasRun)
+        .filter(CanvasRun.document_id == document.id)
+        .order_by(CanvasRun.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    result = []
+    for run in runs:
+        rp = dict(run.result_payload or {})
+        urls = rp.get("urls", []) if isinstance(rp, dict) else []
+        result_type = rp.get("result_type", "") if isinstance(rp, dict) else ""
+        result.append(CanvasRunSummary(
+            id=run.id,
+            document_id=run.document_id,
+            node_id=run.node_id,
+            status=run.status,
+            prompt=run.prompt or "",
+            error=run.error,
+            generation_id=run.generation_id,
+            result_type=result_type,
+            urls_count=len(urls) if isinstance(urls, list) else 0,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+        ))
+    return result
+
+
+@router.get("/runs/{run_id}", response_model=CanvasRunDetail)
+def get_run_detail(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get a single canvas run detail. Validates user owns the document."""
+    run = db.query(CanvasRun).filter(CanvasRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    document = db.query(CanvasDocument).filter(
+        CanvasDocument.id == run.document_id,
+        CanvasDocument.user_id == current_user.id,
+    ).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return CanvasRunDetail(
+        id=run.id,
+        document_id=run.document_id,
+        node_id=run.node_id,
+        status=run.status,
+        prompt=run.prompt or "",
+        error=run.error,
+        generation_id=run.generation_id,
+        request_payload=dict(run.request_payload or {}),
+        result_payload=dict(run.result_payload or {}),
+        worker_id=run.worker_id,
+        run_type=run.run_type,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )

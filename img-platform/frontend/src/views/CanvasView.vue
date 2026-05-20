@@ -54,6 +54,8 @@ interface CanvasNodeData {
   outputText?: string
   sourceRunId?: number
   sourceGenerationId?: number
+  lastRunId?: number
+  lastGenerationId?: number
   sourceNodeId?: string
   sourcePrompt?: string
   sourceCreatedAt?: string
@@ -69,6 +71,24 @@ interface SavedCanvas {
   nodes: any[]
   edges: any[]
   documentId?: number
+}
+
+interface RunHistoryItem {
+  id: number
+  document_id: number
+  node_id: string
+  status: string
+  prompt: string
+  error?: string | null
+  generation_id?: number | null
+  result_type: string
+  urls_count: number
+  created_at?: string | null
+  updated_at?: string | null
+  // client-enriched fields
+  title?: string
+  model?: string
+  url?: string
 }
 
 const STORAGE_KEY = 'aitoolstudio.pipeline.canvas.v1'
@@ -93,6 +113,8 @@ const activeTool = ref<'assets' | 'workflows'>('workflows')
 const selectedNodeId = ref<string | null>(null)
 const showNodeMenu = ref(false)
 const historyDrawerOpen = ref(false)
+const runHistory = ref<RunHistoryItem[]>([])
+const runHistoryLoading = ref(false)
 const promptDraft = ref('')
 const assetDraft = ref('')
 const aspectDraft = ref('1:1')
@@ -173,17 +195,6 @@ const nodeStats = computed(() => ({
   loop: nodes.value.filter((node) => node.type === 'loop').length,
   edges: edges.value.length,
 }))
-const resultHistory = computed(() => nodes.value
-  .filter((node) => node.type === 'media' && (node.data?.assetUrl || node.data?.results?.length))
-  .map((node) => ({
-    id: node.id,
-    title: node.data?.title || '生成结果',
-    url: node.data?.assetUrl || node.data?.results?.[0],
-    model: node.data?.model || 'ComfyUI',
-  }))
-  .filter((item) => item.url)
-  .slice(-12)
-  .reverse())
 const quickPrompts = [
   '产品主图，白底，真实摄影，高级电商质感',
   '欧美模特自然穿戴展示，产品清晰不变形',
@@ -874,6 +885,18 @@ async function hydrateCanvasFromServer() {
         if (localNode) {
           localNode.data = { ...localNode.data, images: serverNode.data.images, status: 'done' }
           merged = true
+          // Propagate metadata back to source workflow/video node
+          const firstImg = serverNode.data.images[0]
+          if (firstImg?.source_node_id) {
+            const sourceNode = nodes.value.find((n: any) => n.id === firstImg.source_node_id)
+            if (sourceNode && (sourceNode.type === 'workflow' || sourceNode.type === 'video')) {
+              sourceNode.data = {
+                ...sourceNode.data,
+                lastRunId: firstImg.run_id || sourceNode.data?.lastRunId,
+                lastGenerationId: firstImg.generation_id || sourceNode.data?.lastGenerationId,
+              }
+            }
+          }
         }
       }
       if (serverNode.type === 'llm') {
@@ -891,6 +914,37 @@ async function hydrateCanvasFromServer() {
     }
     if (merged) canvasSaveState.value = 'saved'
   } catch { /* best effort */ }
+}
+
+async function fetchRunHistory() {
+  if (!canvasDocumentId.value) return
+  runHistoryLoading.value = true
+  try {
+    const response = await api.get(`/api/canvas/documents/${canvasDocumentId.value}/runs`)
+    const runs: RunHistoryItem[] = (response.data || []) as RunHistoryItem[]
+    // Enrich with display info from local nodes
+    runHistory.value = runs.map((run) => {
+      const node = nodes.value.find((n: any) => n.id === run.node_id)
+      // Try to extract first URL from result_payload via a detail call or use urls_count
+      // For now, use node's first result URL if available
+      let url = ''
+      if (node?.data?.results?.length) {
+        url = node.data.results[0]
+      } else if (node?.data?.assetUrl) {
+        url = node.data.assetUrl
+      }
+      return {
+        ...run,
+        title: node?.data?.title || run.node_id,
+        model: node?.data?.model || node?.data?.workflowName || 'ComfyUI',
+        url,
+      }
+    })
+  } catch {
+    runHistory.value = []
+  } finally {
+    runHistoryLoading.value = false
+  }
 }
 
 async function runSelectedNode() {
@@ -939,6 +993,8 @@ async function runSelectedNode() {
     const respData = response.data || {}
     const urls = respData.urls || []
     const resultType = respData.result_type || (urls.length ? 'media' : '')
+    const runId: number | undefined = respData.run_id
+    const generationId: number | undefined = respData.generation_id
     if (resultType === 'text') {
       const outputText = respData.output?.output_text || ''
       updateNodeData(node.id, {
@@ -947,6 +1003,8 @@ async function runSelectedNode() {
         error: '',
         outputText,
         results: [],
+        lastRunId: runId,
+        lastGenerationId: generationId,
       })
     } else {
       updateNodeData(node.id, {
@@ -954,10 +1012,14 @@ async function runSelectedNode() {
         status: urls.length ? 'success' : 'error',
         error: urls.length ? '' : '接口没有返回结果地址',
         results: urls,
+        lastRunId: runId,
+        lastGenerationId: generationId,
       })
     }
     // Re-fetch document graph to get backend-written output node images
     await hydrateCanvasFromServer()
+    // Also refresh run history
+    fetchRunHistory()
   } catch (error: any) {
     const message = error?.response?.data?.detail || error.message || '节点运行失败'
     runError.value = message
@@ -1018,6 +1080,10 @@ onMounted(() => {
 })
 
 watch([nodes, edges], persistCanvas, { deep: true })
+
+watch(historyDrawerOpen, (open) => {
+  if (open) fetchRunHistory()
+})
 </script>
 
 <template>
@@ -1397,18 +1463,23 @@ watch([nodes, edges], persistCanvas, { deep: true })
           </div>
           <button type="button" @click="historyDrawerOpen = false">×</button>
         </header>
-        <div v-if="!resultHistory.length" class="history-empty">还没有生成结果。先选中一个 workflow 跑起来，别盯着空抽屉发呆。</div>
+        <div v-if="runHistoryLoading" class="history-empty">正在加载运行记录...</div>
+        <div v-else-if="!runHistory.length" class="history-empty">还没有生成结果。先选中一个 workflow 跑起来，别盯着空抽屉发呆。</div>
         <div v-else class="history-grid">
           <button
-            v-for="item in resultHistory"
+            v-for="item in runHistory"
             :key="item.id"
             type="button"
-            @click="selectNode(item.id); historyDrawerOpen = false"
+            @click="selectNode(item.node_id); historyDrawerOpen = false"
           >
-            <video v-if="resultKind(item.url) === 'video'" :src="item.url" muted />
-            <img v-else :src="item.url" alt="" />
+            <video v-if="item.url && resultKind(item.url) === 'video'" :src="item.url" muted />
+            <img v-else-if="item.url" :src="item.url" alt="" />
+            <div v-else class="history-no-preview">
+              <span>{{ item.result_type || 'unknown' }}</span>
+            </div>
             <strong>{{ item.title }}</strong>
-            <span>{{ item.model }}</span>
+            <span>{{ item.model }} · {{ item.status }}</span>
+            <small v-if="item.prompt">{{ item.prompt.slice(0, 60) }}{{ item.prompt.length > 60 ? '…' : '' }}</small>
           </button>
         </div>
       </aside>
@@ -2954,6 +3025,27 @@ watch([nodes, edges], persistCanvas, { deep: true })
   color: #6b7280;
   font-size: 12px;
   line-height: 1.5;
+}
+.history-grid small {
+  display: block;
+  color: #9ca3af;
+  font-size: 11px;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.history-no-preview {
+  width: 100%;
+  height: 80px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #9ca3af;
 }
 .workflow-modal {
   justify-content: flex-start;

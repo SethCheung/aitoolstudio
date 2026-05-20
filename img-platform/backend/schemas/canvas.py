@@ -109,3 +109,41 @@ class CanvasMediaNodeCreate(BaseModel):
     source: str = "conversation"
     source_generation_id: Optional[int] = None
     position: CanvasPosition = Field(default_factory=CanvasPosition)
+
+
+class CanvasRunSummary(BaseModel):
+    """Summary view of a canvas run for listing"""
+    id: int
+    document_id: int
+    node_id: str
+    status: str
+    prompt: str = ""
+    error: Optional[str] = None
+    generation_id: Optional[int] = None
+    result_type: str = ""
+    urls_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CanvasRunDetail(BaseModel):
+    """Full detail of a single canvas run"""
+    id: int
+    document_id: int
+    node_id: str
+    status: str
+    prompt: str = ""
+    error: Optional[str] = None
+    generation_id: Optional[int] = None
+    request_payload: dict = Field(default_factory=dict)
+    result_payload: dict = Field(default_factory=dict)
+    worker_id: Optional[str] = None
+    run_type: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
