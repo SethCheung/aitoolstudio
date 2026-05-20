@@ -141,6 +141,24 @@ class TestWorkflowCRUD(unittest.TestCase):
         all_wf = list_workflows()
         self.assertGreaterEqual(len(all_wf), 1)
 
+    def test_create_with_sort_order_none(self) -> None:
+        """API shape: Pydantic sends sort_order=None when field is omitted. Must become 0."""
+        wf = upsert_workflow({
+            "name": "API Shape Create",
+            "category": "image",
+            "enabled": True,
+            "workflow_json": MINIMAL_WF,
+            "sort_order": None,  # what Pydantic dict gives
+        })
+        self.assertEqual(wf["sort_order"], 0, "None sort_order must default to 0")
+
+        # list_workflows must not crash with TypeError
+        wf_list = list_workflows(include_disabled=True)
+        self.assertGreater(len(wf_list), 0)
+        for w in wf_list:
+            self.assertIsInstance(w.get("sort_order"), int)
+            self.assertIsNotNone(w.get("sort_order"))
+
     def test_update_preserves_sort_order(self) -> None:
         wf1 = upsert_workflow({"name": "First", "category": "image", "workflow_json": MINIMAL_WF, "sort_order": 5})
         self.assertEqual(wf1["sort_order"], 5)

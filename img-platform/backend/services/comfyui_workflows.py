@@ -323,7 +323,7 @@ def upsert_workflow(workflow_data: dict, workflow_id: Optional[str] = None) -> d
         "enabled": bool(workflow_data.get("enabled", True)),
         "workflow_json": workflow_json,
         "notes": (workflow_data.get("notes") or "").strip(),
-        "sort_order": workflow_data.get("sort_order", 0),
+        "sort_order": workflow_data.get("sort_order") or 0,  # None → 0 so list_workflows never hits NoneType<->int
         "updated_at": now,
     }
     if not normalized["name"]:
