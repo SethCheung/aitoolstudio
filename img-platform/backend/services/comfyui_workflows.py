@@ -150,6 +150,23 @@ VIDEO_WORKFLOW_HINTS = (
 PROMPT_INPUT_NAMES = ("text", "prompt", "positive", "positive_prompt", "caption")
 NEGATIVE_PROMPT_KEYS = ("negative", "neg")
 
+# ── Output node class_type markers ──
+_OUTPUT_TYPE_MARKERS = {
+    "saveimage": "image",
+    "vhs_videocombine": "video",
+    "savevideo": "video",
+    "saveanimatedwebp": "video",
+    "savegif": "video",
+    "saveernieimage": "image",
+}
+
+# ── Nodes whose inputs indicate required upstream media ──
+_INPUT_LOADER_TYPES = {"loadimage", "loadvideo", "loadimagefromurl"}
+
+# ── Nodes that indicate common patchable parameters ──
+_PATCHABLE_NODE_TYPES = {"ksampler", "emptylatentimage"}
+_PROMPT_ENCODE_TYPES = {"cliptextencode"}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -173,6 +190,55 @@ def validate_workflow_json(workflow_json: dict) -> None:
             raise ValueError(f"Workflow node {node_id} is missing class_type")
         if not isinstance(node.get("inputs", {}), dict):
             raise ValueError(f"Workflow node {node_id} inputs must be an object")
+
+
+def _compute_workflow_summary(workflow_json: dict) -> dict:
+    """Analyse a ComfyUI API-format workflow JSON and return structured summary info."""
+    if not isinstance(workflow_json, dict):
+        return {"node_count": 0, "output_types": [], "required_inputs": [], "patchable_inputs": []}
+
+    node_count = len(workflow_json)
+    output_types: list[str] = []
+    required_inputs: list[str] = []
+    patchable = set()
+
+    for node_id, node in workflow_json.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = (node.get("class_type") or "").lower()
+        inputs = node.get("inputs", {}) if isinstance(node.get("inputs"), dict) else {}
+
+        # ── output type detection ──
+        for marker, out_type in _OUTPUT_TYPE_MARKERS.items():
+            if marker in class_type and out_type not in output_types:
+                output_types.append(out_type)
+
+        # ── required inputs (upstream media loaders) ──
+        for loader_type in _INPUT_LOADER_TYPES:
+            if loader_type in class_type and "source_image" not in required_inputs:
+                required_inputs.append("source_image")
+
+        # ── mask inputs ── (empty mask slots that need filling)
+        for key, value in inputs.items():
+            key_lower = key.lower()
+            if "mask" in key_lower and (value is None or value == "" or (isinstance(value, list) and not value)):
+                if "mask_image" not in required_inputs:
+                    required_inputs.append("mask_image")
+
+        # ── patchable inputs ──
+        for ptype in _PATCHABLE_NODE_TYPES:
+            if ptype in class_type:
+                patchable.update(["prompt", "seed", "size", "batch"])
+        for ptype in _PROMPT_ENCODE_TYPES:
+            if ptype in class_type:
+                patchable.add("prompt")
+
+    return {
+        "node_count": node_count,
+        "output_types": output_types,
+        "required_inputs": required_inputs,
+        "patchable_inputs": sorted(patchable) if patchable else [],
+    }
 
 
 def _infer_workflow_category(path: Path, workflow_json: dict) -> str:
@@ -226,12 +292,17 @@ def list_workflows(include_disabled: bool = False) -> list[dict]:
     workflows = _load().get("workflows", [])
     if not include_disabled:
         workflows = [item for item in workflows if item.get("enabled", True)]
-    return sorted(workflows, key=lambda item: (item.get("category", ""), item.get("sort_order", 0), item.get("name", "")))
+    sorted_workflows = sorted(workflows, key=lambda item: (item.get("category", ""), item.get("sort_order", 0), item.get("name", "")))
+    # Attach computed summary to every entry (non-persistent)
+    for wf in sorted_workflows:
+        wf["summary"] = _compute_workflow_summary(wf.get("workflow_json", {}))
+    return sorted_workflows
 
 
 def get_workflow(workflow_id: str, include_disabled: bool = False) -> Optional[dict]:
     for item in _load().get("workflows", []):
         if item.get("id") == workflow_id and (include_disabled or item.get("enabled", True)):
+            item["summary"] = _compute_workflow_summary(item.get("workflow_json", {}))
             return item
     return None
 
@@ -262,14 +333,19 @@ def upsert_workflow(workflow_data: dict, workflow_id: Optional[str] = None) -> d
 
     for index, item in enumerate(workflows):
         if item.get("id") == target_id:
+            # Preserve existing sort_order unless explicitly overridden with a non-None value
+            if workflow_data.get("sort_order") is None:
+                normalized["sort_order"] = item.get("sort_order", 0)
             normalized["created_at"] = item.get("created_at") or now
             workflows[index] = normalized
             _save({"workflows": workflows})
+            normalized["summary"] = _compute_workflow_summary(workflow_json)
             return normalized
 
     normalized["created_at"] = now
     workflows.append(normalized)
     _save({"workflows": workflows})
+    normalized["summary"] = _compute_workflow_summary(workflow_json)
     return normalized
 
 
@@ -281,6 +357,35 @@ def delete_workflow(workflow_id: str) -> bool:
         return False
     _save({"workflows": next_workflows})
     return True
+
+
+def duplicate_workflow(workflow_id: str) -> Optional[dict]:
+    """Duplicate a workflow with a new unique ID and enabled=False."""
+    original = get_workflow(workflow_id, include_disabled=True)
+    if not original:
+        return None
+
+    data = _load()
+    now = _now()
+    timestamp_suffix = str(int(datetime.now(timezone.utc).timestamp()))[-6:]
+    new_id = f"{original['id']}-copy-{timestamp_suffix}"
+
+    copied = {
+        "id": new_id,
+        "name": f"{original.get('name', '')} (副本)",
+        "description": original.get("description", ""),
+        "category": original.get("category", "image"),
+        "enabled": False,
+        "workflow_json": copy.deepcopy(original.get("workflow_json", {})),
+        "notes": original.get("notes", ""),
+        "sort_order": (original.get("sort_order", 0) or 0) + 1,
+        "created_at": now,
+        "updated_at": now,
+    }
+    data.setdefault("workflows", []).append(copied)
+    _save(data)
+    copied["summary"] = _compute_workflow_summary(copied["workflow_json"])
+    return copied
 
 
 def reorder_workflows(category: str, workflow_ids: list[str]) -> bool:

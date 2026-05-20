@@ -11,7 +11,15 @@ from api.auth import get_current_user, require_admin
 from models.user import User
 from services.comfyui import generate_sam_mask, get_status, list_checkpoints
 from services.comfyui_scheduler import SchedulerError, SchedulerJob, select_worker
-from services.comfyui_workflows import delete_workflow, import_workflows_from_dir, list_workflows, reorder_workflows, upsert_workflow
+from services.comfyui_workflows import (
+    delete_workflow,
+    duplicate_workflow,
+    import_workflows_from_dir,
+    list_workflows,
+    reorder_workflows,
+    upsert_workflow,
+    validate_workflow_json,
+)
 from services.comfyui_workers import (
     delete_worker,
     get_worker,
@@ -43,11 +51,16 @@ class WorkflowRequest(BaseModel):
     workflow_json: dict
     notes: Optional[str] = ""
     backend: Optional[str] = ""
+    sort_order: Optional[int] = None
 
 
 class WorkflowReorderRequest(BaseModel):
     category: str
     workflow_ids: list[str]
+
+
+class WorkflowValidateRequest(BaseModel):
+    workflow_json: dict
 
 
 class SamMaskRequest(BaseModel):
@@ -165,6 +178,9 @@ async def remove_model_path(path_id: str, _: User = Depends(require_admin)):
     return {"ok": True}
 
 
+# ── Workflow Management ──
+
+
 @router.get("/workflows")
 async def workflows(include_disabled: bool = False, current_user: User = Depends(get_current_user)):
     """Return saved ComfyUI workflows. Admin can request disabled workflows too."""
@@ -201,6 +217,27 @@ async def reorder_workflow_list(req: WorkflowReorderRequest, _: User = Depends(r
     if reorder_workflows(req.category, req.workflow_ids):
         return {"ok": True}
     raise HTTPException(status_code=400, detail="No workflows updated")
+
+
+@router.post("/workflows/validate")
+async def validate_workflow(req: WorkflowValidateRequest, _: User = Depends(require_admin)):
+    """Validate a ComfyUI API-format workflow JSON without saving it."""
+    try:
+        validate_workflow_json(req.workflow_json)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    # Return computed summary alongside validation pass
+    from services.comfyui_workflows import _compute_workflow_summary
+    return {"ok": True, "summary": _compute_workflow_summary(req.workflow_json)}
+
+
+@router.post("/workflows/{workflow_id}/duplicate")
+async def duplicate_workflow_endpoint(workflow_id: str, _: User = Depends(require_admin)):
+    """Duplicate an existing workflow. The copy defaults to enabled=false."""
+    result = duplicate_workflow(workflow_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return result
 
 
 @router.post("/workflows/import")
