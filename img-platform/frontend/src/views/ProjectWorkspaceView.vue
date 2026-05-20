@@ -3,7 +3,6 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '@/services/api'
 import GenerateView from './GenerateView.vue'
-import CanvasView from './CanvasView.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,21 +29,48 @@ async function fetchProjectTitle() {
   }
 }
 
+function canvasUrlForConversation(id: number) {
+  const proto = window.location.protocol
+  const host = window.location.hostname
+  return `${proto}//${host}:5173/canvas/${id}`
+}
+
+function openCanvas() {
+  if (!conversationId.value) return
+  window.location.href = canvasUrlForConversation(conversationId.value)
+}
+
 function switchMode(newMode: 'chat' | 'canvas') {
+  if (newMode === 'canvas') {
+    openCanvas()
+    return
+  }
+
   router.replace({
     path: `/project/${conversationId.value}`,
-    query: { mode: newMode },
+    query: { mode: 'chat' },
   })
+}
+
+function redirectCanvasMode() {
+  if (mode.value === 'canvas') openCanvas()
 }
 
 function goHome() {
   router.push('/')
 }
 
-onMounted(fetchProjectTitle)
+onMounted(() => {
+  fetchProjectTitle()
+  redirectCanvasMode()
+})
+
 watch(conversationId, () => {
   if (conversationId.value) fetchProjectTitle()
+  redirectCanvasMode()
 })
+
+watch(mode, redirectCanvasMode)
 </script>
 
 <template>
@@ -85,12 +111,9 @@ watch(conversationId, () => {
         :embedded-conversation-id="conversationId"
         :embedded="true"
       />
-      <CanvasView
-        v-else
-        :key="String(conversationId)"
-        :embedded-conversation-id="conversationId"
-        :embedded="true"
-      />
+      <div v-else class="ws-canvas-redirect">
+        <p>正在打开 Canvas…</p>
+      </div>
     </main>
   </div>
 </template>
@@ -170,5 +193,14 @@ watch(conversationId, () => {
 .ws-content {
   flex: 1;
   overflow: hidden;
+}
+
+.ws-canvas-redirect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgba(255,255,255,0.45);
+  font-size: 14px;
 }
 </style>

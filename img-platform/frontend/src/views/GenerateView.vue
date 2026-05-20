@@ -1602,7 +1602,9 @@ async function goHome() {
 
 function goCanvas() {
   if (convId.value) {
-    router.push({ path: `/project/${convId.value}`, query: { mode: 'canvas' } })
+    const proto = window.location.protocol
+    const host = window.location.hostname
+    window.location.href = `${proto}//${host}:5173/canvas/${convId.value}`
   } else {
     const proto = window.location.protocol
     const host = window.location.hostname
@@ -1629,8 +1631,10 @@ async function sendToCanvas(url: string, record: any) {
       position: { x: 200, y: 200 },
     })
     ElMessage.success('已发送到 Canvas')
-    // Switch to canvas mode
-    router.push({ path: `/project/${convId.value}`, query: { mode: 'canvas' } })
+    // Redirect to Huobao Canvas (not old inline canvas)
+    const proto = window.location.protocol
+    const host = window.location.hostname
+    window.location.href = `${proto}//${host}:5173/canvas/${convId.value}`
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '发送失败')
   }

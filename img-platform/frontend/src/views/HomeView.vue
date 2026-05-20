@@ -85,12 +85,18 @@ function canvasUrl() {
   return `${proto}//${host}:5173/canvas`
 }
 
+function canvasUrlForConversation(id: number) {
+  const proto = window.location.protocol
+  const host = window.location.hostname
+  return `${proto}//${host}:5173/canvas/${id}`
+}
+
 async function newPipeline() {
   try {
     const resp = await api.post('/api/conversations', { title: 'New Pipeline' })
     const id = resp.data?.id
     if (id) {
-      router.push({ path: `/project/${id}`, query: { mode: 'canvas' } })
+      window.location.href = canvasUrlForConversation(id)
     } else {
       window.location.href = canvasUrl()
     }
@@ -101,7 +107,7 @@ async function newPipeline() {
 
 function openCanvas(id: number, e: Event) {
   e.stopPropagation()
-  router.push({ path: `/project/${id}`, query: { mode: 'canvas' } })
+  window.location.href = canvasUrlForConversation(id)
 }
 
 async function newProject() {
