@@ -45,7 +45,36 @@ interface ComfyWorkflow {
   updated_at?: string
 }
 
-type Category = 'all' | 'image' | 'voice' | 'video' | 'music' | 'text' | 'users' | 'paths' | 'workflows'
+interface ComfyWorker {
+  id: string
+  name: string
+  url: string
+  tier: 'heavy' | 'medium' | 'light'
+  gpu: string
+  vram_gb: number
+  tags: string[]
+  model_root_uri: string
+  model_mount_path: string
+  enabled: boolean
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+interface WorkerStatus {
+  id: string
+  name: string
+  online: boolean
+  queue_pending: number
+  queue_running: number
+  system_stats: object | null
+  checkpoint_count: number
+  object_info_ok: boolean
+  has_required_core_nodes: boolean
+  last_health_error: string | null
+}
+
+type Category = 'all' | 'image' | 'voice' | 'video' | 'music' | 'text' | 'users' | 'paths' | 'workflows' | 'workers'
 
 const categories: Array<{ key: Category; label: string; icon: string }> = [
   { key: 'all', label: 'All', icon: 'A' },
@@ -55,6 +84,7 @@ const categories: Array<{ key: Category; label: string; icon: string }> = [
   { key: 'music', label: 'Music', icon: '♪' },
   { key: 'text', label: 'Text', icon: 'T' },
   { key: 'workflows', label: 'Workflows', icon: 'W' },
+  { key: 'workers', label: 'Workers', icon: '⚙' },
   { key: 'users', label: 'Users', icon: 'U' },
   { key: 'paths', label: 'Paths', icon: 'P' },
 ]
@@ -64,7 +94,7 @@ const apiDocsUrl = `${apiBaseUrl.replace(/\/$/, '')}/docs`
 const router = useRouter()
 const auth = useAuthStore()
 
-const modelCategories: Record<Exclude<Category, 'all' | 'users' | 'paths' | 'workflows'>, string[]> = {
+const modelCategories: Record<Exclude<Category, 'all' | 'users' | 'paths' | 'workflows' | 'workers'>, string[]> = {
   image: ['image-01'],
   voice: ['speech-2.8-hd', 'speech-2.8-turbo', 'speech-2.6-hd', 'speech-2.6-turbo'],
   video: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'S2V-01'],
@@ -76,26 +106,33 @@ const profiles = ref<Profile[]>([])
 const users = ref<User[]>([])
 const modelPaths = ref<ModelPath[]>([])
 const comfyWorkflows = ref<ComfyWorkflow[]>([])
+const workers = ref<ComfyWorker[]>([])
+const workerStatuses = ref<WorkerStatus[]>([])
 const activeCategory = ref<Category>('all')
 const selectedName = ref('')
 const userSearch = ref('')
 const pathSearch = ref('')
 const workflowSearch = ref('')
 const workflowImportSummary = ref('')
+const workerSearch = ref('')
+const workerStatusError = ref('')
 const isLoading = ref(false)
 const loadError = ref('')
 const showForm = ref(false)
 const showUserForm = ref(false)
 const showPathForm = ref(false)
 const showWorkflowForm = ref(false)
+const showWorkerForm = ref(false)
 const editingProfile = ref<Profile | null>(null)
 const editingUser = ref<User | null>(null)
 const editingModelPath = ref<ModelPath | null>(null)
 const editingWorkflow = ref<ComfyWorkflow | null>(null)
+const editingWorker = ref<ComfyWorker | null>(null)
 const formError = ref('')
 const userFormError = ref('')
 const pathFormError = ref('')
 const workflowFormError = ref('')
+const workerFormError = ref('')
 const form = ref({
   name: '',
   api_key: '',
@@ -135,7 +172,20 @@ const workflowForm = ref({
   description: '',
   category: 'image',
   enabled: true,
-  workflow_json_text: '',
+  workflow_json_text: '{\n  "1": {\n    "class_type": "SaveImage",\n    "inputs": {}\n  }\n}',
+  notes: '',
+})
+const workerForm = ref({
+  id: '',
+  name: '',
+  url: '',
+  tier: 'medium' as 'heavy' | 'medium' | 'light',
+  gpu: '',
+  vram_gb: 0,
+  tags_text: '',
+  model_root_uri: 'smb://192.168.1.60/团队文件-SJM-MediaFile/Comfyui_Model',
+  model_mount_path: '/mnt/comfyui-models',
+  enabled: true,
   notes: '',
 })
 
@@ -182,6 +232,19 @@ const filteredWorkflows = computed(() => {
       .some((value) => value.toLowerCase().includes(query))
   )
 })
+
+const filteredWorkers = computed(() => {
+  const query = workerSearch.value.trim().toLowerCase()
+  if (!query) return workers.value
+  return workers.value.filter((w) =>
+    [w.name, w.id, w.url, w.tier, w.gpu, w.notes || '']
+      .some((value) => value.toLowerCase().includes(query))
+  )
+})
+
+function getWorkerStatus(workerId: string): WorkerStatus | undefined {
+  return workerStatuses.value.find((s) => s.id === workerId)
+}
 
 const groupedWorkflows = computed(() => {
   const query = workflowSearch.value.trim().toLowerCase()
@@ -249,6 +312,18 @@ const summaryStats = computed(() => {
       secondLabel: 'Enabled',
       third: workflowCategoryCount.value,
       thirdLabel: 'Categories',
+    }
+  }
+  if (activeCategory.value === 'workers') {
+    const onlineCount = workerStatuses.value.filter((s) => s.online).length
+    const offlineCount = workerStatuses.value.filter((s) => !s.online).length
+    return {
+      total: workers.value.length,
+      totalLabel: 'Workers',
+      second: onlineCount,
+      secondLabel: 'Online',
+      third: offlineCount,
+      thirdLabel: 'Offline',
     }
   }
   return {
@@ -417,6 +492,9 @@ function refreshActive() {
     fetchModelPaths()
   } else if (activeCategory.value === 'workflows') {
     fetchWorkflows()
+  } else if (activeCategory.value === 'workers') {
+    fetchWorkers()
+    fetchWorkerStatus()
   } else {
     fetchProfiles()
   }
@@ -619,6 +697,147 @@ async function saveWorkflowOrder(category: string, workflowIds: string[]) {
   }
 }
 
+// --- Workers CRUD ---
+async function fetchWorkers() {
+  try {
+    const response = await api.get('/api/comfyui/workers')
+    workers.value = response.data?.workers || response.data || []
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to load workers'
+  }
+}
+
+async function fetchWorkerStatus() {
+  workerStatusError.value = ''
+  try {
+    const response = await api.get('/api/comfyui/workers/status')
+    workerStatuses.value = response.data?.workers || response.data || []
+  } catch (error: any) {
+    workerStatusError.value = error?.response?.data?.detail || error.message || 'Failed to load worker status'
+  }
+}
+
+async function refreshWorkerStatus() {
+  await fetchWorkerStatus()
+}
+
+function openAddWorker() {
+  editingWorker.value = null
+  workerForm.value = {
+    id: '',
+    name: '',
+    url: '',
+    tier: 'medium',
+    gpu: '',
+    vram_gb: 0,
+    tags_text: '',
+    model_root_uri: 'smb://192.168.1.60/团队文件-SJM-MediaFile/Comfyui_Model',
+    model_mount_path: '/mnt/comfyui-models',
+    enabled: true,
+    notes: '',
+  }
+  workerFormError.value = ''
+  showWorkerForm.value = true
+}
+
+function openEditWorker(worker: ComfyWorker) {
+  editingWorker.value = worker
+  workerForm.value = {
+    id: worker.id,
+    name: worker.name,
+    url: worker.url,
+    tier: worker.tier,
+    gpu: worker.gpu,
+    vram_gb: worker.vram_gb,
+    tags_text: (worker.tags || []).join(', '),
+    model_root_uri: worker.model_root_uri,
+    model_mount_path: worker.model_mount_path,
+    enabled: worker.enabled,
+    notes: worker.notes || '',
+  }
+  workerFormError.value = ''
+  showWorkerForm.value = true
+}
+
+async function saveWorker() {
+  workerFormError.value = ''
+  if (!workerForm.value.name.trim()) {
+    workerFormError.value = 'Name is required'
+    return
+  }
+  if (!workerForm.value.url.trim()) {
+    workerFormError.value = 'URL is required'
+    return
+  }
+
+  const tags = workerForm.value.tags_text
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean)
+
+  const payload = {
+    name: workerForm.value.name.trim(),
+    url: workerForm.value.url.trim(),
+    tier: workerForm.value.tier,
+    gpu: workerForm.value.gpu.trim(),
+    vram_gb: workerForm.value.vram_gb,
+    tags,
+    model_root_uri: workerForm.value.model_root_uri.trim(),
+    model_mount_path: workerForm.value.model_mount_path.trim(),
+    enabled: workerForm.value.enabled,
+    notes: workerForm.value.notes.trim(),
+  }
+
+  try {
+    if (editingWorker.value) {
+      await api.put(`/api/comfyui/workers/${editingWorker.value.id}`, payload)
+    } else {
+      const createPayload: any = { ...payload }
+      if (workerForm.value.id.trim()) {
+        createPayload.id = workerForm.value.id.trim()
+      }
+      await api.post('/api/comfyui/workers', createPayload)
+    }
+    showWorkerForm.value = false
+    await fetchWorkers()
+    await fetchWorkerStatus()
+  } catch (error: any) {
+    workerFormError.value = error?.response?.data?.detail || error.message || 'Failed to save worker'
+  }
+}
+
+async function deleteWorker(worker: ComfyWorker) {
+  if (!confirm(`Delete worker "${worker.name}" (${worker.id})?`)) return
+  try {
+    await api.delete(`/api/comfyui/workers/${worker.id}`)
+    await fetchWorkers()
+    await fetchWorkerStatus()
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to delete worker'
+  }
+}
+
+async function toggleWorker(worker: ComfyWorker) {
+  try {
+    await api.put(`/api/comfyui/workers/${worker.id}`, {
+      name: worker.name,
+      url: worker.url,
+      tier: worker.tier,
+      gpu: worker.gpu,
+      vram_gb: worker.vram_gb,
+      tags: worker.tags,
+      model_root_uri: worker.model_root_uri,
+      model_mount_path: worker.model_mount_path,
+      enabled: !worker.enabled,
+      notes: worker.notes || '',
+    })
+    await fetchWorkers()
+    await fetchWorkerStatus()
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error.message || 'Failed to toggle worker'
+  }
+}
+
 function openAddUser() {
   editingUser.value = null
   userForm.value = { username: '', password: '', is_admin: false }
@@ -697,6 +916,7 @@ onMounted(() => {
   fetchUsers()
   fetchModelPaths()
   fetchWorkflows()
+  fetchWorkers()
 })
 </script>
 
@@ -738,16 +958,16 @@ onMounted(() => {
         </button>
         <button
           class="text-action"
-          :title="activeCategory === 'paths' ? 'Add model path' : activeCategory === 'workflows' ? 'Add workflow' : 'Add user'"
-          @click="activeCategory === 'paths' ? openAddModelPath() : activeCategory === 'workflows' ? openAddWorkflow() : openAddUser()"
+          :title="activeCategory === 'paths' ? 'Add model path' : activeCategory === 'workflows' ? 'Add workflow' : activeCategory === 'workers' ? 'Add worker' : 'Add user'"
+          @click="activeCategory === 'paths' ? openAddModelPath() : activeCategory === 'workflows' ? openAddWorkflow() : activeCategory === 'workers' ? openAddWorker() : openAddUser()"
         >
           <span>+</span>
-          {{ activeCategory === 'paths' ? 'Add Path' : activeCategory === 'workflows' ? 'Add Workflow' : 'Add User' }}
+          {{ activeCategory === 'paths' ? 'Add Path' : activeCategory === 'workflows' ? 'Add Workflow' : activeCategory === 'workers' ? 'Add Worker' : 'Add User' }}
         </button>
         <button
           class="add-button"
-          :title="activeCategory === 'users' ? 'Add user' : activeCategory === 'paths' ? 'Add model path' : activeCategory === 'workflows' ? 'Add workflow' : 'Add profile'"
-          @click="activeCategory === 'users' ? openAddUser() : activeCategory === 'paths' ? openAddModelPath() : activeCategory === 'workflows' ? openAddWorkflow() : openAdd()"
+          :title="activeCategory === 'users' ? 'Add user' : activeCategory === 'paths' ? 'Add model path' : activeCategory === 'workflows' ? 'Add workflow' : activeCategory === 'workers' ? 'Add worker' : 'Add profile'"
+          @click="activeCategory === 'users' ? openAddUser() : activeCategory === 'paths' ? openAddModelPath() : activeCategory === 'workflows' ? openAddWorkflow() : activeCategory === 'workers' ? openAddWorker() : openAdd()"
         >+</button>
       </div>
     </header>
@@ -773,7 +993,7 @@ onMounted(() => {
 
     <section class="profile-list" aria-label="Profiles">
       <!-- Profile Management View -->
-      <template v-if="activeCategory !== 'users' && activeCategory !== 'paths' && activeCategory !== 'workflows'">
+      <template v-if="activeCategory !== 'users' && activeCategory !== 'paths' && activeCategory !== 'workflows' && activeCategory !== 'workers'">
         <div v-if="isLoading" class="empty-state">Loading profiles...</div>
         <div v-else-if="filteredProfiles.length === 0" class="empty-state">
           No profiles in this category.
@@ -951,6 +1171,89 @@ onMounted(() => {
         </section>
       </template>
 
+      <!-- Workers Management View -->
+      <template v-else-if="activeCategory === 'workers'">
+        <section class="users-panel">
+          <div class="users-toolbar">
+            <div>
+              <h2>ComfyUI Workers</h2>
+              <p>Manage GPU worker nodes for ComfyUI generation. Status refreshes on demand.</p>
+            </div>
+            <div class="users-tools">
+              <input v-model="workerSearch" type="search" placeholder="Search worker name, ID, URL, or tier" />
+              <button class="secondary-button compact-action" @click="refreshWorkerStatus">Refresh Status</button>
+              <button class="primary-action" @click="openAddWorker">Add Worker</button>
+            </div>
+          </div>
+
+          <p v-if="workerStatusError" class="form-error" style="margin: 0">{{ workerStatusError }}</p>
+
+          <div v-if="filteredWorkers.length === 0" class="empty-state">
+            No workers found.
+            <button @click="openAddWorker">Add Worker</button>
+          </div>
+
+          <article
+            v-for="worker in filteredWorkers"
+            :key="worker.id"
+            class="path-card worker-card-row"
+            :class="{ disabled: !worker.enabled, 'worker-offline': getWorkerStatus(worker.id)?.online === false, 'worker-model-issue': getWorkerStatus(worker.id) && (getWorkerStatus(worker.id)!.checkpoint_count === 0 || getWorkerStatus(worker.id)!.object_info_ok === false) }"
+          >
+            <div class="profile-avatar">{{ worker.tier.slice(0, 2).toUpperCase() }}</div>
+
+            <div class="profile-main">
+              <div class="profile-title-row">
+                <h2>{{ worker.name }}</h2>
+                <span class="status-pill" :class="{ on: worker.enabled }">
+                  {{ worker.enabled ? 'Enabled' : 'Disabled' }}
+                </span>
+                <span v-if="getWorkerStatus(worker.id)" class="status-pill" :class="{ on: getWorkerStatus(worker.id)!.online, off: !getWorkerStatus(worker.id)!.online }">
+                  {{ getWorkerStatus(worker.id)!.online ? 'Online' : 'Offline' }}
+                </span>
+                <span v-if="getWorkerStatus(worker.id) && (getWorkerStatus(worker.id)!.checkpoint_count === 0 || getWorkerStatus(worker.id)!.object_info_ok === false)" class="status-pill warn">
+                  ⚠ Model issue
+                </span>
+              </div>
+              <p class="path-category">{{ worker.id }} · {{ worker.tier }} · {{ worker.gpu }} · {{ worker.vram_gb }} GB VRAM</p>
+              <div class="path-lines">
+                <div>
+                  <span>URL</span>
+                  <code>{{ worker.url }}</code>
+                </div>
+                <div>
+                  <span>Models</span>
+                  <code>{{ worker.model_root_uri }}</code>
+                </div>
+                <div>
+                  <span>Mount</span>
+                  <code>{{ worker.model_mount_path }}</code>
+                </div>
+              </div>
+              <div v-if="getWorkerStatus(worker.id)" class="worker-status-detail">
+                <span v-if="getWorkerStatus(worker.id)!.checkpoint_count > 0">{{ getWorkerStatus(worker.id)!.checkpoint_count }} checkpoints</span>
+                <span v-if="getWorkerStatus(worker.id)!.queue_pending > 0 || getWorkerStatus(worker.id)!.queue_running > 0">
+                  Queue: {{ getWorkerStatus(worker.id)!.queue_pending }} pending / {{ getWorkerStatus(worker.id)!.queue_running }} running
+                </span>
+                <span v-if="!getWorkerStatus(worker.id)!.has_required_core_nodes" class="warn-text">Missing core nodes</span>
+                <span v-if="getWorkerStatus(worker.id)!.last_health_error" class="error-text">{{ getWorkerStatus(worker.id)!.last_health_error }}</span>
+              </div>
+              <div v-if="worker.tags && worker.tags.length" class="model-row">
+                <span v-for="tag in worker.tags" :key="tag" class="model-chip">{{ tag }}</span>
+              </div>
+              <p v-if="worker.notes" class="user-meta">{{ worker.notes }}</p>
+            </div>
+
+            <div class="profile-actions" @click.stop>
+              <button class="primary-action" @click="toggleWorker(worker)">
+                {{ worker.enabled ? 'Disable' : 'Enable' }}
+              </button>
+              <button class="tool-button" title="Edit worker" @click="openEditWorker(worker)">✎</button>
+              <button class="tool-button danger" title="Delete worker" @click="deleteWorker(worker)">⌫</button>
+            </div>
+          </article>
+        </section>
+      </template>
+
       <!-- User Management View -->
       <template v-else>
         <section class="users-panel">
@@ -1105,6 +1408,81 @@ onMounted(() => {
         <p v-if="workflowFormError" class="form-error">{{ workflowFormError }}</p>
         <div class="modal-actions">
           <button type="button" class="secondary-button" @click="showWorkflowForm = false">Cancel</button>
+          <button type="submit" class="save-button">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Worker Form Modal -->
+    <div v-if="showWorkerForm" class="modal-overlay" @click.self="showWorkerForm = false">
+      <form class="modal-card" @submit.prevent="saveWorker">
+        <div class="modal-header">
+          <div>
+            <h2>{{ editingWorker ? 'Edit Worker' : 'Add Worker' }}</h2>
+            <p>Register a ComfyUI GPU node. Scheduler will auto-select the best worker.</p>
+          </div>
+          <button type="button" class="tool-button" @click="showWorkerForm = false">×</button>
+        </div>
+
+        <label>
+          Worker ID
+          <input v-model="workerForm.id" placeholder="Optional short ID (e.g. 195)" :disabled="!!editingWorker" />
+        </label>
+        <div class="form-row">
+          <label>
+            Name
+            <input v-model="workerForm.name" placeholder="Worker 195" required />
+          </label>
+          <label>
+            URL
+            <input v-model="workerForm.url" placeholder="http://192.168.1.195:8188" required />
+          </label>
+        </div>
+        <div class="form-row">
+          <label>
+            Tier
+            <select v-model="workerForm.tier">
+              <option value="heavy">heavy</option>
+              <option value="medium">medium</option>
+              <option value="light">light</option>
+            </select>
+          </label>
+          <label>
+            GPU
+            <input v-model="workerForm.gpu" placeholder="NVIDIA RTX 4090" />
+          </label>
+          <label>
+            VRAM (GB)
+            <input v-model.number="workerForm.vram_gb" type="number" min="0" step="1" />
+          </label>
+        </div>
+        <label>
+          Tags
+          <input v-model="workerForm.tags_text" placeholder="sd15, sdxl, upscale (comma separated)" />
+        </label>
+        <div class="form-row">
+          <label>
+            Model Root URI
+            <input v-model="workerForm.model_root_uri" />
+          </label>
+          <label>
+            Mount Path
+            <input v-model="workerForm.model_mount_path" />
+          </label>
+        </div>
+        <label>
+          Notes
+          <input v-model="workerForm.notes" placeholder="Optional notes" />
+        </label>
+
+        <label class="check-row">
+          <input v-model="workerForm.enabled" type="checkbox" />
+          Enabled
+        </label>
+
+        <p v-if="workerFormError" class="form-error">{{ workerFormError }}</p>
+        <div class="modal-actions">
+          <button type="button" class="secondary-button" @click="showWorkerForm = false">Cancel</button>
           <button type="submit" class="save-button">Save</button>
         </div>
       </form>
