@@ -497,11 +497,16 @@ def runtime_workflow(
                     "{{seed}}": resolved_seed,
                     "{{batch_size}}": n,
                     "{{n}}": n,
-                    "{{steps}}": steps,
-                    "{{cfg}}": cfg,
-                    "{{denoise}}": denoise,
                     "{{num_frames}}": resolved_frames or max(1, resolved_fps * 5),
                 }
+                # Only add operator placeholders when the value is not None —
+                # otherwise "{{steps}}" with steps=None would replace with Python None
+                if steps is not None:
+                    numeric_placeholders["{{steps}}"] = steps
+                if cfg is not None:
+                    numeric_placeholders["{{cfg}}"] = cfg
+                if denoise is not None:
+                    numeric_placeholders["{{denoise}}"] = denoise
                 if value in numeric_placeholders:
                     inputs[key] = numeric_placeholders[value]
                     continue
@@ -609,9 +614,9 @@ def runtime_workflow(
         # ERNIEImage uses different field names
         elif class_type == "ernieimage" and isinstance(inputs, dict):
             if steps is not None:
-                inputs.setdefault("num_inference_steps", steps)
+                inputs["num_inference_steps"] = steps
             if cfg is not None:
-                inputs.setdefault("guidance_scale", cfg)
+                inputs["guidance_scale"] = cfg
 
     if not prompt_patched:
         raise ValueError("Workflow does not contain a supported prompt text input to patch")

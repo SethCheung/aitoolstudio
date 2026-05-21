@@ -335,3 +335,28 @@ class TestRuntimeWorkflowOperatorParams(unittest.TestCase):
         self.assertEqual(ksampler["inputs"]["steps"], 42)
         self.assertEqual(ksampler["inputs"]["cfg"], 11.5)
         self.assertAlmostEqual(ksampler["inputs"]["denoise"], 0.88)
+
+    def test_placeholder_with_none_skips(self) -> None:
+        """When steps/cfg/denoise are None, {{steps}} placeholder stays as-is."""
+        wf_with_placeholders = {
+            "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sd.safetensors"}},
+            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{prompt}}", "clip": ["1", 1]}},
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "neg", "clip": ["1", 1]}},
+            "4": {"class_type": "EmptyLatentImage", "inputs": {"width": 512, "height": 512, "batch_size": 1}},
+            "5": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0], "seed": 42, "steps": "{{steps}}", "cfg": "{{cfg}}", "sampler_name": "euler", "scheduler": "normal", "denoise": "{{denoise}}"}},
+            "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+            "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": "test", "images": ["6", 0]}},
+        }
+        uid = "none-placeholder-test"
+        upsert_workflow({"name": "None Placeholder", "category": "image", "workflow_json": wf_with_placeholders}, workflow_id=uid)
+        patched = runtime_workflow(
+            workflow_id=uid, prompt="cat",
+            aspect_ratio=None, width=None, height=None,
+            n=1, seed=None, checkpoint=None,
+            steps=None, cfg=None, denoise=None,
+        )
+        ksampler = patched["5"]
+        # None → placeholder NOT replaced, stays as original string
+        self.assertEqual(ksampler["inputs"]["steps"], "{{steps}}")
+        self.assertEqual(ksampler["inputs"]["cfg"], "{{cfg}}")
+        self.assertEqual(ksampler["inputs"]["denoise"], "{{denoise}}")
