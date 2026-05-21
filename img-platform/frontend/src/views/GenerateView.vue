@@ -95,6 +95,9 @@ const useCustomImageSize = ref(false)
 const imageWidth = ref(1024)
 const imageHeight = ref(1024)
 const imageSeed = ref<number | null>(null)
+const comfyuiSteps = ref(28)
+const comfyuiCfg = ref(7)
+const comfyuiDenoise = ref(1)
 const imagePromptOptimizer = ref(false)
 const imageAigcWatermark = ref(false)
 const imageStyleWeight = ref(0.8)
@@ -1292,6 +1295,9 @@ async function sendImage(prompt: string) {
       seed: imageSeed.value,
       aigc_watermark: imageAigcWatermark.value,
       comfyui_workflow_id: isLocalComfyUI.value ? selectedComfyWorkflow.value || null : null,
+      comfyui_steps: isLocalComfyUI.value ? comfyuiSteps.value : null,
+      comfyui_cfg: isLocalComfyUI.value ? comfyuiCfg.value : null,
+      comfyui_denoise: isLocalComfyUI.value ? comfyuiDenoise.value : null,
       sam_x: localComfyUsesClickMask.value && inpaintMode.value === 'click' ? samClickX.value : null,
       sam_y: localComfyUsesClickMask.value && inpaintMode.value === 'click' ? samClickY.value : null,
       style: selectedModel.value === 'image-01-live' && selectedStyle.value !== '默认'
@@ -2171,6 +2177,20 @@ onUnmounted(() => {
                 @input="updateImageSeed"
               />
             </label>
+            <template v-if="isLocalComfyUI">
+              <label class="voice-field">
+                <span>Steps</span>
+                <input v-model.number="comfyuiSteps" type="number" min="1" max="100" step="1" />
+              </label>
+              <label class="voice-field">
+                <span>CFG</span>
+                <input v-model.number="comfyuiCfg" type="number" min="0" max="30" step="0.5" />
+              </label>
+              <label class="voice-field">
+                <span>Denoise</span>
+                <input v-model.number="comfyuiDenoise" type="number" min="0" max="1" step="0.01" />
+              </label>
+            </template>
             <label v-if="selectedModel === 'image-01-live'" class="voice-field">
               <span>画风权重 {{ imageStyleWeight.toFixed(1) }}</span>
               <input v-model.number="imageStyleWeight" type="range" min="0.1" max="1" step="0.1" />
