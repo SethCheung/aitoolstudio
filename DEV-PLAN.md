@@ -85,16 +85,17 @@
 - ✅ sort_order 编辑不重置（Pydantic Optional[int] 陷阱修复）
 - ✅ Admin Workflows 面板 summary 彩色徽标 + validate/duplicate 按钮
 - ✅ Canvas 画布插入 workflow 节点时根据 required_inputs 给出上游依赖提示
+- ✅ ComfyUI 操作者参数开放：Steps（1-100）/ CFG（0-30）/ Denoise（0-1），Generate 页和 Canvas Workflow/Video 节点均可调，后端 runtime_workflow() patch KSampler + 占位符支持
 
 ### 待做（按优先级）
 
-1. **节点参数映射 UI**：将 workflow summary 中的 `patchable_inputs`（prompt/seed/steps/cfg/width/height/batch）暴露为 Workflow 节点的可编辑表单控件，对标 RunningHub 的参数面板。
+1. **节点参数映射 UI**：将 workflow summary 中的 `patchable_inputs`（prompt/seed/size/batch 等，steps/cfg/denoise 已完成独立控件）暴露为 Workflow 节点的可编辑表单控件，对标 RunningHub 的参数面板。
 2. **Canvas 图生图/inpainting 闭环**：Workflow 节点检测到 `required_inputs` 含 `source_image`/`mask_image` 时，自动读取上游 Media 节点结果并注入 ComfyUI 工作流。
-3. **ControlNet 工作流支持**：识别 ControlNet 节点类型，允许用户选择预处理器模型，参数注入。
-4. **Worker Pool 多机调度**：基于现有 `comfyui_workers.py` registry + `comfyui_scheduler.py` tier scoring，将生成任务自动分配到合适 GPU 节点。
-5. **节点参数映射 UI 对接 scheduler**：生成时根据 workflow summary + 用户选择的参数 + scheduler 选定的 worker，构建最终 ComfyUI job payload。
+3. **Sampler/Scheduler 枚举选择**：在 Steps/CFG/Denoise 基础上开放 sampler_name/scheduler 下拉框，覆盖 euler/normal、dpmpp_2m/karras 等常用组合。
+4. **ControlNet 工作流支持**：识别 ControlNet 节点类型，允许用户选择预处理器模型，参数注入。
+5. **Worker Pool 多机调度**：基于现有 `comfyui_workers.py` registry + `comfyui_scheduler.py` tier scoring，将生成任务自动分配到合适 GPU 节点。
 
-**下个 agent 应该接**：节点参数映射 UI（第 1 项）。关键文件：`frontend/src/views/CanvasView.vue` 的 `addNode()` + workflow 节点模板，`backend/services/comfyui_workflows.py` 的 `_compute_workflow_summary()`，`backend/api/canvas.py` 的 `run_node`。
+**下个 agent 应该接**：节点参数映射 UI（第 1 项）。steps/cfg/denoise 已完成独立控件，但 workflow summary 中的其他 `patchable_inputs`（seed/size/batch 等）仍需要在 Workflow 节点中暴露为可编辑表单。关键文件：`frontend/src/views/CanvasView.vue`，`backend/services/comfyui_workflows.py` 的 `_compute_workflow_summary()`，`backend/api/canvas.py` 的 `run_node`。
 
 ---
 

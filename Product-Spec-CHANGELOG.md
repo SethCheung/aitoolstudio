@@ -1,5 +1,32 @@
 # Product Spec 变更记录
 
+## v1.20 - 2026-05-21
+
+**ComfyUI 操作者参数开放：Steps / CFG / Denoise**
+
+### 变更内容
+- 后端 `ImageGenerateRequest` 和 `CanvasNodeRunRequest` 新增 `comfyui_steps`（1-100）、`comfyui_cfg`（0-30）、`comfyui_denoise`（0-1），均为 Optional，None=保留 workflow 原值。
+- `runtime_workflow()` 新增 `steps`/`cfg`/`denoise` 参数，patch KSampler 节点（后置直接赋值），同时支持占位符 `{{steps}}`/`{{cfg}}`/`{{denoise}}`（仅在值不为 None 时加入替换表）。
+- ERNIEImage 节点同步映射 `num_inference_steps`/`guidance_scale`。
+- Generate 页"图片高级设置"增加 Steps/CFG/Denoise 三个 number input，仅 `comfyui-local` 时显示，非 ComfyUI 模型发 null。
+- Canvas Workflow/Video 节点底部面板增加同样三个参数，`selectedUsesComfyUI`（workflow || video，不含 llm）守卫，runSelectedNode 和 cascade payload 传入。
+- sort_order=None 边界修复（Pydantic `Optional[int]` + `dict.get(default)` 陷阱），27 个单元测试覆盖。
+
+### 影响范围
+- `backend/schemas/image.py`、`backend/schemas/canvas.py` — 新增字段
+- `backend/services/comfyui_workflows.py` — `runtime_workflow()` 签名 + patching + placeholder guard
+- `backend/api/image.py`、`backend/api/video.py`、`backend/api/canvas.py` — 5 个调用点传参
+- `backend/tests/test_comfyui_workflows.py` — +5 测试（27 total）
+- `frontend/src/views/GenerateView.vue` — 状态/模板/payload
+- `frontend/src/views/CanvasView.vue` — CanvasNodeData/draft/savePrompt/runSelectedNode/模板
+
+### 设计原则
+- 范围校验在前端 input min/max 和后端 Pydantic Field 双保险。
+- 参数仅在 ComfyUI 上下文发送，LLM/Text/Media 节点不受污染。
+- 占位符 None-guard：`{{steps}}` 仅在 `steps is not None` 时加入替换表，防止 Python None 进入 ComfyUI payload。
+
+---
+
 ## v1.19 - 2026-05-21
 
 **Workflow 管理完善：summary + validate + duplicate + Canvas 提示**
