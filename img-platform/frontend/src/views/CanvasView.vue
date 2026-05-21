@@ -46,6 +46,9 @@ interface CanvasNodeData {
   quantity?: number
   aspectRatio?: string
   seed?: number | null
+  comfyuiSteps?: number
+  comfyuiCfg?: number
+  comfyuiDenoise?: number
   status?: RunStatus
   error?: string
   results?: string[]
@@ -120,6 +123,9 @@ const assetDraft = ref('')
 const aspectDraft = ref('1:1')
 const quantityDraft = ref(1)
 const seedDraft = ref('')
+const stepsDraft = ref(28)
+const cfgDraft = ref(7)
+const denoiseDraft = ref(1)
 const runError = ref('')
 const previewImage = ref<string | null>(null)
 const agentOpen = ref(false)
@@ -360,6 +366,9 @@ function selectNode(nodeId: string) {
   aspectDraft.value = data.aspectRatio || '1:1'
   quantityDraft.value = safeNumber(data.quantity, 1)
   seedDraft.value = data.seed == null ? '' : String(data.seed)
+  stepsDraft.value = data.comfyuiSteps ?? 28
+  cfgDraft.value = data.comfyuiCfg ?? 7
+  denoiseDraft.value = data.comfyuiDenoise ?? 1
   runError.value = ''
 }
 
@@ -510,6 +519,9 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
         quantity: 1,
         aspectRatio: workflow.category === 'video' ? '16:9' : '1:1',
         seed: null,
+        comfyuiSteps: 28,
+        comfyuiCfg: 7,
+        comfyuiDenoise: 1,
         status: 'idle',
         results: [],
       }
@@ -594,6 +606,9 @@ function savePrompt() {
     aspectRatio: aspectDraft.value,
     quantity: Math.max(1, Math.min(9, Math.round(quantityDraft.value || 1))),
     seed: seedDraft.value.trim() ? Number(seedDraft.value) : null,
+    comfyuiSteps: stepsDraft.value,
+    comfyuiCfg: cfgDraft.value,
+    comfyuiDenoise: denoiseDraft.value,
   })
 }
 
@@ -839,6 +854,9 @@ async function runCascade() {
       aspect_ratio: aspectDraft.value || '1:1',
       quantity: Math.max(1, Math.min(9, Math.round(quantityDraft.value || 1))),
       seed: seedDraft.value.trim() ? Number(seedDraft.value) : null,
+      comfyui_steps: selectedCanRun.value ? stepsDraft.value : null,
+      comfyui_cfg: selectedCanRun.value ? cfgDraft.value : null,
+      comfyui_denoise: selectedCanRun.value ? denoiseDraft.value : null,
       duration: 6,
     })
 
@@ -995,6 +1013,9 @@ async function runSelectedNode() {
       aspect_ratio: aspectDraft.value || '1:1',
       quantity: Math.max(1, Math.min(9, Math.round(quantityDraft.value || 1))),
       seed: seedDraft.value.trim() ? Number(seedDraft.value) : null,
+      comfyui_steps: selectedCanRun.value ? stepsDraft.value : null,
+      comfyui_cfg: selectedCanRun.value ? cfgDraft.value : null,
+      comfyui_denoise: selectedCanRun.value ? denoiseDraft.value : null,
       duration: 6,
     })
     const respData = response.data || {}
@@ -1439,6 +1460,18 @@ watch(historyDrawerOpen, (open) => {
         <label v-if="selectedCanRun" class="inline-field">
           Seed
           <input v-model="seedDraft" type="number" placeholder="随机" @blur="savePrompt" />
+        </label>
+        <label v-if="selectedCanRun" class="inline-field">
+          Steps
+          <input v-model.number="stepsDraft" type="number" min="1" max="100" step="1" @blur="savePrompt" />
+        </label>
+        <label v-if="selectedCanRun" class="inline-field">
+          CFG
+          <input v-model.number="cfgDraft" type="number" min="0" max="30" step="0.5" @blur="savePrompt" />
+        </label>
+        <label v-if="selectedCanRun" class="inline-field">
+          Denoise
+          <input v-model.number="denoiseDraft" type="number" min="0" max="1" step="0.01" @blur="savePrompt" />
         </label>
         <button type="button" class="submit-run" :disabled="selectedData?.status === 'running'" @click="runSelectedNode">
         运行
