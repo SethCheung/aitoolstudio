@@ -30,7 +30,7 @@
 | **ComfyUI GPU 状态** | `comfyui-local` 状态条展示在线状态、VRAM 已用/总量、占用百分比和 Torch VRAM，生成中每 2 秒刷新，帮助用户判断本地 GPU 是否正在工作 |
 | **ComfyUI Upscale** | 图片结果中的 Upscale 按钮接入 ComfyUI 原生 `ImageScale` 工作流，默认 2x `lanczos` 放大，结果作为新生成记录展示 |
 | **Flux 局部重绘** | 用户选择 `Flux 局部重绘` workflow 后上传原图，默认在居中的图片画布上直接涂抹要修改的区域；也可切换为点选目标，由后端生成 SAM 提示遮罩后提交 ComfyUI |
-| **流水线无限画布（进行中）** | 新增 RunningHub/RHTV 风格的 `/canvas` 流水线工作台，使用无限画布承载 Text / Media / Workflow / Video 节点；左侧“工作流”tab 必须读取平台现有 `/api/comfyui/workflows`，按已启用 ComfyUI workflow 生成可插入节点；画布文档、节点、连线、运行记录和结果由 `/api/canvas` 保存，不能和后台 workflow 管理割裂 |
+| **流水线无限画布** | Canvas 画布必须绑定项目（conversation），不允许独立工作区。主入口为 `/project/:conversationId?mode=canvas`，从项目卡片进入画布模式。画布使用无限画布承载 Text / Media / Workflow / Video 节点；左侧"工作流"tab 必须读取平台现有 `/api/comfyui/workflows`，按已启用 ComfyUI workflow 生成可插入节点；画布文档、节点、连线、运行记录和结果由 `/api/canvas` 保存并关联当前 conversation，不能和后台 workflow 管理割裂。返回按钮回到项目列表页 |
 | **视频生成参数面板** | video 分类对齐 MiniMax 官方视频调试方案，支持文生视频、首帧图生视频、首尾帧视频、主体参考视频、官方 Prompt 优化、快速预处理、时长和分辨率 |
 | **语音生成参数面板** | voice 分类对齐 MiniMax 官方同步语音调试台，支持模型、音色、情绪、语速、音量、音调、格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典、声音效果和语气词标签 |
 | **音乐生成参数面板** | music 分类对齐 MiniMax 官方音乐调试台，支持歌曲模板、歌词结构标签、风格描述、歌词、纯音乐模式、AI 歌词优化、采样率、比特率、音频格式、返回格式、Seed 和 AI 音频水印 |
@@ -93,10 +93,10 @@
 |------|------|
 | **账号登录** | 管理员创建账号，用户输入用户名 + 密码登录后看到所有项目和个人历史 |
 | **工作流选择** | 下拉框选择管理员预设的工作流，显示工作流名称和简要说明 |
-| **流水线工作流选择** | 用户在 `/canvas` 左侧“工作流”tab 选择现有 ComfyUI workflow → 系统在画布中插入对应 Workflow 节点 → 节点展示分类、节点数量、说明和备注，并可与 Text / Media 节点连线；执行时后端读取节点绑定的 `workflow_id`、上游 Text 和 Media，提交本地 ComfyUI 并生成结果节点 |
+| **流水线工作流选择** | 用户从项目卡片进入画布模式（`/project/:conversationId?mode=canvas`），在左侧"工作流"tab 选择现有 ComfyUI workflow → 系统在画布中插入对应 Workflow 节点 → 节点展示分类、节点数量、说明和备注，并可与 Text / Media 节点连线；执行时后端读取节点绑定的 `workflow_id`、上游 Text 和 Media，提交本地 ComfyUI 并生成结果节点 |
 | **节点生成输入框** | 用户选中 Video / Workflow 节点后，画布下方展示 RunningHub 风格生成输入框：顶部模式标签（如“全能参考”“文生视频”）、素材库入口、中间 prompt 输入区、底部模型/规格/数量/提交任务按钮；输入框参数必须结合节点绑定的 workflow/category，并通过 `/api/canvas/documents/{id}/nodes/{node_id}/run` 写入运行记录。平台为公司内网使用，不展示计费或扣费逻辑 |
 | **电商套图模板** | 用户从工作流面板选择“电商套图模板” → 系统生成产品信息 Text、产品图 Media、模特/侧面/俯瞰提示词和三个 Workflow 节点 → 用户补产品图和文案后逐个运行节点，得到可继续接入下游的结果节点 |
-| **流水线 Agent 助手** | `/canvas` 右下角提供 Agent 助手入口，读取当前画布节点、连线、选中节点和可用 workflow 摘要，通过 `/api/prompt/canvas-agent` 调用 MiniMax 文本模型给用户下一步建议、prompt 改写方向和 workflow 选择提示；回答必须中文、短、具体 |
+| **流水线 Agent 助手** | 画布模式右下角提供 Agent 助手入口，读取当前画布节点、连线、选中节点和可用 workflow 摘要，通过 `/api/prompt/canvas-agent` 调用 MiniMax 文本模型给用户下一步建议、prompt 改写方向和 workflow 选择提示；回答必须中文、短、具体 |
 | **参数调节** | 滑动条/输入框调整采样步数、CFG、种子等 ComfyUI 参数（可选显示） |
 | **生成队列** | 多用户同时生成时显示排队状态，预估等待时间 |
 | **下载/分享** | 单张或批量下载 PNG 格式，支持复制链接分享给团队成员 |
@@ -274,6 +274,7 @@
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v1.21 | 2026-05-21 | Canvas/Project 绑定同步：入口统一（`/project/:conversationId?mode=canvas` 替代独立 `/canvas`，必须项目绑定）、工作流同步（关联 conversation）、模型同步（共享参数配置）、topbar 同步（统一导航栏和返回按钮）、文档同步（本条目） |
 | v1.20 | 2026-05-21 | ComfyUI 操作者参数开放：Generate 页"图片高级设置"和 Canvas Workflow/Video 节点面板支持调整 Steps（1-100，默认 28）、CFG（0-30，默认 7）、Denoise（0-1，默认 1）；后端 schema 加范围校验，runtime_workflow() patch KSampler 并支持 {{steps}}/{{cfg}}/{{denoise}} 占位符 |
 | v1.19 | 2026-05-21 | Workflow 管理完善：后端自动计算 summary（节点数/输出类型/required inputs/patchable inputs），新增 validate 和 duplicate 接口，sort_order 编辑不重置，Admin 面板以彩色徽标展示 summary，Canvas 画布根据 summary.required_inputs 给出上游依赖提示 |
 | v1.11 | 2026-05-07 | Admin Profile 模型选择支持自定义模型 ID，避免模型列表被 MiniMax 预设锁死，为后续其他供应商 API 接入预留入口 |

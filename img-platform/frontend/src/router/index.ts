@@ -41,13 +41,11 @@ const router = createRouter({
     },
     {
       path: '/canvas',
-      name: 'canvas',
-      component: () => import('../views/CanvasView.vue'),
-      meta: { requiresAuth: true },
+      redirect: '/',
     },
     {
-      path: '/canvas/',
-      redirect: '/canvas',
+      path: '/canvas/:catchAll(.*)',
+      redirect: '/',
     },
   ],
 })

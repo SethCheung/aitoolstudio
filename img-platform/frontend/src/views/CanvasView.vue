@@ -100,6 +100,7 @@ const router = useRouter()
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   document.addEventListener('click', closeContextMenu)
+  fetchModels()
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
@@ -113,6 +114,45 @@ const workflowError = ref('')
 const workflowQuery = ref('')
 const workflowModalOpen = ref(false)
 const activeTool = ref<'assets' | 'workflows'>('workflows')
+const models = ref<Record<string, string[]>>({})
+const modelsLoading = ref(false)
+const modelDraft = ref('')
+
+function modelNamesFor(category: string): string[] {
+  const m = models.value[category]
+  if (!m) return []
+  return Array.isArray(m) ? m : Object.keys(m)
+}
+
+function getDefaultModel(type: CanvasNodeType): string {
+  if (type === 'text') return modelNamesFor('text')[0] || ''
+  if (type === 'video') return modelNamesFor('video')[0] || ''
+  if (type === 'workflow') return modelNamesFor('image')[0] || ''
+  if (type === 'llm') return modelNamesFor('text')[0] || ''
+  if (type === 'loop') return 'Serial'
+  return ''
+}
+
+async function fetchModels() {
+  modelsLoading.value = true
+  try {
+    const resp = await api.get('/api/profiles/models')
+    models.value = resp.data as Record<string, string[]>
+    // Update default nodes with real model names
+    const textNode = nodes.value.find(n => n.id === 'text-seed')
+    if (textNode && !textNode.data.model) {
+      textNode.data.model = getDefaultModel('text')
+    }
+    const wfNode = nodes.value.find(n => n.id === 'workflow-preview')
+    if (wfNode && (!wfNode.data.workflowId || wfNode.data.model === 'ComfyUI')) {
+      wfNode.data.model = getDefaultModel('workflow')
+    }
+  } catch (e) {
+    console.warn('Failed to load models', e)
+  } finally {
+    modelsLoading.value = false
+  }
+}
 const selectedNodeId = ref<string | null>(null)
 const showNodeMenu = ref(false)
 const historyDrawerOpen = ref(false)
@@ -150,7 +190,7 @@ const nodes = ref<any[]>([
       title: 'Text',
       body: '描述你想生成的内容。这个文本节点可以连接到图片、视频或 ComfyUI workflow 节点。',
       mode: 'Prompt',
-      model: 'M2.7',
+      model: '',
       status: 'idle',
     },
   },
@@ -163,7 +203,7 @@ const nodes = ref<any[]>([
       body: '打开左侧工作流，插入后台启用的 ComfyUI workflow 后再运行。',
       hint: '先替换成真实 workflow',
       mode: '全能参考',
-      model: 'ComfyUI',
+      model: '',
       spec: 'image / ComfyUI',
       quantity: 1,
       aspectRatio: '1:1',
@@ -192,6 +232,23 @@ const selectedCanRun = computed(() => selectedNode.value?.type === 'workflow' ||
 const selectedUsesComfyUI = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video')
 const canCascadeRun = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video')
 const selectedIsMedia = computed(() => selectedNode.value?.type === 'media')
+const selectedModelOptions = computed(() => {
+  if (!selectedNode.value) return []
+  const node = selectedNode.value
+  if (node.data?.workflowId) return []
+  if (node.type === 'text' || node.type === 'llm') return modelNamesFor('text')
+  if (node.type === 'video') return modelNamesFor('video')
+  if (node.type === 'workflow') return modelNamesFor('image')
+  return []
+})
+const selectedModelLabel = computed(() => {
+  if (!selectedNode.value) return ''
+  const node = selectedNode.value
+  if (node.data?.workflowId) {
+    return `本地 ComfyUI / ${node.data.title || node.data.model || 'workflow'}`
+  }
+  return node.data?.model || '选择模型'
+})
 const selectedIncomingPairs = computed(() => selectedNode.value ? incomingNodePairs(selectedNode.value.id) : [])
 const nodeStats = computed(() => ({
   text: nodes.value.filter((node) => node.type === 'text').length,
@@ -350,7 +407,7 @@ async function fetchWorkflows() {
   workflowError.value = ''
   try {
     const response = await api.get('/api/comfyui/workflows')
-    workflows.value = response.data?.workflows || []
+    workflows.value = (response.data?.workflows || []).filter((w: any) => w.enabled !== false)
   } catch (error: any) {
     workflowError.value = error?.response?.data?.detail || error.message || '工作流加载失败'
   } finally {
@@ -370,6 +427,7 @@ function selectNode(nodeId: string) {
   stepsDraft.value = data.comfyuiSteps ?? 28
   cfgDraft.value = data.comfyuiCfg ?? 7
   denoiseDraft.value = data.comfyuiDenoise ?? 1
+  modelDraft.value = data.model || ''
   runError.value = ''
 }
 
@@ -532,7 +590,7 @@ function addNode(type: CanvasNodeType, workflow?: ComfyWorkflow) {
         body: type === 'text' ? '输入提示词，连接到下游工作流。' : type === 'llm' ? 'LLM 处理节点' : type === 'loop' ? '第《进度》批' : '',
         hint: type === 'media' ? '上传或引用素材后连接到工作流节点' : type === 'output' ? '收集生成结果' : type === 'llm' ? '连接上游 Text/Media，运行后输出文本给下游' : type === 'loop' ? '设置循环次数、提示词模板。串联运行时每轮调用下游链。' : '选中节点后在下方配置并生成',
         mode: type === 'video' ? '文生视频' : type === 'output' ? '结果容器' : type === 'llm' ? 'LLM' : type === 'loop' ? 'Loop' : '全能参考',
-        model: type === 'video' ? 'Seedance2.0' : type === 'output' ? '—' : type === 'llm' ? 'MiniMax-M2.7' : type === 'loop' ? 'Serial' : 'ComfyUI',
+        model: type === 'output' ? '—' : type === 'loop' ? 'Serial' : getDefaultModel(type),
         spec: type === 'video' ? '480p / 5s / 是 / 自适应 / 否' : type === 'output' ? '—' : type === 'llm' ? 'Node 模式' : type === 'loop' ? '《计数》《总数》《进度》' : '默认参数',
         quantity: 1,
         aspectRatio: type === 'video' ? '16:9' : '1:1',
@@ -610,6 +668,7 @@ function savePrompt() {
     comfyuiSteps: stepsDraft.value,
     comfyuiCfg: cfgDraft.value,
     comfyuiDenoise: denoiseDraft.value,
+    model: modelDraft.value || undefined,
   })
 }
 
@@ -744,7 +803,7 @@ function addEcommerceTemplate(workflow: ComfyWorkflow) {
         title: '产品信息',
         body: '在这里粘贴产品名称、卖点、材质、使用场景和目标人群。',
         mode: 'Prompt',
-        model: 'M2.7',
+        model: getDefaultModel('text'),
         status: 'idle',
       },
     },
@@ -769,7 +828,7 @@ function addEcommerceTemplate(workflow: ComfyWorkflow) {
         title: '模特图提示词',
         body: '根据产品特性，生成一张适合展示该产品且时尚、有高级感的模特图，彩色人像，白底，人物居中，欧美人优先，产品清晰可见且不变形。',
         mode: 'Prompt',
-        model: 'M2.7',
+        model: getDefaultModel('text'),
         status: 'idle',
       },
     },
@@ -781,7 +840,7 @@ function addEcommerceTemplate(workflow: ComfyWorkflow) {
         title: '侧面展示提示词',
         body: '侧面展示图：根据产品图和产品信息，生成左侧 45 度侧面展示图，高清展示侧面形状和细节，保持产品不变形，背景简洁。',
         mode: 'Prompt',
-        model: 'M2.7',
+        model: getDefaultModel('text'),
         status: 'idle',
       },
     },
@@ -793,7 +852,7 @@ function addEcommerceTemplate(workflow: ComfyWorkflow) {
         title: '俯瞰展示提示词',
         body: '俯瞰展示图：根据产品图和产品信息，生成从上往下俯瞰的产品展示图，高清展示俯瞰角度的形状和细节，保持产品不变形。',
         mode: 'Prompt',
-        model: 'M2.7',
+        model: getDefaultModel('text'),
         status: 'idle',
       },
     },
@@ -1128,7 +1187,6 @@ watch(historyDrawerOpen, (open) => {
       </div>
       <div class="header-actions">
         <button type="button" @click="historyDrawerOpen = true">历史</button>
-        <button type="button" @click="router.push('/generate')">生成工作台</button>
         <button type="button" @click="openTool('workflows')">工作流</button>
         <button class="intranet-pill" type="button">ComfyUI Local</button>
       </div>
@@ -1287,7 +1345,7 @@ watch(historyDrawerOpen, (open) => {
             </div>
             <p v-else class="llm-empty">运行 LLM 节点后，输出文本会显示在这里，并可传下游 workflow。</p>
             <p v-if="data.error" class="node-error">{{ data.error }}</p>
-            <small>{{ data.model || 'MiniMax-M2.7' }}</small>
+            <small>{{ data.model || '选择模型' }}</small>
           </div>
         </div>
       </template>
@@ -1443,7 +1501,12 @@ watch(historyDrawerOpen, (open) => {
         <input v-model="assetDraft" type="url" placeholder="https://... 或 data:image/..." @blur="savePrompt" />
       </div>
       <div class="composer-footer">
-        <button type="button" class="model-select">{{ selectedData?.model || selectedData?.title }}⌄</button>
+        <span v-if="selectedData?.workflowId" class="model-select readonly">{{ selectedModelLabel }}</span>
+        <select v-else-if="selectedModelOptions.length" v-model="modelDraft" class="model-select" @change="savePrompt">
+          <option value="" disabled>选择模型</option>
+          <option v-for="m in selectedModelOptions" :key="m" :value="m">{{ m }}</option>
+        </select>
+        <span v-else class="model-select readonly">{{ selectedModelLabel }}</span>
         <label v-if="selectedCanRun" class="inline-field">
           比例
           <select v-model="aspectDraft" @change="savePrompt">

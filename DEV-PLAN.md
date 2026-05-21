@@ -49,14 +49,15 @@
 ## 当前迭代：RunningHub/RHTV 风格流水线画布
 
 **交付内容**：
-- 新增 `/canvas` 路由，提供黑色点阵无限画布、拖拽节点、缩放、连线和视图重置能力。
-- 左侧悬浮工具栏包含素材和工作流入口；“工作流”tab 打开模板库。
+- Canvas 画布不再作为独立 `/canvas` 路由，主入口改为 `/project/:conversationId?mode=canvas`，必须绑定项目（conversation）。
+- 从项目卡片进入画布模式，顶部导航栏与 Generate 页统一（项目名称、搜索框、返回项目列表按钮）。
+- 左侧悬浮工具栏包含素材和工作流入口；"工作流"tab 打开模板库。
 - 工作流模板库不写死外部示例，必须读取现有 `/api/comfyui/workflows` enabled workflow，按 category 过滤并插入 Workflow 节点。
 - 支持 Text / Media / Workflow / Video 节点；选中节点后显示 RunningHub 风格底部生成输入框，可编辑 prompt、模式、模型、规格和数量；内网版本不展示计费或扣费。
 - 右下角新增 Agent 助手，通过 `/api/prompt/canvas-agent` + `MiniMax-M2.7` 读取画布状态并输出中文下一步搭建建议。
-- 画布节点、边、运行状态和结果优先保存到 `/api/canvas/documents`，localStorage 只作为未登录或接口失败时的降级缓存。
+- 画布节点、边、运行状态和结果优先保存到 `/api/canvas/documents` 并关联当前 conversation，localStorage 只作为未登录或接口失败时的降级缓存。
 - Workflow / Video 节点通过服务端画布运行接口执行，后端负责收集上游 Text / Media、调用本地 ComfyUI workflow、写入 Generation / CanvasRun，并将输出作为可复用结果节点展示。
-- 内置第一版“电商套图模板”：产品信息 + 产品图 → 模特图 / 侧面展示 / 俯瞰展示。
+- 内置第一版"电商套图模板"：产品信息 + 产品图 → 模特图 / 侧面展示 / 俯瞰展示。
 
 **关键文件**：
 - `img-platform/frontend/package.json`
@@ -69,10 +70,12 @@
 
 **验收标准**：
 - `npm run build` 通过。
-- 登录后可访问 `/canvas`。
+- Canvas 不再作为独立路由，主入口为 `/project/:conversationId?mode=canvas`；必须从项目卡片进入画布模式，不允许无绑定的独立画布工作区。
+- 画布顶部导航栏与 Generate 页统一（项目名称 + 搜索框 + 返回项目列表按钮），返回按钮回到项目列表 `/`。
 - 工作流 tab 能展示后端已有 enabled ComfyUI workflow，并可插入画布节点。
 - Text / Media 节点可连到 Workflow/Video 节点，运行时按连线顺序注入 prompt 和参考图。
 - Workflow 节点运行后能返回图片/视频 URL、更新节点状态，并在右侧生成可继续连线的结果 Media 节点。
+- 画布文档数据写入当前 conversation，不创建孤立的 canvas document。
 
 ---
 

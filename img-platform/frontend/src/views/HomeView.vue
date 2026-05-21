@@ -78,36 +78,23 @@ function openProject(id: number) {
   router.push({ path: `/project/${id}`, query: { mode: 'chat' } })
 }
 
-function canvasUrl() {
-  // Force port 5173 for canvas — avoid fnOS (5666) or port 80 misrouting
-  const proto = window.location.protocol
-  const host = window.location.hostname
-  return `${proto}//${host}:5173/canvas`
-}
-
-function canvasUrlForConversation(id: number) {
-  const proto = window.location.protocol
-  const host = window.location.hostname
-  return `${proto}//${host}:5173/canvas/${id}`
-}
-
 async function newPipeline() {
   try {
     const resp = await api.post('/api/conversations', { title: 'New Pipeline' })
     const id = resp.data?.id
     if (id) {
-      window.location.href = canvasUrlForConversation(id)
+      router.push({ path: `/project/${id}`, query: { mode: 'canvas' } })
     } else {
-      window.location.href = canvasUrl()
+      router.push('/')
     }
   } catch {
-    window.location.href = canvasUrl()
+    router.push('/')
   }
 }
 
 function openCanvas(id: number, e: Event) {
   e.stopPropagation()
-  window.location.href = canvasUrlForConversation(id)
+  router.push({ path: `/project/${id}`, query: { mode: 'canvas' } })
 }
 
 async function newProject() {

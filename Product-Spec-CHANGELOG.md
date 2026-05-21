@@ -1,5 +1,30 @@
 # Product Spec 变更记录
 
+## v1.21 - 2026-05-21
+
+**Canvas/Project 绑定同步：入口统一 + 工作流/模型/topbar/文档同步**
+
+### 变更内容
+- **入口统一**：Canvas 画布不再作为独立路由 `/canvas`，主入口改为 `/project/:conversationId?mode=canvas`；画布必须绑定项目（conversation），不允许独立工作区。
+- **工作流同步**：画布模式下的工作流选择、节点运行和历史记录均关联当前 conversation，不再与项目数据脱节。
+- **模型同步**：画布 Workflow/Video 节点的模型选择、Steps/CFG/Denoise 参数与 Generate 页保持一致，共享同一套参数配置和校验逻辑。
+- **Topbar 同步**：画布模式顶部导航栏与 Generate 页统一，展示项目名称、搜索框和返回项目列表按钮，不再使用独立 `/canvas` 的导航。
+- **文档同步**：Product-Spec.md 明确 Canvas 必须项目绑定，DEV-PLAN.md 补充同步验收标准，CHANGELOG 记录本次变更。
+
+### 影响范围
+- `Product-Spec.md` — 移除 `/canvas` 独立入口描述，改为项目绑定画布模式
+- `DEV-PLAN.md` — 当前迭代补充 canvas/project 同步验收标准
+- `Product-Spec-CHANGELOG.md` — 本条目
+- 前端路由 — `/project/:conversationId?mode=canvas` 替代独立 `/canvas`
+- Canvas 组件 — 顶部导航栏、返回按钮、项目上下文注入
+
+### 设计原则
+- Canvas 是项目的视图模式而非独立应用，无项目则无画布。
+- 返回按钮统一回到项目列表，不制造导航死循环。
+- 画布数据和生成记录写入当前 conversation，不创建孤立的 canvas document。
+
+---
+
 ## v1.20 - 2026-05-21
 
 **ComfyUI 操作者参数开放：Steps / CFG / Denoise**
