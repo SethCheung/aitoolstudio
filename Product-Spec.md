@@ -184,7 +184,7 @@
 | **语音合成（MiniMax Speech T2A）** | 使用 MiniMax 同步 T2A HTTP API，把文本转成音频；支持 Speech 2.8/2.6/02/01 系列模型、系统/复刻音色、情绪、音频规格、发音词典、语言增强和声音效果 | 用户切换分类为 voice 时调用；生成结果保存为本地音频并展示播放器 |
 | **视频生成（MiniMax Hailuo）** | 使用 MiniMax 异步视频 API，支持 `MiniMax-Hailuo-2.3`、`MiniMax-Hailuo-2.3-Fast`、`MiniMax-Hailuo-02`、`S2V-01`，覆盖文本、首帧、首尾帧和主体参考模式 | 用户切换分类为 video 时调用；生成完成后下载到本地并展示播放器 |
 | **音乐生成（MiniMax Music）** | 使用 MiniMax 音乐生成 API，把歌词和风格描述转成完整音乐；支持 music-2.6 / music-cover / music-2.5+ / music-2.5、纯音乐、AI 歌词优化、Seed 复现、Hex/URL 返回 | 用户切换分类为 music 时调用；生成结果保存为本地音频并展示播放器 |
-| **图像生成（ComfyUI + 本地 GPU）** | 主力生图引擎；当前已支持默认文生图直连，后续扩展工作流、LoRA、ControlNet 等能力 | `comfyui-local` 模型入口；完整管理员预设工作流管理仍待实现 |
+| **图像生成（ComfyUI + 本地 GPU）** | 主力生图引擎；管理员可通过 `/admin` Workflows 面板管理 JSON、启停、校验、复制和 SMB 同步，Canvas 插入 workflow 节点时根据 summary 给出上游依赖提示；后续扩展节点参数映射 UI、LoRA、ControlNet 专用表单 | `comfyui-local` 模型入口；管理员工作流管理已可用，节点参数映射 UI 和高级工作流表单仍待实现 |
 
 ## 技术方向
 
@@ -225,7 +225,7 @@
 | 默认文生图 | `POST /api/image/generate`，模型为 `comfyui-local` | 后端构造默认 API-format 工作流，提交到 ComfyUI `/prompt` |
 | 图片放大 | `POST /api/image/upscale` → ComfyUI `LoadImage/ImageScale/SaveImage` | 当前为 2x `lanczos` 几何放大，不是 ESRGAN/模型超分 |
 | 结果归档 | 轮询 `/history/{prompt_id}`，再通过 `/view` 拉取输出图 | 图片保存到本平台 `/uploads/comfyui`，沿用现有生成记录流和原图预览 |
-| 暂不支持 | 参考图、inpainting、ControlNet、LoRA、管理员工作流上传和参数映射 | 这些必须等工作流管理闭环完成，别装成已经有 |
+| 暂不支持 | 参考图注入、inpainting 涂抹、ControlNet、LoRA 工作流专用参数表单和队列管理 | 节点参数映射 UI（将 workflow patchable_inputs 暴露为可编辑控件）是下一阶段重点 |
 
 ### 性能要求
 | 指标 | 目标值 |
@@ -273,7 +273,7 @@
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
-| v1.12 | 2026-05-21 | Workflow 管理完善：后端自动计算 summary（节点数/输出类型/required inputs/patchable inputs），新增 validate 和 duplicate 接口，sort_order 编辑不重置，Admin 面板以彩色徽标展示 summary，Canvas 画布根据 summary.required_inputs 给出上游依赖提示 |
+| v1.19 | 2026-05-21 | Workflow 管理完善：后端自动计算 summary（节点数/输出类型/required inputs/patchable inputs），新增 validate 和 duplicate 接口，sort_order 编辑不重置，Admin 面板以彩色徽标展示 summary，Canvas 画布根据 summary.required_inputs 给出上游依赖提示 |
 | v1.11 | 2026-05-07 | Admin Profile 模型选择支持自定义模型 ID，避免模型列表被 MiniMax 预设锁死，为后续其他供应商 API 接入预留入口 |
 | v1.10 | 2026-05-07 | 明确管理员后台用户管理入口：前端 `/admin` 必须展示可见 Add User 操作，并提供创建账号、重置密码、管理员权限切换和删除保护 |
 | v1.0 | 2026-04-30 | 初始版本 |
