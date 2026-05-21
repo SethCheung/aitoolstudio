@@ -167,6 +167,9 @@ async def generate(
                         n=req.n,
                         seed=req.seed,
                         checkpoint=req.comfyui_checkpoint,
+                        steps=req.comfyui_steps,
+                        cfg=req.comfyui_cfg,
+                        denoise=req.comfyui_denoise,
                     )
                 except ValueError:
                     logger.warning(

@@ -43,6 +43,10 @@ class ImageGenerateRequest(BaseModel):
     comfyui_required_models: list[str] = Field(default_factory=list, description="调度要求 — worker 必须可见的 checkpoint 列表")
     comfyui_required_nodes: list[str] = Field(default_factory=list, description="调度要求 — worker 必须支持的节点类型列表")
     comfyui_estimated_vram_gb: Optional[float] = Field(default=None, description="调度要求 — 预估显存占用 (GB)")
+    # ComfyUI operator parameters（传给 runtime_workflow patch KSampler）
+    comfyui_steps: Optional[int] = Field(default=None, ge=1, le=100, description="采样步数，1-100，None=保留 workflow 原值")
+    comfyui_cfg: Optional[float] = Field(default=None, ge=0, le=30, description="提示词遵循强度，0-30，None=保留 workflow 原值")
+    comfyui_denoise: Optional[float] = Field(default=None, ge=0, le=1, description="重绘/变化强度，0-1，txt2img=1，None=保留 workflow 原值")
     sam_x: Optional[float] = Field(default=None, ge=0, le=1, description="局部重绘点击点 X，0-1 归一化坐标")
     sam_y: Optional[float] = Field(default=None, ge=0, le=1, description="局部重绘点击点 Y，0-1 归一化坐标")
 

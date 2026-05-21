@@ -67,6 +67,10 @@ class CanvasNodeRunRequest(CanvasGraphSave):
     seed: Optional[int] = None
     duration: int = Field(default=6, ge=1, le=30)
     fps: Optional[int] = None
+    # ComfyUI operator parameters（传给 runtime_workflow patch KSampler）
+    comfyui_steps: Optional[int] = Field(default=None, ge=1, le=100, description="采样步数，1-100")
+    comfyui_cfg: Optional[float] = Field(default=None, ge=0, le=30, description="提示词遵循强度，0-30")
+    comfyui_denoise: Optional[float] = Field(default=None, ge=0, le=1, description="重绘/变化强度，0-1")
 
 
 class CanvasNodeRunResponse(BaseModel):

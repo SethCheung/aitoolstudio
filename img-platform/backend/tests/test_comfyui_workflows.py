@@ -19,6 +19,7 @@ from services.comfyui_workflows import (
     get_workflow,
     list_workflows,
     reorder_workflows,
+    runtime_workflow,
     upsert_workflow,
     validate_workflow_json,
 )
@@ -249,3 +250,88 @@ class TestSummaryOnAllEndpoints(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRuntimeWorkflowOperatorParams(unittest.TestCase):
+    """Task A: verify steps/cfg/denoise patching in runtime_workflow."""
+
+    def setUp(self) -> None:
+        _reset_store()
+        # Create a workflow with KSampler for testing
+        upsert_workflow({
+            "name": "KSampler Test",
+            "category": "image",
+            "workflow_json": MINIMAL_WF,
+        })
+
+    def test_patch_ksampler_with_values(self) -> None:
+        """steps=35, cfg=8.5, denoise=0.72 should override KSampler defaults."""
+        patched = runtime_workflow(
+            workflow_id="ksampler-test",
+            prompt="test prompt",
+            aspect_ratio=None, width=None, height=None,
+            n=1, seed=None, checkpoint=None,
+            steps=35, cfg=8.5, denoise=0.72,
+        )
+        # Find the KSampler node (node 5 in MINIMAL_WF)
+        self.assertIn("5", patched)
+        ksampler = patched["5"]
+        self.assertEqual(ksampler["class_type"], "KSampler")
+        self.assertEqual(ksampler["inputs"]["steps"], 35)
+        self.assertEqual(ksampler["inputs"]["cfg"], 8.5)
+        self.assertAlmostEqual(ksampler["inputs"]["denoise"], 0.72)
+
+    def test_none_preserves_workflow_values(self) -> None:
+        """When steps/cfg/denoise are None, workflow original values stay."""
+        patched = runtime_workflow(
+            workflow_id="ksampler-test",
+            prompt="test prompt",
+            aspect_ratio=None, width=None, height=None,
+            n=1, seed=None, checkpoint=None,
+            steps=None, cfg=None, denoise=None,
+        )
+        ksampler = patched["5"]
+        self.assertEqual(ksampler["inputs"]["steps"], 20)   # original
+        self.assertEqual(ksampler["inputs"]["cfg"], 7)       # original
+        self.assertEqual(ksampler["inputs"]["denoise"], 1)   # original
+
+    def test_partial_override(self) -> None:
+        """Only steps provided — cfg/denoise stay at original values."""
+        patched = runtime_workflow(
+            workflow_id="ksampler-test",
+            prompt="test prompt",
+            aspect_ratio=None, width=None, height=None,
+            n=1, seed=None, checkpoint=None,
+            steps=50, cfg=None, denoise=None,
+        )
+        ksampler = patched["5"]
+        self.assertEqual(ksampler["inputs"]["steps"], 50)
+        self.assertEqual(ksampler["inputs"]["cfg"], 7)        # preserved
+        self.assertEqual(ksampler["inputs"]["denoise"], 1)    # preserved
+
+    def test_placeholder_substitution(self) -> None:
+        """{{steps}}/{{cfg}}/{{denoise}} placeholders are replaced in string inputs."""
+        wf_with_placeholders = {
+            "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sd.safetensors"}},
+            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{prompt}}", "clip": ["1", 1]}},
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "neg", "clip": ["1", 1]}},
+            "4": {"class_type": "EmptyLatentImage", "inputs": {"width": 512, "height": 512, "batch_size": 1}},
+            "5": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0], "seed": 42, "steps": "{{steps}}", "cfg": "{{cfg}}", "sampler_name": "euler", "scheduler": "normal", "denoise": "{{denoise}}"}},
+            "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+            "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": "test", "images": ["6", 0]}},
+        }
+        uid = "placeholder-test"
+        upsert_workflow({"name": "Placeholder Test", "category": "image", "workflow_json": wf_with_placeholders}, workflow_id=uid)
+        patched = runtime_workflow(
+            workflow_id=uid, prompt="cat",
+            aspect_ratio=None, width=None, height=None,
+            n=1, seed=None, checkpoint=None,
+            steps=42, cfg=11.5, denoise=0.88,
+        )
+        ksampler = patched["5"]
+        # Placeholder substitution runs BEFORE the KSampler override loop,
+        # so if placeholders exist, they get replaced. The KSampler loop
+        # then does a second pass with direct value assignment (if not None).
+        self.assertEqual(ksampler["inputs"]["steps"], 42)
+        self.assertEqual(ksampler["inputs"]["cfg"], 11.5)
+        self.assertAlmostEqual(ksampler["inputs"]["denoise"], 0.88)

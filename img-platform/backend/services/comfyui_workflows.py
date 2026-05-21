@@ -455,6 +455,9 @@ def runtime_workflow(
     duration: Optional[int] = None,
     fps: Optional[int] = None,
     source_image: Optional[str] = None,
+    steps: Optional[int] = None,
+    cfg: Optional[float] = None,
+    denoise: Optional[float] = None,
 ) -> dict:
     workflow = get_workflow(workflow_id)
     if not workflow:
@@ -494,6 +497,9 @@ def runtime_workflow(
                     "{{seed}}": resolved_seed,
                     "{{batch_size}}": n,
                     "{{n}}": n,
+                    "{{steps}}": steps,
+                    "{{cfg}}": cfg,
+                    "{{denoise}}": denoise,
                     "{{num_frames}}": resolved_frames or max(1, resolved_fps * 5),
                 }
                 if value in numeric_placeholders:
@@ -587,6 +593,25 @@ def runtime_workflow(
             inputs.setdefault("pingpong", False)
             inputs.setdefault("loop_count", 0)
             inputs.setdefault("save_output", True)
+
+    # ── Patch KSampler operator parameters (steps / cfg / denoise) ──
+    # Applied AFTER the main loop so direct value override wins over placeholder substitution
+    for node_id, node in patched.items():
+        class_type = (node.get("class_type") or "").lower()
+        inputs = node.get("inputs", {})
+        if "ksampler" in class_type:
+            if steps is not None:
+                inputs["steps"] = steps
+            if cfg is not None:
+                inputs["cfg"] = cfg
+            if denoise is not None:
+                inputs["denoise"] = denoise
+        # ERNIEImage uses different field names
+        elif class_type == "ernieimage" and isinstance(inputs, dict):
+            if steps is not None:
+                inputs.setdefault("num_inference_steps", steps)
+            if cfg is not None:
+                inputs.setdefault("guidance_scale", cfg)
 
     if not prompt_patched:
         raise ValueError("Workflow does not contain a supported prompt text input to patch")

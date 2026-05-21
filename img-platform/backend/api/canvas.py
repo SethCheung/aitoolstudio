@@ -762,6 +762,7 @@ async def _run_cascade(
                     aspect_ratio=payload.aspect_ratio or str(target.data.get("aspectRatio") or "16:9"),
                     width=None, height=None, n=1, seed=payload.seed, checkpoint=None,
                     expected_category="video", duration=payload.duration, fps=payload.fps,
+                    steps=payload.comfyui_steps, cfg=payload.comfyui_cfg, denoise=payload.comfyui_denoise,
                 )
                 # ── Scheduler: select worker for cascade video run ──
                 try:
@@ -803,6 +804,7 @@ async def _run_cascade(
                     workflow_id=workflow_id, prompt=workflow_prompt,
                     aspect_ratio=payload.aspect_ratio or str(target.data.get("aspectRatio") or "1:1"),
                     width=None, height=None, n=quantity, seed=payload.seed, checkpoint=None,
+                    steps=payload.comfyui_steps, cfg=payload.comfyui_cfg, denoise=payload.comfyui_denoise,
                 )
                 # ── Scheduler: select worker for cascade image run ──
                 try:
@@ -1012,6 +1014,7 @@ async def run_node(
                 expected_category="video",
                 duration=payload.duration,
                 fps=payload.fps,
+                steps=payload.comfyui_steps, cfg=payload.comfyui_cfg, denoise=payload.comfyui_denoise,
             )
             # ── Scheduler: select worker for canvas video run ──
             try:
@@ -1072,6 +1075,7 @@ async def run_node(
                 n=quantity,
                 seed=payload.seed,
                 checkpoint=None,
+                steps=payload.comfyui_steps, cfg=payload.comfyui_cfg, denoise=payload.comfyui_denoise,
             )
             # ── Scheduler: select worker for canvas image run ──
             try:
