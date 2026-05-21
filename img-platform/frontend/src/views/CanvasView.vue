@@ -189,6 +189,7 @@ const edges = ref<any[]>([
 const selectedNode = computed((): any => nodes.value.find((node) => node.id === selectedNodeId.value) || null)
 const selectedData = computed((): CanvasNodeData | undefined => selectedNode.value?.data)
 const selectedCanRun = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video' || selectedNode.value?.type === 'llm')
+const selectedUsesComfyUI = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video')
 const canCascadeRun = computed(() => selectedNode.value?.type === 'workflow' || selectedNode.value?.type === 'video')
 const selectedIsMedia = computed(() => selectedNode.value?.type === 'media')
 const selectedIncomingPairs = computed(() => selectedNode.value ? incomingNodePairs(selectedNode.value.id) : [])
@@ -854,9 +855,9 @@ async function runCascade() {
       aspect_ratio: aspectDraft.value || '1:1',
       quantity: Math.max(1, Math.min(9, Math.round(quantityDraft.value || 1))),
       seed: seedDraft.value.trim() ? Number(seedDraft.value) : null,
-      comfyui_steps: selectedCanRun.value ? stepsDraft.value : null,
-      comfyui_cfg: selectedCanRun.value ? cfgDraft.value : null,
-      comfyui_denoise: selectedCanRun.value ? denoiseDraft.value : null,
+      comfyui_steps: selectedUsesComfyUI.value ? stepsDraft.value : null,
+      comfyui_cfg: selectedUsesComfyUI.value ? cfgDraft.value : null,
+      comfyui_denoise: selectedUsesComfyUI.value ? denoiseDraft.value : null,
       duration: 6,
     })
 
@@ -1013,9 +1014,9 @@ async function runSelectedNode() {
       aspect_ratio: aspectDraft.value || '1:1',
       quantity: Math.max(1, Math.min(9, Math.round(quantityDraft.value || 1))),
       seed: seedDraft.value.trim() ? Number(seedDraft.value) : null,
-      comfyui_steps: selectedCanRun.value ? stepsDraft.value : null,
-      comfyui_cfg: selectedCanRun.value ? cfgDraft.value : null,
-      comfyui_denoise: selectedCanRun.value ? denoiseDraft.value : null,
+      comfyui_steps: selectedUsesComfyUI.value ? stepsDraft.value : null,
+      comfyui_cfg: selectedUsesComfyUI.value ? cfgDraft.value : null,
+      comfyui_denoise: selectedUsesComfyUI.value ? denoiseDraft.value : null,
       duration: 6,
     })
     const respData = response.data || {}
@@ -1461,15 +1462,15 @@ watch(historyDrawerOpen, (open) => {
           Seed
           <input v-model="seedDraft" type="number" placeholder="随机" @blur="savePrompt" />
         </label>
-        <label v-if="selectedCanRun" class="inline-field">
+        <label v-if="selectedUsesComfyUI" class="inline-field">
           Steps
           <input v-model.number="stepsDraft" type="number" min="1" max="100" step="1" @blur="savePrompt" />
         </label>
-        <label v-if="selectedCanRun" class="inline-field">
+        <label v-if="selectedUsesComfyUI" class="inline-field">
           CFG
           <input v-model.number="cfgDraft" type="number" min="0" max="30" step="0.5" @blur="savePrompt" />
         </label>
-        <label v-if="selectedCanRun" class="inline-field">
+        <label v-if="selectedUsesComfyUI" class="inline-field">
           Denoise
           <input v-model.number="denoiseDraft" type="number" min="0" max="1" step="0.01" @blur="savePrompt" />
         </label>
