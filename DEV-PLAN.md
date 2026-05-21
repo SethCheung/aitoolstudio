@@ -5,7 +5,7 @@
 
 ---
 
-## 当前实现快照（2026-05-05）
+## 当前实现快照（2026-05-21）
 
 当前代码不是严格按原 Phase 文件名落地，后续开发必须以本节为准，别照着旧文件名硬找。
 
@@ -18,6 +18,7 @@
 - MiniMax Profile 路由：HTTP API / CLI profile 管理
 - 图片、语音、视频、音乐生成入口：`api/image.py`、`api/voice.py`、`api/video.py`、`api/music.py`
 - 本地 ComfyUI 直连入口：`comfyui-local` 模型通过 `api/image.py` 路由到 `services/comfyui.py`，默认连接 `http://192.168.1.195:8188`，支持 GPU/VRAM 状态检测、checkpoint 选择、默认文生图工作流、ComfyUI ImageScale Upscale、历史轮询和输出图本地归档
+- ComfyUI Workflow 管理：后端自动计算 summary（节点数/输出/required inputs/patchable inputs），`POST /api/comfyui/workflows/validate` 校验 JSON，`POST /api/comfyui/workflows/{id}/duplicate` 复制（默认 disabled），编辑时 sort_order 不重置；Admin 面板展示 summary 彩色徽标和 validate/duplicate 按钮；Canvas 画布插入 workflow 节点时根据 required_inputs 给出上游依赖提示
 - 语音生成已对齐 MiniMax 官方同步 T2A HTTP 调试台的核心参数：Speech 2.8/2.6/02/01 模型、音色、情绪、语速、音量、音调、音频格式、采样率、比特率、声道、字幕、LaTeX 朗读、语言增强、发音词典和声音效果
 - 视频生成已对齐 MiniMax 官方视频方案的异步闭环：文生视频、首帧图生视频、首尾帧、主体参考、`prompt_optimizer`、`fast_pretreatment`、时长、分辨率、`task_id` 查询、`file_id` 取文件和 `/uploads/videos` 本地归档
 - 音乐生成已对齐 MiniMax 官方音乐调试台的核心参数：music-2.6/music-cover/music-2.5+/music-2.5、歌词、风格描述、纯音乐、AI 歌词优化、音频规格、返回格式、Seed 和 AI 水印
@@ -29,7 +30,7 @@
 - `.gitignore` 已补充运行时数据、密钥文件、构建产物忽略规则
 
 **仍未完成**
-- ComfyUI 工作流上传、参数映射、图生图/inpainting/ControlNet/LoRA 工作流和服务端任务取消
+- ComfyUI 工作流节点参数映射 UI（将 workflow 参数暴露为前端表单控件）、图生图/inpainting/ControlNet 工作流专用参数表单、服务端任务取消
 - Celery / Redis 任务队列
 - 图像理解、自动标签
 - 提示词库、收藏、批量下载
@@ -72,6 +73,28 @@
 - 工作流 tab 能展示后端已有 enabled ComfyUI workflow，并可插入画布节点。
 - Text / Media 节点可连到 Workflow/Video 节点，运行时按连线顺序注入 prompt 和参考图。
 - Workflow 节点运行后能返回图片/视频 URL、更新节点状态，并在右侧生成可继续连线的结果 Media 节点。
+
+---
+
+## 下一步工作计划（2026-05-21）
+
+### 已完成
+
+- ✅ Workflow summary 后端计算（节点数、输出类型、required inputs、patchable inputs）
+- ✅ Workflow validate / duplicate 接口 + 22 个单元测试
+- ✅ sort_order 编辑不重置（Pydantic Optional[int] 陷阱修复）
+- ✅ Admin Workflows 面板 summary 彩色徽标 + validate/duplicate 按钮
+- ✅ Canvas 画布插入 workflow 节点时根据 required_inputs 给出上游依赖提示
+
+### 待做（按优先级）
+
+1. **节点参数映射 UI**：将 workflow summary 中的 `patchable_inputs`（prompt/seed/steps/cfg/width/height/batch）暴露为 Workflow 节点的可编辑表单控件，对标 RunningHub 的参数面板。
+2. **Canvas 图生图/inpainting 闭环**：Workflow 节点检测到 `required_inputs` 含 `source_image`/`mask_image` 时，自动读取上游 Media 节点结果并注入 ComfyUI 工作流。
+3. **ControlNet 工作流支持**：识别 ControlNet 节点类型，允许用户选择预处理器模型，参数注入。
+4. **Worker Pool 多机调度**：基于现有 `comfyui_workers.py` registry + `comfyui_scheduler.py` tier scoring，将生成任务自动分配到合适 GPU 节点。
+5. **节点参数映射 UI 对接 scheduler**：生成时根据 workflow summary + 用户选择的参数 + scheduler 选定的 worker，构建最终 ComfyUI job payload。
+
+**下个 agent 应该接**：节点参数映射 UI（第 1 项）。关键文件：`frontend/src/views/CanvasView.vue` 的 `addNode()` + workflow 节点模板，`backend/services/comfyui_workflows.py` 的 `_compute_workflow_summary()`，`backend/api/canvas.py` 的 `run_node`。
 
 ---
 

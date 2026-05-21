@@ -1,5 +1,34 @@
 # Product Spec 变更记录
 
+## v1.19 - 2026-05-21
+
+**Workflow 管理完善：summary + validate + duplicate + Canvas 提示**
+
+### 变更内容
+- 后端 `_compute_workflow_summary()` 自动分析 workflow JSON，提取节点数、输出类型、required inputs（`source_image`/`mask_image`）和 patchable inputs（prompt/seed/steps/cfg 等可注入参数）。
+- 新增 `POST /api/comfyui/workflows/validate` 校验 workflow JSON 结构。
+- 新增 `POST /api/comfyui/workflows/{id}/duplicate` 复制 workflow，默认 `enabled=false`。
+- 修复 `upsert_workflow` 编辑时 sort_order 被重置为 0 的问题（Pydantic `Optional[int]` 默认 `None` 导致 `dict.get(key, 0)` 不走 default 分支——改为 `get(key) or 0`）。
+- Admin Workflows 面板展示 summary 彩色徽标：📦 节点数、🖼 source_image / 🎭 mask_image 需求、✏️ patchable 参数列表。
+- Admin Workflows 面板新增「Validate JSON」按钮和「Duplicate」按钮。
+- CanvasView `addNode()` 根据 `summary.required_inputs` 生成上游依赖提示：含 `source_image` 时提示"需要上游图片节点"，含 `mask_image` 时提示"需要蒙版"。
+
+### 影响范围
+- `backend/services/comfyui_workflows.py` — summary 计算、duplicate、sort_order 修复
+- `backend/api/comfyui.py` — validate、duplicate 端点
+- `backend/tests/test_comfyui_workflows.py` — 22 个单元测试（含 sort_order=None 边界用例）
+- `frontend/src/views/AdminView.vue` — summary 徽标、validate/duplicate 按钮
+- `frontend/src/views/CanvasView.vue` — addNode() 上游依赖提示
+- `Product-Spec.md` — 已实现/未实现更新
+- `DEV-PLAN.md` — 区分已完成和规划中
+
+### 设计原则
+- summary 由后端计算，前端只展示——避免 JSON 分析逻辑散落两处。
+- Canvas 不需要为每个 workflow 类型写死提示文案，summary 统一驱动。
+- sort_order 修复是 Pydantic 陷阱：`Optional[int] = None` 的 `model_dump()` 永远包含 key，`dict.get(key, default)` 对 None 不走 fallback。
+
+---
+
 ## v1.18 - 2026-05-18
 
 **流水线画布接入服务端运行模型**

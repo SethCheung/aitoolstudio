@@ -23,7 +23,7 @@
 | **提示词优化** | 用户可点击「AI enhance」显式调用文本模型扩写当前输入，优化结果回填输入框，用户确认后再生成 |
 | **图片生成参数** | image 分类对齐 MiniMax 官方图片调试台，支持参考图微缩预览、URL/拖拽添加参考图、`1x / 2x / 3x / 4x` 快捷数量、1-9 自定义数量、官方 Prompt 优化、Seed、AIGC 水印、宽高比和 image-01 自定义尺寸 |
 | **本地 ComfyUI 直连** | image 分类新增 `comfyui-local` 模型入口，默认连接 `http://192.168.1.195:8188`，后端通过 ComfyUI HTTP API 提交默认文生图工作流，支持选择可用于图片工作流的 checkpoint，生成结果下载到本平台 `/uploads/comfyui` 后按现有图片网格展示 |
-| **ComfyUI Workflow 管理** | 管理员可在 `/admin` 的 Workflows 面板管理 ComfyUI API-format workflow JSON，支持默认文生图 workflow、启停、编辑、删除、复制 JSON，并可从 SMB 固定目录 `团队文件-SJM-MediaFile/Comfyui_Workflows` 同步导入；生成页选择 `comfyui-local` 后可选择启用的 workflow |
+| **ComfyUI Workflow 管理** | 管理员可在 `/admin` 的 Workflows 面板管理 ComfyUI API-format workflow JSON：支持启停、编辑、删除、Validate JSON 校验、Duplicate 复制（默认 disabled），可从 SMB 固定目录 `团队文件-SJM-MediaFile/Comfyui_Workflows` 同步导入；后端自动计算 workflow summary（节点数、输出类型、required inputs、patchable inputs），Admin 面板以彩色徽标展示，Canvas 画布插入 workflow 节点时根据 summary 给出上游依赖提示（需要图片节点/蒙版）；编辑时 sort_order 不重置；生成页选择 `comfyui-local` 后可选择启用的 workflow |
 | **ERNIE Image 工作流** | 本地 ComfyUI 检测到 `ComfyUI-ERNIE-Image` 自定义节点后，平台内置 `ERNIE Image` workflow 模板，使用 `baidu/ERNIE-Image` 模型路径，运行时注入 prompt、宽高和 seed |
 | **ComfyUI 模型路径快捷管理** | 管理员可在 `/admin` 的 Paths 面板保存 SMB 模型目录和 195 服务器本地挂载路径备注，首个默认快捷路径指向 `smb://192.168.1.60/团队文件-SJM-MediaFile/Comfyui_Model/audio_encoders` |
 | **ComfyUI GPU 状态** | `comfyui-local` 状态条展示在线状态、VRAM 已用/总量、占用百分比和 Torch VRAM，生成中每 2 秒刷新，帮助用户判断本地 GPU 是否正在工作 |
@@ -43,7 +43,7 @@
 
 | 模块 | 当前状态 |
 |------|----------|
-| **ComfyUI 工作流高级管理** | 当前已支持 API-format JSON 的保存、启停和生成页选择；完整节点参数映射、图生图/inpainting/ControlNet 专用表单和队列管理仍未完成 |
+| **ComfyUI 工作流高级管理** | summary 计算、validate/duplicate 接口、Admin 徽标展示和 Canvas 上游依赖提示已完成；完整节点参数映射 UI（将 workflow 参数暴露为表单控件）、图生图/inpainting/ControlNet 专用参数表单和生成队列管理仍未完成 |
 | **ControlNet / LoRA** | 属于规划能力，当前 UI/后端未形成完整闭环；Upscale 已完成第一版 ComfyUI ImageScale 放大；Flux 局部重绘已完成第一版涂抹/点选交互 |
 | **图像理解/自动标签** | 规划中，当前未形成独立 API 和 UI 流程 |
 | **批量提示词任务、提示词库、收藏、下载 ZIP** | 规划中；当前只实现单 prompt 下的 `1x / 2x / 4x` 多图数量 |
@@ -273,6 +273,7 @@
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v1.12 | 2026-05-21 | Workflow 管理完善：后端自动计算 summary（节点数/输出类型/required inputs/patchable inputs），新增 validate 和 duplicate 接口，sort_order 编辑不重置，Admin 面板以彩色徽标展示 summary，Canvas 画布根据 summary.required_inputs 给出上游依赖提示 |
 | v1.11 | 2026-05-07 | Admin Profile 模型选择支持自定义模型 ID，避免模型列表被 MiniMax 预设锁死，为后续其他供应商 API 接入预留入口 |
 | v1.10 | 2026-05-07 | 明确管理员后台用户管理入口：前端 `/admin` 必须展示可见 Add User 操作，并提供创建账号、重置密码、管理员权限切换和删除保护 |
 | v1.0 | 2026-04-30 | 初始版本 |
