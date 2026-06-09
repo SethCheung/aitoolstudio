@@ -1,0 +1,23 @@
+services:
+  aitoolstudio:
+    image: python:3.11-slim
+    container_name: aitoolstudio-canvas
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             python main.py"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+      - ./API/.env:/app/API/.env
+      - ./data:/app/data
+      - /vol3/@team/SJM-MediaFile:/vol3/@team/SJM-MediaFile
+      - /vol3/@team/SJM-MediaFile/AI-Tool-Studio/outputs/aitoolstudio-assets-output:/app/assets/output
+      - /vol3/@team/SJM-MediaFile/AI-Tool-Studio/outputs/aitoolstudio-output:/app/output
+    restart: unless-stopped
+
+# 60 生产部署：
+# - 旧系统继续占用 5173/8000，本服务先使用 3000。
+# - /vol3/@team/SJM-MediaFile 是 60 盘资产根，容器内保持同路径可见。
+# - 输出目录落到 60 盘，避免散在容器或项目目录。

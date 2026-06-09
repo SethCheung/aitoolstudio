@@ -1,0 +1,26 @@
+{
+  "title": "Z-Image",
+  "description": "",
+  "category": "",
+  "thumbnail": "",
+  "enabled": true,
+  "fields": [
+    {
+      "id": "23::text",
+      "node": "23",
+      "input": "text",
+      "name": "prompt",
+      "type": "textarea",
+      "default": "",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "random_enabled": false,
+      "required": true,
+      "enabled": true,
+      "hidden": false
+    }
+  ],
+  "mini_cards": {}
+}

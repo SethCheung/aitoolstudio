@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <title>项目主页</title>
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/lucide.js?v=2026.05.28.2"></script>
+    <script src="/static/js/theme.js?v=2026.05.28.2"></script>
+    <script src="/static/js/auth.js?v=2026.05.28.2"></script>
+    <script>
+        if (window.StudioAuth) {
+            StudioAuth.guard({ requireAuth: true, redirect: true });
+        }
+    </script>
+    <link rel="stylesheet" href="/static/css/project-home.css?v=2026.05.28.2">
+</head>
+<body>
+    <div class="home-shell">
+        <header class="home-topbar">
+            <div class="home-title">
+                <span class="eyebrow">PROJECTS</span>
+                <h1>项目</h1>
+                <p id="pageSummary">正在读取项目...</p>
+            </div>
+            <div class="search-wrap">
+                <i data-lucide="search" class="icon-16"></i>
+                <input id="searchInput" type="search" placeholder="搜索项目" autocomplete="off">
+            </div>
+            <div class="topbar-actions">
+                <label class="tool-btn sort-control" title="排序">
+                    <i data-lucide="arrow-up-down" class="icon-16"></i>
+                    <select id="sortSelect" aria-label="排序">
+                        <option value="updated_desc">最近更新</option>
+                        <option value="name_asc">名称</option>
+                        <option value="created_asc">最早创建</option>
+                    </select>
+                </label>
+                <button id="viewToggleBtn" class="tool-btn" type="button" title="切换视图">
+                    <i data-lucide="layout-grid" class="icon-16"></i>
+                    <span id="viewToggleText">网格</span>
+                </button>
+                <button id="newClassicBtn" class="primary-btn" type="button">
+                    <i data-lucide="plus" class="icon-16"></i>
+                    <span>新建项目</span>
+                </button>
+                <button id="newSmartBtn" class="smart-btn" type="button">
+                    <i data-lucide="sparkles" class="icon-16"></i>
+                    <span>新建智能项目</span>
+                </button>
+                <button id="adminBtn" class="tool-btn hidden" type="button">
+                    <i data-lucide="shield" class="icon-16"></i>
+                    <span>后台</span>
+                </button>
+                <button id="themeToggleBtn" class="tool-btn icon-btn theme-toggle" type="button" title="切换深浅色" aria-label="切换深浅色">
+                    <i data-lucide="moon" class="icon-16"></i>
+                </button>
+                <button id="changePasswordBtn" class="tool-btn" type="button">
+                    <i data-lucide="key-round" class="icon-16"></i>
+                    <span>改密码</span>
+                </button>
+                <button id="logoutBtn" class="tool-btn" type="button">
+                    <i data-lucide="log-out" class="icon-16"></i>
+                    <span>退出</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="home-main">
+            <section class="list-head">
+                <div class="tabs">
+                    <button id="activeTabBtn" class="tab-btn active" type="button">
+                        <i data-lucide="folder-open" class="icon-14"></i>
+                        <span>项目</span>
+                        <strong id="activeCount">0</strong>
+                    </button>
+                    <button id="trashTabBtn" class="tab-btn" type="button">
+                        <i data-lucide="trash-2" class="icon-14"></i>
+                        <span>回收站</span>
+                        <strong id="trashCount">0</strong>
+                    </button>
+                </div>
+                <button id="refreshBtn" class="tool-btn" type="button">
+                    <i data-lucide="refresh-cw" class="icon-16"></i>
+                    <span>刷新</span>
+                </button>
+            </section>
+
+            <section id="statusBar" class="status-bar">加载中...</section>
+            <section id="projectList" class="project-list grid"></section>
+        </main>
+    </div>
+
+    <template id="projectCardTpl">
+        <article class="project-card">
+            <div class="project-preview">
+                <div class="preview-mark">
+                    <i class="preview-icon" data-lucide="layout-dashboard"></i>
+                </div>
+                <span class="preview-kind"></span>
+            </div>
+            <div class="card-main open-action" role="button" tabindex="0">
+                <div class="title-row">
+                    <h3 class="project-title"></h3>
+                    <span class="kind-tag"></span>
+                </div>
+                <div class="meta-row">
+                    <span class="meta-item meta-updated"></span>
+                    <span class="meta-item meta-nodes"></span>
+                    <span class="meta-item meta-owner"></span>
+                </div>
+            </div>
+            <div class="card-actions"></div>
+        </article>
+    </template>
+
+    <div id="passwordModal" class="modal-wrap hidden" aria-hidden="true">
+        <div class="modal-mask"></div>
+        <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
+            <header class="modal-head">
+                <h2 id="passwordModalTitle">修改密码</h2>
+                <button id="passwordCloseBtn" class="tool-btn icon-btn" type="button" aria-label="关闭">
+                    <i data-lucide="x" class="icon-16"></i>
+                </button>
+            </header>
+            <form id="passwordForm" class="password-form">
+                <label>
+                    <span>旧密码</span>
+                    <input id="oldPasswordInput" type="password" autocomplete="current-password" required>
+                </label>
+                <label>
+                    <span>新密码</span>
+                    <input id="newPasswordInput" type="password" minlength="6" autocomplete="new-password" required>
+                </label>
+                <div id="passwordMessage" class="password-message"></div>
+                <div class="password-actions">
+                    <button id="passwordSubmitBtn" type="submit" class="primary-btn">
+                        <i data-lucide="save" class="icon-14"></i>
+                        <span>提交</span>
+                    </button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <script src="/static/js/project-home.js?v=2026.05.28.2"></script>
+</body>
+</html>

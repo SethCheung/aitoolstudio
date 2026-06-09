@@ -1,35 +1,42 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls .env)",
-      "Bash(ls venv/bin/python)",
-      "Bash(ls data/)",
-      "Bash(cd /Users)",
-      "Bash(nohup venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000)",
-      "Bash(curl -s http://127.0.0.1:8000/docs -o /dev/null -w '%{http_code} *)",
-      "Read(//private/tmp/**)",
-      "Bash(ls frontend/src/views/)",
-      "Bash(ls frontend/src/components/)",
-      "Bash(ls backend/api/)",
-      "Bash(ls img-platform/frontend/src/views/)",
-      "Bash(ls img-platform/frontend/src/components/)",
-      "Bash(ls img-platform/backend/api/)",
-      "Bash(npm run *)",
-      "Bash(git commit -m 'feat\\(admin\\): add user management tab in AdminView *)",
-      "Bash(git push *)",
-      "Bash(curl -s 'http://localhost:5173/src/views/AdminView.vue')",
-      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=3 sethchang@192.168.1.60 'echo ok')",
-      "Bash(sshpass -p '12301230' ssh -o StrictHostKeyChecking=no sethchang@192.168.1.60 'whoami && pwd && find ~ -maxdepth 4 -name \"aitoolstudio\" -type d 2>/dev/null; find / -maxdepth 5 -name \"aitoolstudio\" -type d 2>/dev/null | head -5')",
-      "Bash(sshpass -p '12301230' ssh -o StrictHostKeyChecking=no sethchang@192.168.1.60 'cd /opt/aitoolstudio && git log --oneline -3 && echo \"---STATUS---\" && git status && echo \"---PROCESS---\" && ps aux | grep -E \"vite|npm run dev\" | grep -v grep')",
-      "Bash(sshpass -p '12301230' ssh -o StrictHostKeyChecking=no -o PubkeyAuthentication=no -o PreferredAuthentications=password sethchang@192.168.1.60 'cd /opt/aitoolstudio && git log --oneline -3 && echo \"---STATUS---\" && git status && echo \"---PROCESS---\" && ps -ef | grep -E \"vite|npm\" | grep -v grep')",
-      "Bash(sshpass *)",
-      "Bash(curl -s 'http://192.168.1.60:5173/')",
-      "Bash(curl -s 'http://192.168.1.60:5173/' -o /tmp/index.html)",
-      "Read(//tmp/**)",
-      "Bash(curl -s 'http://192.168.1.60:5173/assets/index-9m67P4ks.js')",
-      "Bash(curl -s 'http://192.168.1.60:5173/' -o /tmp/idx.html)",
-      "Bash(curl -s 'http://192.168.1.60:5173/assets/AdminView-CVPRNIBv.js')",
-      "Bash(curl -sI 'http://192.168.1.60:5173/assets/AdminView-CVPRNIBv.js')"
+      "Bash(sshpass -p 12301230 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 sethchang@192.168.1.60 *)",
+      "Bash(sshpass -p 12301230 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 -tt sethchang@192.168.1.60 *)",
+      "Bash(sshpass -p Sjm744546 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 sjm@192.168.1.195 *)",
+      "Bash(sshpass -p Sjm744546 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 sjm@192.168.1.197 *)",
+      "Bash(sshpass -p Sjm744546 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 sjm@192.168.1.249 *)",
+      "Bash(/usr/bin/curl -sS *)",
+      "Bash(/usr/bin/curl -sS -o /dev/null -w *)",
+      "Bash(/usr/bin/curl -X *)",
+      "Bash(/usr/bin/python3 *)",
+      "Bash(python3 scripts/probe_aitool_runtime.py)",
+      "Bash(python3 scripts/comfyui_pool_inventory.py *)",
+      "Bash(python3 scripts/verify_resource_root_phase1.py *)",
+      "Bash(python3 scripts/verify_workflow_import_plan.py *)",
+      "Bash(docker compose *)",
+      "Bash(docker logs *)",
+      "Bash(docker ps *)",
+      "Bash(docker exec *)",
+      "WebFetch(domain:192.168.1.60)",
+      "WebFetch(domain:192.168.1.195)",
+      "WebFetch(domain:192.168.1.197)",
+      "WebFetch(domain:192.168.1.249)"
     ]
+  },
+  "sandbox": {
+    "enabled": false,
+    "network": {
+      "allowedDomains": [
+        "192.168.1.60",
+        "192.168.1.195",
+        "192.168.1.197",
+        "192.168.1.249",
+        "anthropic.com",
+        "minimaxi.com",
+        "api.minimax.chat"
+      ],
+      "allowLocalBinding": true
+    }
   }
 }

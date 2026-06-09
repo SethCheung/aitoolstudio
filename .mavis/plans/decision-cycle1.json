@@ -1,0 +1,13 @@
+{
+  "last_cycle": [
+    {"task_id": "track-a-infra-auth", "verdict": "accept", "reason": "verifier 独立复核 8 个探测点全部对得上（HTTP 码、密码穷举、用户枚举时序、路由 diff）。verifier 补出的 2 个 P0（/api/auth/register 开放注册 + 静态文件实际缺 10/15）和 5 个测试账号数据污染已记录到最终报告。"},
+    {"task_id": "track-b-comfyui-backend", "verdict": "manual_retry", "reason": "verifier 找出 P0 路由硬编码（5 次稳定复现 + md5 字节级证据）：60:3000 任何 instance_id 都返回 195 数据，197/249 实际从未被路由。OpenAPI 显示 system_stats 端点 parameters: []，proxy 未声明 instance_id 参数。不要重测（数据 verifier 已采齐），按下面 8 条改 detection-track-b.md + outputs/track-b-comfyui-backend/deliverable.md 报告：1) system_stats 表格 197/249 行的响应摘要统一改为 195 的内容：v 0.19.2, pytorch 2.11.0+cu130, ram 33GB, RTX 4090, vram_total 50.86G。2) object_info 表格 197/249 行：实际响应是 195 object_info（md5=1186f6d0, 3,836,819 字节）；直连 197 是 3,330,858 字节 (md5 8965c609)，直连 249 是 3,287,102 字节 (md5 b92964ea)——三个完全不同。保留已有的「内容与 195 字节级一致」备注。3) 端到端代理验证 (B.4) 的「代理通」结论改为「200 OK 但路由被硬编码到 195，未按 instance_id 路由」。4) 头条/TLDR「代理路径 60:3000 → 8188 完全通」改为「代理路径返回 200 但内容不按 instance_id 路由（硬编码到 195）」。5) P0 重编号：原 P0-1 → P0-2、原 P0-2 → P0-3，新增 P0-1：60:3000 代理不按 instance_id 路由（OpenAPI 端点 parameters: [] 是佐证）。6) 自检 checklist 中「POST prompt 转发」/「view 真实图」的「✅ 代理通」改为「✅ 状态码 200（但路由层不按 instance_id 区分，见 P0-1）」。7) Notes for Verifier 第 1 条（status 端点名错误）保持不变。8) 关键发现 TLDR 第 4 点「4 端点 × 3 实例 = 12 次 200」改为「返回 200 但内容全为 195 的响应」。其他 P0/P1（60 部署版本落后、resource-root 端点 404、broken symlink、197 GPU1 浪费、版本不齐、249 无 curl、/api/comfyui/status 缺失）保持不变。同步更新 board.md 标记本次修订。"},
+    {"task_id": "track-c-workflows", "verdict": "accept", "reason": "verifier 独立核对 22/23 模型文件 + 3 个 ComfyUI 实例的 14 个 model-loading class_type，结论可信。瑕疵（28 笔误、Z-Image 措辞、14:30 时间漂移）已记录，不影响核心结论。"},
+    {"task_id": "track-d-canvas-projects", "verdict": "accept", "reason": "verifier 确认 P0（admin 密码 + 部署版本）真实、6 个 owner=null 孤儿画布 ID 准确、公开画布/历史/队列端点全部独立验证通过。鉴权阻断部分已记为 P0，等密码后重测 D.1/D.3。"},
+    {"task_id": "track-e-ai-tools", "verdict": "accept", "reason": "verifier 独立抽查了 4 个 custom workflow + 9 个 AI 工具页面，所有页面 HTTP 200 + DOM 关键字命中。0 P0 阻断成立。custom/ 目录命名差异（仓库只有 1 个，其他是 60 部署动态注册）已记录。"},
+    {"task_id": "track-f-gpt-settings", "verdict": "accept", "reason": "verifier 独立确认 admin/test123 凭证有效（实际跑通 chat 流式）、Provider 配置现状准确（comfly+modelscope 有 key，uki+api 缺）、P0 上游 404 真实、ms/generate 绕过路径可用。"}
+  ],
+  "next_cycle": [],
+  "plan_complete": false,
+  "message_to_user": "5 个模块验收过了，ComfyUI 后端那块发现新问题（路由硬编码到 195），报告在修订中。修订完会重新过一遍验收再出综合报告。"
+}

@@ -1,0 +1,46 @@
+{
+  "title": "2511",
+  "description": "Qwen Image Edit 双阶段编辑工作流",
+  "category": "Image Edit",
+  "thumbnail": "",
+  "enabled": true,
+  "fields": [
+    {
+      "id": "31::image",
+      "node": "31",
+      "input": "image",
+      "name": "input_image",
+      "type": "image",
+      "default": "",
+      "enabled": true,
+      "hidden": false,
+      "required": true,
+      "random_enabled": false
+    },
+    {
+      "id": "3::prompt",
+      "node": "3",
+      "input": "prompt",
+      "name": "prompt_stage1",
+      "type": "textarea",
+      "default": "",
+      "enabled": true,
+      "hidden": false,
+      "required": false,
+      "random_enabled": false
+    },
+    {
+      "id": "11::prompt",
+      "node": "11",
+      "input": "prompt",
+      "name": "prompt_stage2",
+      "type": "textarea",
+      "default": "将摄像机向右旋转45度",
+      "enabled": true,
+      "hidden": false,
+      "required": false,
+      "random_enabled": false
+    }
+  ],
+  "mini_cards": {}
+}

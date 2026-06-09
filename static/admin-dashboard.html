@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员后台</title>
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/lucide.js?v=2026.05.28.2"></script>
+    <script src="/static/js/theme.js?v=2026.05.28.2"></script>
+    <script src="/static/js/auth.js?v=2026.05.28.2"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.05.28.2">
+    <link rel="stylesheet" href="/static/css/admin-dashboard.css?v=2026.05.28.2">
+</head>
+<body>
+    <div class="admin-shell">
+        <header class="admin-head">
+            <div class="head-main">
+                <h1>后台工具台</h1>
+                <p>系统入口、版本更新、备份回滚</p>
+            </div>
+            <div class="head-actions">
+                <button id="themeToggleBtn" type="button" class="tool-btn" aria-label="切换主题" title="切换深色/浅色">
+                    <i id="themeToggleIcon" data-lucide="sun-medium"></i>
+                </button>
+                <div id="authBadge" class="auth-badge">正在验证权限...</div>
+            </div>
+        </header>
+
+        <section class="panel">
+            <div class="panel-title">
+                <i data-lucide="panel-left-close"></i>
+                <span>后台入口</span>
+            </div>
+            <div class="quick-links">
+                <a class="quick-link" href="/admin/users">
+                    <i data-lucide="users-round"></i>
+                    <span>人员管理</span>
+                </a>
+                <a class="quick-link" href="/api-settings">
+                    <i data-lucide="key-round"></i>
+                    <span>API 设置</span>
+                </a>
+                <a class="quick-link" href="/comfyui-settings">
+                    <i data-lucide="workflow"></i>
+                    <span>ComfyUI 工作流设置</span>
+                </a>
+                <a class="quick-link" href="/projects">
+                    <i data-lucide="folder-kanban"></i>
+                    <span>返回项目主页</span>
+                </a>
+                <a id="repoLink" class="quick-link disabled" href="#" target="_blank" rel="noopener">
+                    <i data-lucide="github"></i>
+                    <span>GitHub 项目页</span>
+                </a>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-title">
+                <i data-lucide="download-cloud"></i>
+                <span>一键更新</span>
+            </div>
+            <div class="version-grid">
+                <div class="kv"><span>当前版本</span><strong id="currentVersion">-</strong></div>
+                <div class="kv"><span>远程版本</span><strong id="remoteVersion">-</strong></div>
+                <div class="kv"><span>更新状态</span><strong id="updateStatus">等待检查</strong></div>
+            </div>
+            <div class="actions">
+                <button id="checkUpdateBtn" type="button">
+                    <i data-lucide="refresh-cw"></i>
+                    <span>检查版本</span>
+                </button>
+                <button id="runUpdateBtn" type="button" class="primary">
+                    <i data-lucide="arrow-up-circle"></i>
+                    <span>执行更新</span>
+                </button>
+            </div>
+            <div id="updateMessage" class="message"></div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-title">
+                <i data-lucide="history"></i>
+                <span>备份回滚</span>
+            </div>
+            <div class="backup-row">
+                <label for="backupSelect">备份列表</label>
+                <select id="backupSelect" disabled>
+                    <option>正在读取...</option>
+                </select>
+            </div>
+            <div class="actions">
+                <button id="refreshBackupsBtn" type="button">
+                    <i data-lucide="list-restart"></i>
+                    <span>刷新备份</span>
+                </button>
+                <button id="rollbackBtn" type="button" class="danger" disabled>
+                    <i data-lucide="rotate-ccw"></i>
+                    <span>回滚到所选备份</span>
+                </button>
+            </div>
+            <div id="backupMessage" class="message"></div>
+        </section>
+    </div>
+    <script src="/static/js/admin-dashboard.js?v=2026.05.28.2"></script>
+</body>
+</html>

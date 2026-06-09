@@ -1,0 +1,34 @@
+{
+  "title": "Z-Image-Enhance",
+  "description": "Z-Image 增强工作流",
+  "category": "Image Enhance",
+  "thumbnail": "",
+  "enabled": true,
+  "fields": [
+    {
+      "id": "15::image",
+      "node": "15",
+      "input": "image",
+      "name": "input_image",
+      "type": "image",
+      "default": "",
+      "enabled": true,
+      "hidden": false,
+      "required": true,
+      "random_enabled": false
+    },
+    {
+      "id": "23::text",
+      "node": "23",
+      "input": "text",
+      "name": "prompt",
+      "type": "textarea",
+      "default": "丰富的细节",
+      "enabled": true,
+      "hidden": false,
+      "required": false,
+      "random_enabled": false
+    }
+  ],
+  "mini_cards": {}
+}

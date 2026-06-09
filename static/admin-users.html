@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人员管理</title>
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/lucide.js?v=2026.05.28.2"></script>
+    <script src="/static/js/theme.js?v=2026.05.28.2"></script>
+    <script src="/static/js/auth.js?v=2026.05.28.2"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.05.28.2">
+    <link rel="stylesheet" href="/static/css/admin-users.css?v=2026.05.28.2">
+</head>
+<body>
+    <div class="users-shell">
+        <header class="users-head">
+            <div class="head-main">
+                <h1>人员管理</h1>
+                <p id="headSummary">正在加载用户...</p>
+            </div>
+            <div class="head-actions">
+                <button id="themeToggleBtn" type="button" class="tool-btn" aria-label="切换主题" title="切换深色/浅色">
+                    <i data-lucide="sun-medium"></i>
+                </button>
+                <div id="authBadge" class="auth-badge">正在验证权限...</div>
+            </div>
+        </header>
+
+        <section class="panel">
+            <div class="panel-title">
+                <i data-lucide="panel-left-close"></i>
+                <span>后台入口</span>
+            </div>
+            <div class="quick-links">
+                <a class="quick-link" href="/admin">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>返回后台工具台</span>
+                </a>
+                <a class="quick-link" href="/projects">
+                    <i data-lucide="folder-kanban"></i>
+                    <span>返回项目主页</span>
+                </a>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-title">
+                <i data-lucide="user-plus"></i>
+                <span>创建用户</span>
+            </div>
+            <form id="createForm" class="create-form">
+                <input id="createUsername" type="text" maxlength="40" autocomplete="off" placeholder="用户名（3-40 位）" required>
+                <input id="createPassword" type="password" minlength="6" autocomplete="new-password" placeholder="初始密码（至少 6 位）" required>
+                <label class="checkbox-wrap">
+                    <input id="createAdmin" type="checkbox">
+                    <span>管理员</span>
+                </label>
+                <button id="createSubmitBtn" type="submit" class="primary">
+                    <i data-lucide="plus"></i>
+                    <span>创建</span>
+                </button>
+            </form>
+            <div id="createMessage" class="message"></div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-head">
+                <div class="panel-title">
+                    <i data-lucide="users-round"></i>
+                    <span>用户列表</span>
+                </div>
+                <button id="refreshBtn" type="button">
+                    <i data-lucide="refresh-cw"></i>
+                    <span>刷新</span>
+                </button>
+            </div>
+            <div class="list-head">
+                <span>用户名</span>
+                <span>角色</span>
+                <span>状态</span>
+                <span>创建时间</span>
+                <span>操作</span>
+            </div>
+            <div id="usersList" class="users-list"></div>
+            <div id="listMessage" class="message"></div>
+        </section>
+    </div>
+
+    <template id="userRowTpl">
+        <article class="user-row">
+            <div class="col username-col">
+                <span class="username"></span>
+                <span class="self-tag hidden">当前账号</span>
+            </div>
+            <div class="col"><span class="role-badge"></span></div>
+            <div class="col"><span class="status-badge"></span></div>
+            <div class="col created-at"></div>
+            <div class="col actions"></div>
+        </article>
+    </template>
+    <script src="/static/js/admin-users.js?v=2026.05.28.2"></script>
+</body>
+</html>

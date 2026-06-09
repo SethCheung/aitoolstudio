@@ -1,0 +1,430 @@
+version: 1
+plan:
+  name: 'xy-canvas 项目全功能 E2E 端到端测试（sethchang 凭据）'
+  max_concurrency: 6
+  max_consecutive_failures: 2
+  max_cycles: 4
+  auto_reject_retries: 1
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  - id: e2e-a-auth-static
+    title: 'E2E-A 鉴权全流程 + 静态页面 + 公共 API'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 E2E 测试 subworker，负责 Track A：**鉴权全流程 + 静态资源 + 公共 API 完整性测试**。
+
+      ## 服务地址
+      - 主服务：http://192.168.1.60:3000
+      - **admin 凭据**：`sethchang` / `12301230`（sethchang is_admin: true，token: 21422613-d16c-4adc-b07e-b7ae2868fceb）
+      - 鉴权方式：部署侧旧版用 `?token=...` query string（不接 Bearer / cookie / X-Token）
+      - 60 的 SSH 22 端口可用：`sshpass -p 12301230 ssh -o StrictHostKeyChecking=no sethchang@192.168.1.60`，sethchang 是 sudo 账号
+
+      ## 之前的修复（这次必须回归测试）
+      - P0-1：代理路由硬编码（修复后 197/249 应正确路由）
+      - P0-4：开放注册 `/api/auth/register` 已返 404
+
+      ## 端到端测试矩阵
+
+      ### A.1 静态页面可达 + 关键 DOM
+      对每个路径 curl 测 HTTP 200 + HTML 关键字（用 curl + grep）：
+      - `/`（主页，含 xy-canvas 标识）
+      - `/login`
+      - `/canvas`
+      - `/smart-canvas`
+      - `/projects`（如部署存在，60 是 xy-canvas 可能缺）
+      - `/admin`（如部署存在）
+      - `/studio`（如部署存在）
+      - `/api-settings`（如部署存在）
+      - `/comfyui-settings`（如部署存在）
+      - 关键静态资源：`/static/tailwind.min.css` `/static/theme.js` `/static/canvas.html` `/static/login.html`
+
+      ### A.2 鉴权全流程（用 sethchang token，**不暴力破解**）
+      - `POST /api/auth/login` sethchang/12301230 → 拿 token
+      - `GET /api/auth/me?token=...` 验证 token 有效，返 sethchang is_admin:true
+      - `GET /api/auth/users?token=...` 用户列表（28+ 用户，verifier_* 应该已清）
+      - `POST /api/auth/users` 新建临时测试账号，记录 username
+      - `POST /api/auth/users/{user_id}/reset-password` 重置刚创建的测试账号密码
+      - `POST /api/auth/change-password` 改 sethchang 自己的密码（**改回 12301230**，或者流程前备份 hash）
+      - `POST /api/auth/logout` 登出
+      - 登出后 `GET /api/auth/me` 应返 401
+      - **回归 P0-4**：`POST /api/auth/register` 应返 404
+
+      ### A.3 公共 API 端到端
+      - `GET /api/config` 返完整配置
+      - `GET /api/models` 返模型列表
+      - `GET /api/providers` 返 provider 列表（注意不要泄露真实 key，只看 has_key）
+      - `GET /api/comfyui/instances` 返 3 个实例
+      - `GET /api/comfyui/system_stats?instance_id=195:8188 / 197:8188 / 249:8188` 三个应返不同 md5（**回归 P0-1**）
+      - `GET /api/queue_status?client_id=test` 返队列状态
+      - `GET /api/history?token=...` 返历史
+
+      ### A.4 不在部署里的端点（之前检测的 P0-2 路径）
+      这些**不要重测**，但要确认一次不存在（已 404 = 符合 xy-canvas 特性）：
+      - `/api/app-info`、`/api/auth/change-password`（可能 60 没实现）、`/api/projects/*`、`/api/asset-library/*`、`/api/canvases/{id}/meta|restore|purge`、`/api/resource-root/*`、`/api/workflow-install/*`、`/api/update-from-github|backups|rollback`
+
+      ## 清理义务
+      - 测试用临时账号最后用 `PUT /api/auth/users/{id}` 或类似端点删除（看部署端点）
+      - change-password 改回 12301230
+      - logout 后所有 cookie/token 清掉
+
+      ## 完整性判定
+      每个测试项给一个：✅ 完整可用 / ⚠️ 部分功能（说明）/ ❌ 失败
+
+      ## 交付物
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/e2e-detection-track-a.md` + `/Users/apple/.mavis/plans/plan_e2e_*/outputs/track-a/...`
+      必须含：
+      1. 完整性矩阵：每个 API/页面 + 判定
+      2. P0-1/P0-4 回归测试结果
+      3. 数据残留状态（应该没 verifier_* 残留）
+      4. 任何新发现的问题
+    verified_by: verifier
+    verify_prompt: |
+      独立验证 Track A：
+      1. 自己用 sethchang/12301230 登录，验证 token 有效
+      2. 自己 curl 5-8 个随机 API 端点，验证 producer 报告的 HTTP 码
+      3. **关键回归**：自己 curl `/api/comfyui/system_stats?instance_id=197:8188` 看是否返 0.21.1（不是 0.19.2）
+      4. **关键回归**：自己 curl `/api/auth/register` 看是否返 404
+      5. 检查 producer 是否清理了测试账号和改了密码
+      输出 PASS/FAIL。
+
+  - id: e2e-b-comfyui-e2e
+    title: 'E2E-B ComfyUI 后端端到端（路由回归 + 实际 prompt）'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 E2E 测试 subworker，负责 Track B：**ComfyUI 后端 + 工作流端到端测试**。
+
+      ## 服务地址
+      - 主服务：http://192.168.1.60:3000
+      - 3 个 ComfyUI 实例：
+        - 195:4090 48G（v0.19.2）
+        - 197:2080 Ti 22G × 2（v0.21.1）
+        - 249:4090 48G（v0.21.1）
+      - token: 21422613-d16c-4adc-b07e-b7ae2868fceb (sethchang)
+      - 60 SSH: `sshpass -p 12301230 ssh -o StrictHostKeyChecking=no sethchang@192.168.1.60`，sudo 账号
+
+      ## 测试矩阵
+
+      ### B.1 P0-1 路由修复回归（必须）
+      对 3 个 instance_id（195/197/249）测：
+      - `/api/comfyui/system_stats?instance_id=X` 应返各自真实的 system_stats（md5 不同）
+      - `/api/comfyui/object_info?instance_id=X` 应返各自真实（size 不同）
+      - `/api/comfyui/view?filename=...` （需先 history 拿 filename）
+
+      ### B.2 ComfyUI 直连健康（SSH 195/197/249）
+      ```bash
+      sshpass -p 'Sjm744546' ssh -o StrictHostKeyChecking=no sjm@IP 'ps -ef | grep -E "python.*main.py" | grep -v grep'
+      sshpass -p 'Sjm744546' ssh -o StrictHostKeyChecking=no sjm@IP 'nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv'
+      sshpass -p 'Sjm744546' ssh -o StrictHostKeyChecking=no sjm@IP 'du -sh ~/ComfyUI/models/*'
+      ```
+      记每台机器：
+      - ComfyUI 进程 PID
+      - GPU 状态（哪几张卡被挂）
+      - 关键模型目录大小（checkpoints/loras/controlnet 等）
+
+      ### B.3 60 端 ComfyUI 代理 API
+      - `GET /api/comfyui/instances?token=...` 返 3 个
+      - `GET /api/comfyui/system_stats` 不带 instance_id 应返第一个（195）
+      - `GET /api/comfyui/object_info` 不带 instance_id 应返第一个（195）
+      - `POST /api/comfyui/prompt?token=...` 提交一个最小 prompt payload（用仓库的任意一个简单 workflow）
+      - `GET /api/comfyui/history?token=...` 拿最新 prompt_id
+      - `GET /api/comfyui/view?filename=...` 拿图片（如果 60 proxy 真支持返回图片）
+
+      ### B.4 工作流静态分析 + 端到端跑一个
+      - `ls /opt/xy-canvas/workflows/` 看有多少 workflow JSON
+      - 挑一个最简单的（如 aitool-smoke-sd15），看 node 数 + model refs
+      - 静态分析每个 ref 是否在 3 个 ComfyUI 实例上就绪
+      - 试通过 `/api/workflows/{id}` 拉详情
+      - 试通过 `/api/generate`（看 OpenAPI 是不是这个端点）跑该 workflow
+
+      ### B.5 resource-root 和 60 盘
+      - `/api/resource-root?token=...` 看配置
+      - `POST /api/resource-root/detect?token=...` 触发检测
+      - SSH 195/197/249 看 `/mnt/nas_comfyui/` 是否真挂载、`/mnt/nas_comfyui/AI-Tool-Studio/comfyui/models/` 内容
+
+      ## 端到端判定
+      - B.1 路由硬编码已修 = ✅
+      - B.2 三台机器健康 = ✅/❌（按机器列）
+      - B.3 60 代理 API 工作 = ✅
+      - B.4 workflow 静态 OK + 至少一个跑通 = ✅
+      - B.5 60 盘挂载 + 模型就绪 = ✅/❌
+
+      ## 交付物
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/e2e-detection-track-b.md`
+      必须含：3 台机器详细对比表 + API 探测 + workflow 端到端结果。
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track B：
+      1. 自己 curl `/api/comfyui/system_stats?instance_id=197:8188` 看是否真返 197 真实数据（不是 195）
+      2. 自己 SSH 195/197/249 看 GPU 状态，对比 producer 报告
+      3. 抽查 1 个 workflow 跨 3 台实例的 model 命中情况
+      4. 验证 producer 没把 195/197/249 数据搞混
+      输出 PASS/FAIL。
+
+  - id: e2e-c-canvas-e2e
+    title: 'E2E-C 画布 + 项目 + 资产库 + 端到端 CRUD'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 E2E 测试 subworker，负责 Track C：**画布 + 项目 + 资产库 端到端 CRUD**。
+
+      ## 服务地址
+      - http://192.168.1.60:3000
+      - token: 21422613-d16c-4adc-b07e-b7ae2868fceb (sethchang)
+      - 60 是 xy-canvas 项目，**可能没有** `/api/projects` `/api/asset-library` 端点
+
+      ## 测试矩阵
+
+      ### C.1 画布公开 API（之前检测时已通过）
+      - `GET /api/canvases?token=...` 列表
+      - `GET /api/canvases/trash?token=...` 回收站
+      - `GET /api/canvases/{id}?token=...` 单个详情
+      - `GET /api/canvases/{id}/meta?token=...` 元信息（**端到端真测**，不是 404 = 通过）
+
+      ### C.2 画布 CRUD 端到端（必须实际跑）
+      - `POST /api/canvases?token=...` 创建测试画布 `{title: "E2E-C测试", icon: "🧪", nodes: [...], connections: [...]}`
+      - 记录返回的 canvas id + output_folder
+      - `GET /api/canvases/{id}?token=...` 看是否真创建
+      - `PUT /api/canvases/{id}?token=...` 更新画布（加 1 个测试节点）
+      - `GET /api/canvases/{id}?token=...` 验证更新生效
+      - `POST /api/canvas-assets/check?token=...` 资产在位检查
+      - `DELETE /api/canvases/{id}?token=...` 软删
+      - `POST /api/canvases/{id}/restore?token=...` 恢复（如果端点存在）
+      - `DELETE /api/canvases/{id}/purge?token=...` 永久删
+      - **清干净**：最后必须删除所有测试画布，list 应为空
+
+      ### C.3 项目 API（如果部署存在）
+      - `GET /api/projects?token=...`
+      - `POST /api/projects?token=...` 创建测试项目
+      - `GET /api/projects/{id}?token=...` 详情
+      - `DELETE /api/projects/{id}?token=...` 软删
+      - `POST /api/projects/{id}/restore?token=...` 恢复
+      - `DELETE /api/projects/{id}/purge?token=...` 永久删
+      - 如果端点 404，记录"xy-canvas 项目无 project API" = 符合项目特性
+
+      ### C.4 资产库 API（如果部署存在）
+      - `GET /api/asset-library?token=...`
+      - `POST /api/asset-library/categories?token=...` 建测试分类
+      - `POST /api/asset-library/items?token=...` 加测试条目
+      - DELETE 刚加的（按端点定义）
+      - 如果端点 404，记录"xy-canvas 项目无 asset-library API"
+
+      ### C.5 历史 + 队列端到端
+      - `GET /api/history?token=...` 返历史
+      - `GET /api/history?type=textmatting&token=...` 过滤
+      - `GET /api/queue_status?client_id=test&token=...` 队列
+      - 如果有 queue POST 端点，提交 1 个测试任务看
+
+      ## 完整性判定
+      画布 CRUD 完整 = 至少 5 个端点（create/read/update/delete/list）都能用
+      项目 + 资产库 = 看部署是否实现
+
+      ## 清理义务（重要）
+      - 所有测试画布/项目/资产/分类/条目**最终硬删除**
+      - list 和 trash 都应为空
+      - 实在删不掉的（owner=null 旧版 bug）记录 ID 给我清理
+
+      ## 交付物
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/e2e-detection-track-c.md`
+      必须含：CRUD 端到端记录（每步 HTTP 码）+ 完整性矩阵 + 清理状态。
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track C：
+      1. 自己 GET /api/canvases 列表，确认 producer 报告的测试画布已清空
+      2. 自己 GET /api/canvases/trash 确认回收站也清空
+      3. 自己创建 + 删除一个测试画布，验证 CRUD 行为
+      4. 验证 producer 没在 auth.db/data 里留垃圾
+      输出 PASS/FAIL。
+
+  - id: e2e-d-ai-tools-e2e
+    title: 'E2E-D 10 个 AI 工具模块端到端（实际跑最小任务）'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 E2E 测试 subworker，负责 Track D：**10 个 AI 工具模块端到端**。
+
+      ## 服务地址
+      - http://192.168.1.60:3000
+      - token: 21422613-d16c-4adc-b07e-b7ae2868fceb
+      - 60 SSH 可用，sethchang 是 sudo 账号
+
+      ## 10 个模块列表
+      1. 2D风格细化 - /static/app/2dstyle.html
+      2. 3D视角变换 - /static/app/angle.html（注意：之前检测发现这个页面不用 /api/angle/generate）
+      3. CG一键细化 - /static/app/cgstyle.html
+      4. 高清修复 - /static/app/gaoqingxiufu.html
+      5. 图片编辑 (Klein) - /static/app/klein.html（走 ModelScope）
+      6. 扩图 - /static/app/kuotu.html
+      7. 图像反推 - /static/app/promptgen.html
+      8. 一键抠图 - /static/app/rmbg.html
+      9. 文字抠图 - /static/app/textmatting.html
+      10. 万物移除 - /static/app/yichuwuti.html
+
+      ## 端到端测试（每个模块都要做）
+
+      ### D.1 页面可达 + 静态资源
+      curl 每个页面，HTTP 200 + 关键字命中（"上传"、"生成"等）
+      检查 `/static/favicon.svg` 是否仍 404（之前检测的小问题）
+
+      ### D.2 找模块对应的后端 API
+      grep main.py 找每个模块用的 endpoint（之前检测发现都走 /api/generate + /api/upload）
+
+      ### D.3 实际跑每个模块（关键）
+      对每个模块，构造最小有效 payload 调用其 API：
+      - 上传一个 1x1 测试 PNG（用 base64 编码一个最小 PNG，避免依赖文件）
+      - POST /api/upload 验证上传通道
+      - POST /api/generate 配模块的 workflow（如果有）
+      - 看返回是不是 task_id 之类，然后等结果
+      - 如果 60 部署下没有该模块的 workflow（cross-workflow 是从 workflows 目录调），那 POST 实际会失败，记录即可
+
+      **但**：
+      - promptgen（图像反推）：可能不需要图片输入，可以纯文本测
+      - rmbg（一键抠图）：需要图片输入
+      - 通用做法：每个模块试一次，记录响应
+
+      ### D.4 上传端点回归
+      - `POST /api/upload` 真上传 1 个小 PNG（10x10）
+      - `POST /api/ai/upload` 同上
+      - 验证返回的 URL 可以 GET 到
+
+      ## 完整性判定
+      每个模块 = 页面 200 + 后端 API 可达 + 至少能传最小 payload
+      不要求真跑 AI 推理（耗时长），但 API 不能 500
+
+      ## 交付物
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/e2e-detection-track-d.md`
+      必须含：10 个模块逐一完整性矩阵（页面/API/上传通道/生成 endpoint 状态）。
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track D：
+      1. 自己 curl 5 个随机 AI 工具页面，验证 HTTP 200
+      2. 自己 POST /api/upload 测试上传通道
+      3. 对比 main.py grep 出的 endpoint 列表 vs producer 报告（防漏报）
+      4. 抽查 1 个模块的端到端响应
+      输出 PASS/FAIL。
+
+  - id: e2e-e-gpt-canvas-llm
+    title: 'E2E-E GPT 对话 + 画布 LLM 端到端'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 E2E 测试 subworker，负责 Track E：**GPT 对话 + 画布 LLM + 会话管理端到端**。
+
+      ## 服务地址
+      - http://192.168.1.60:3000
+      - token: 21422613-d16c-4adc-b07e-b7ae2868fceb
+      - 60 端 COMFLY_BASE_URL=https://api.minimaxi.com (兼容 chat 不兼容 image)
+
+      ## 端到端测试
+
+      ### E.1 会话 CRUD
+      - `GET /api/conversations?token=...` 列表
+      - `POST /api/conversations?token=...` 新建会话 `{title: "E2E-E测试"}`，记录 conversation_id
+      - `GET /api/conversations/{id}?token=...` 详情
+      - `DELETE /api/conversations/{id}?token=...` 删除
+      - **清干净**：测试会话必须删除
+
+      ### E.2 GPT 对话（流式 + 非流式）
+      - `POST /api/chat?token=...` 不带 model（应该返 200 + 业务错误 400，因为默认 model gpt-4o-mini 上游不存在）—— 记录这个行为
+      - `POST /api/chat?token=...` 带 model=MiniMax-M3 真发消息 `{message: "1+1=?", max_tokens: 30}` 看完整回复
+      - `POST /api/chat/stream?token=...` 流式 curl -N 验证收到 meta → delta → done SSE chunk
+      - 流式也用 MiniMax-M3
+
+      ### E.3 画布 LLM
+      - `POST /api/canvas-llm?token=...` 用 message 字段（不是 prompt）发消息
+      - 验证 response.text 不为空
+
+      ### E.4 模型配置检查
+      - `GET /api/config?token=...` 看 chat_model / image_model 默认
+      - `GET /api/models?token=...` 看可用模型列表
+
+      ## 完整性判定
+      - 会话 CRUD 全 = ✅
+      - GPT 对话实际能跑通（带 model 字段） = ✅
+      - 流式真的流 = ✅
+      - 画布 LLM = ✅
+
+      ## 清理义务
+      - 所有 E2E 产生的会话**必须删除**
+
+      ## 交付物
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/e2e-detection-track-e.md`
+      必须含：每个 API 实际响应（特别是 GPT 流式的 chunk 数量）。
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track E：
+      1. 自己 POST /api/chat 流式验证 SSE chunk 真有 delta/done
+      2. 自己 POST /api/chat 带 model=MiniMax-M3 看返非空文本
+      3. GET /api/conversations 验证 producer 报告的测试会话已清
+      4. 验证 producer 没泄露真实 API key
+      输出 PASS/FAIL。
+
+  - id: e2e-f-ms-generate
+    title: 'E2E-F ms/generate + 公共端点 + 输出验证'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 E2E 测试 subworker，负责 Track F：**ms/generate 端到端 + canvas-image-tasks + canvas-video 端到端**。
+
+      ## 服务地址
+      - http://192.168.1.60:3000
+      - token: 21422613-d16c-4adc-b07e-b7ae2868fceb
+      - 60 的 MODELSCOPE_API_KEY 已配，ms/generate 应可用
+
+      ## 端到端测试
+
+      ### F.1 ms/generate 实际跑图（关键）
+      - `POST /api/ms/generate?token=...` 真发请求：
+        ```json
+        {"prompt": "a cute cat", "model": "black-forest-labs/FLUX.2-klein-9B", "width": 512, "height": 512}
+        ```
+      - 拿到返回的 task_id
+      - 等 10-30 秒（ModelScope 异步）
+      - `GET /api/canvas-image-tasks/{task_id}?token=...` 查状态，应该从 queued → running → done
+      - 拿到 image_url
+      - `GET http://192.168.1.60:3000/output/...` 真下载图片
+      - 验证 PNG 头（用 file 或 xxd 看头 8 字节）
+
+      ### F.2 canvas-image-tasks 完整流程
+      - `POST /api/canvas-image-tasks?token=...` 提交一个画布生图任务（如果该端点存在）
+      - 跟 task 到 done
+      - 验证 image_url
+
+      ### F.3 canvas-video（如果存在）
+      - 找 main.py 里 canvas-video endpoint，curl 看存在性
+      - 不真触发（耗时长 + credits），只确认 endpoint 存在
+
+      ### F.4 公共端点端到端
+      - `GET /api/conversations?token=...`
+      - `GET /api/history?type=...&token=...` 各类型过滤
+      - `GET /api/queue_status?client_id=test&token=...`
+      - `GET /api/canvases?token=...`
+
+      ### F.5 60 主机 output 目录验证
+      - SSH 到 60: `ls -la /opt/xy-canvas/output/`
+      - 看 F.1 生成的图是否真落到磁盘
+      - 看权限（sethchang 启的 3001 会写不进，60:3000 是 root 启的应该 OK）
+
+      ## 完整性判定
+      - ms/generate 真能生成图 = ✅
+      - 图片文件真实落盘 = ✅
+      - canvas-image-tasks 流程通 = ✅
+      - canvas-video endpoint 注册 = ✅/❌
+
+      ## 清理义务
+      - ms/generate 生成的图在 /opt/xy-canvas/output/ 下，记录文件名即可，**不要手动删**（user 自己的数据）
+
+      ## 交付物
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/e2e-detection-track-f.md`
+      必须含：ms/generate 实际跑的 task_id、生成图的文件大小、下载验证结果。
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track F：
+      1. 自己 SSH 60 看 /opt/xy-canvas/output/ 是否有新文件（producer 报告的 task 对应）
+      2. 自己 GET /api/canvas-image-tasks/{task_id} 验证 task 状态
+      3. 下载 producer 报告的图片 URL，验证 PNG 头
+      4. 检查 producer 没乱删 user 的 output 文件
+      输出 PASS/FAIL。

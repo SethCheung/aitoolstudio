@@ -1,0 +1,422 @@
+version: 1
+plan:
+  name: 'AIToolStudio 全功能检测（60:3000 + 3 台 ComfyUI）'
+  max_concurrency: 6
+  max_consecutive_failures: 2
+  max_cycles: 6
+  auto_reject_retries: 1
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  - id: track-a-infra-auth
+    title: '基础设施 + 鉴权流'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 AIToolStudio 全功能检测的 subworker，负责 Track A：**基础设施 + 鉴权流**。
+
+      ## 你的服务地址
+      - 主服务：http://192.168.1.60:3000
+      - 注：60 的 SSH 22 端口被防火墙屏蔽，所有探测必须走 HTTP API。
+      - 注：当前工作机是 mac，zsh 可用 curl（PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin）。
+
+      ## 默认凭据
+      - 管理员账号：`admin` / `admin123`（README 默认值）
+      - 如果登录失败，停下来在 deliverable 里记录"默认密码已变更"，尝试空密码 / 常见变体（admin@123、Admin123、admin2024、admin2025、admin2026）后立即停手，不要暴力破解。
+
+      ## 检测范围
+
+      ### A.1 基础设施（无需登录）
+      对以下 URL 用 curl 探测，输出 HTTP 码 + 响应摘要：
+      - `GET /` - 主页面
+      - `GET /login` - 登录页
+      - `GET /projects` - 项目列表
+      - `GET /admin` - 后台
+      - `GET /studio` - 兼容入口
+      - `GET /smart-canvas` - 智能画布
+      - `GET /canvas` - 画布
+      - `GET /api-settings` - API 设置页
+      - `GET /comfyui-settings` - ComfyUI 设置页
+      - `GET /static/...` 关键静态资源（参照 main.py 1723+ 行 `app.get` 路由的 static 挂载点）
+      - `GET /api/app-info` - 应用元信息
+      - `GET /api/config` - 配置
+      - `GET /api/models` - 模型清单
+      - `GET /api/providers` - Provider 清单
+
+      ### A.2 鉴权流（管理员登录后）
+      - `POST /api/auth/login`  登录拿 token（cookie 或 bearer，记录清楚）
+      - `GET /api/auth/me` 当前用户
+      - `GET /api/auth/users` 用户列表（应仅管理员可读）
+      - `POST /api/auth/users` 新建一个临时测试用户，**记下 username**，完成后用 `PUT /api/auth/users/{id}` 或后续 cleanup 把它禁用/删除
+      - `POST /api/auth/change-password` 修改自己的密码（**改回 admin123**，或先备份 hash 再恢复）
+      - `POST /api/auth/logout` 登出
+      - 登出后 `GET /api/auth/me` 应返回 401
+
+      ## 探测命令模板
+      ```bash
+      # PATH 兜底
+      export PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH
+      BASE=http://192.168.1.60:3000
+      # GET
+      curl -s -o /tmp/resp -w "HTTP %{http_code} | %{time_total}s | %{size_download}B\n" $BASE/api/auth/me
+      # POST login
+      curl -s -c /tmp/cookies.txt -X POST $BASE/api/auth/login \
+        -H 'Content-Type: application/json' \
+        -d '{"username":"admin","password":"admin123"}'
+      # 带 cookie 鉴权
+      curl -s -b /tmp/cookies.txt $BASE/api/auth/users
+      ```
+
+      ## 交付物
+      写到：`/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/detection-track-a.md`
+
+      必须包含：
+      1. **执行摘要表格**：模块 | 通过 | 失败 | 风险
+      2. **逐项探测结果**：URL/API | 期望 | 实际 | 判定 | 备注
+      3. **截图证据**（可选）：如果能截到页面就截
+      4. **问题清单**：每条写明严重程度 P0/P1/P2 + 复现命令
+      5. **下一步建议**
+
+      ## 你的约束
+      - 不要修改 main.py / 任何源码
+      - 不要触碰 `/api/auth/users` 创建的测试用户以外的数据
+      - 完成后必须写 deliverable.md 和退出，不要等待
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track A 的检测结果。**不要只读 producer 的 report**。你必须自己重跑关键探测：
+      1. 重新 curl 至少 5 个随机挑选的 URL/API，验证 producer 报告的 HTTP 码是真实的
+      2. 自己用 `POST /api/auth/login` 走一遍登录流程，确认能拿到 token
+      3. 检查 producer 是否把测试用户的密码改回了 admin123（查看 `change-password` 调用历史）
+      4. 如果 producer 报告有 P0 阻断，验证阻断是否真实存在
+      5. 对照 main.py 路由表（line 4683-4809 等），看 producer 是否漏掉了关键鉴权端点
+      输出 PASS/FAIL，FAIL 时列出 producer 报告中的具体哪一项不实。
+
+  - id: track-b-comfyui-backend
+    title: 'ComfyUI 后端代理（3 实例 + 队列 + 系统）'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 subworker，负责 Track B：**ComfyUI 后端代理 + 3 台算力节点**。
+
+      ## 服务地址
+      - 主服务：http://192.168.1.60:3000
+      - ComfyUI 实例：
+        - http://192.168.1.195:8188
+        - http://192.168.1.197:8188
+        - http://192.168.1.249:8188
+      - SSH 凭据：sjm@{195,197,249} / Sjm744546（mac 用 sshpass）
+
+      ## 检测范围
+
+      ### B.1 主服务 → ComfyUI 代理 API
+      - `GET /api/comfyui/instances`  应返回 3 个实例
+      - `GET /api/comfyui/status`  全部 3 台状态
+      - `GET /api/comfyui/system_stats?instance_id=...`  对每台都打一次
+      - `GET /api/comfyui/object_info?instance_id=...`  对每台都打一次
+      - `GET /api/queue_status`  队列状态
+      - `GET /api/history`  历史记录（取前 20 条摘要）
+
+      ### B.2 60 盘资源中心
+      - `GET /api/resource-root`  资源根
+      - `POST /api/resource-root/detect`  触发检测
+      - `POST /api/resource-root/models/check`  配合一个示例模型路径，验证逻辑
+
+      ### B.3 三台 ComfyUI 节点直连
+      SSH 进去后（mac 用 `sshpass -p 'Sjm744546' ssh -o StrictHostKeyChecking=no sjm@IP`）：
+      ```bash
+      # 进程
+      ps -ef | grep -E "python.*main.py|comfyui" | grep -v grep
+      # 健康
+      curl -s http://localhost:8188/system_stats | head -200
+      # 模型目录大小（顶级子目录）
+      du -sh ~/ComfyUI/models/* 2>/dev/null
+      # 关键模型是否在位
+      ls ~/ComfyUI/models/checkpoints 2>/dev/null | head
+      ls ~/ComfyUI/models/loras 2>/dev/null | head
+      ls ~/ComfyUI/models/controlnet 2>/dev/null | head
+      # GPU
+      nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv 2>/dev/null
+      # 端口监听
+      ss -tlnp 2>/dev/null | grep -E "8188|22" || netstat -tlnp 2>/dev/null | grep 8188
+      ```
+
+      ### B.4 端到端最小化任务（不实际跑模型，避免长任务）
+      - `GET /api/comfyui/prompt` 确认代理转发正常
+      - 准备好一个最简单的 prompt payload 文档（不需要真提交），写到 deliverable 里说明 60:3000 → 8188 的代理路径是通的（基于 system_stats / object_info 调用都 200 即可证明）
+
+      ## 交付物
+      写到：`/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/detection-track-b.md`
+
+      必须包含：
+      1. **3 台机器对比表**：hostname | GPU | 显存 | ComfyUI PID | 8188 状态 | 模型目录大小 | 关键模型数
+      2. **API 探测结果表**：每行记录 HTTP 码 + 耗时 + 响应摘要
+      3. **60 盘资源中心配置**（路径、检测结果）
+      4. **问题清单**：GPU 异常 / 端口不通 / 进程缺失等
+
+      ## 约束
+      - 不要 kill / restart 任何服务进程
+      - 不要往 ComfyUI 提交实际工作流任务（耗时长）
+      - 一切只读探测
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track B：
+      1. 自己 SSH 进去看 3 台机器的 GPU 状态（`nvidia-smi`），验证 producer 报告的 GPU 数据
+      2. 自己 curl `http://192.168.1.60:3000/api/comfyui/instances`，验证返回的实例数确实是 3 个
+      3. 自己 curl `http://192.168.1.60:3000/api/queue_status`，验证 producer 报告的队列状态
+      4. 对比 3 台机器的 model 目录大小，验证 producer 没把 195/197/249 数据搞混
+      5. 如果 producer 说某台机器有问题，独立 curl 那台的 8188 验证
+      输出 PASS/FAIL。
+
+  - id: track-c-workflows
+    title: 'ComfyUI 工作流（导入/校验/缺失模型）'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 subworker，负责 Track C：**ComfyUI 工作流模块**。
+
+      ## 服务地址
+      - 主服务：http://192.168.1.60:3000
+      - 项目 workflows 目录：`/Users/apple/Documents/GitHub/aitoolstudio/workflows/`
+
+      ## 先看本地
+      ```bash
+      ls /Users/apple/Documents/GitHub/aitoolstudio/workflows/
+      # JSON 数量
+      ls /Users/apple/Documents/GitHub/aitoolstudio/workflows/*.json 2>/dev/null | wc -l
+      ```
+
+      ## 检测范围
+      - `GET /api/workflows`  服务端注册的工作流列表
+      - 对每个返回的工作流：调用 `GET /api/workflows/{workflow_id}` 拉详情
+      - `POST /api/workflow-install/tasks`  对每个工作流跑一次"预检任务"，记录返回的缺失节点/模型
+      - `POST /api/workflow-install/model-candidates`  配合一个明显不存在的模型路径，验证返回的"候选下载"逻辑
+      - `POST /api/workflow-install/auto-model-downloads`  不要真触发，看代码 / endpoint 是否在 + 行为
+
+      ## 关键工作流 JSON 静态分析
+      对 `workflows/` 下每个 .json：
+      ```bash
+      python3 -c "
+      import json, sys
+      w = json.load(open(sys.argv[1]))
+      print('nodes:', len(w.get('nodes', [])))
+      # 看节点 class_type 分布
+      from collections import Counter
+      c = Counter(n.get('class_type','?') for n in w.get('nodes', []))
+      for k, v in c.most_common(10):
+          print(f'  {v}x  {k}')
+      "
+      ```
+
+      ## 交付物
+      写到：`/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/detection-track-c.md`
+
+      包含：
+      1. **工作流清单表**：workflow_id | 名称 | 节点数 | 涉及模型 | 缺失模型 | 状态
+      2. **常见模型需求 Top 10**：在 60 盘上是否就绪
+      3. **问题工作流**：哪些有阻断性缺失
+      4. **workflow-install API 行为记录**
+
+      ## 约束
+      - 不要实际跑工作流生成
+      - 不要下载任何模型
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track C：
+      1. 自己 ls workflows/ 目录，对比 producer 报告的 JSON 数量
+      2. 自己 curl `GET /api/workflows` 验证 producer 报告的 workflow 数量
+      3. 随机抽 1-2 个 workflow，自己 curl 详情，对比 producer 报告的节点数
+      4. 检查 producer 是否漏报或重复了 workflow
+      输出 PASS/FAIL。
+
+  - id: track-d-canvas-projects
+    title: '无限画布 + 项目/画布 CRUD'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 subworker，负责 Track D：**无限画布 + 项目/画布生命周期**。
+
+      ## 服务地址
+      - 主服务：http://192.168.1.60:3000
+      - 默认管理员：admin / admin123（如被改则先尝试常见变体后停手）
+
+      ## 检测范围
+
+      ### D.1 项目 CRUD
+      - `GET /api/projects`  列表
+      - `POST /api/projects`  创建一个临时测试项目（**记下 project_id**）
+      - `GET /api/projects/{project_id}`  详情
+      - `GET /api/projects/trash`  回收站
+      - `DELETE /api/projects/{project_id}`  软删
+      - `POST /api/projects/{project_id}/restore`  恢复
+      - `DELETE /api/projects/{project_id}/purge`  永久删
+
+      ### D.2 画布 CRUD
+      - `GET /api/canvases`  列表
+      - `POST /api/canvases`  在测试项目下创建画布
+      - `GET /api/canvases/{canvas_id}/meta`  元信息
+      - `GET /api/canvases/{canvas_id}`  完整画布
+      - `PUT /api/canvases/{canvas_id}`  更新画布（加一个测试节点）
+      - `POST /api/canvas-assets/check`  资产在位检查
+      - `GET /api/canvases/trash`  画布回收站
+      - 软删 + 恢复 + 永久删
+
+      ### D.3 资产库
+      - `GET /api/asset-library`  列表
+      - `POST /api/asset-library/categories`  建测试分类
+      - `POST /api/asset-library/items`  加测试条目
+      - 清理：DELETE 刚加的 category 和 item
+
+      ### D.4 历史 + 队列
+      - `GET /api/history?type=canvas`  画布历史
+      - `GET /api/queue_status`
+
+      ## 清理义务（必须）
+      测试项目/画布/分类/条目**最终都硬删除（purge + delete）**，不要在生产数据里留垃圾。
+
+      ## 交付物
+      写到：`/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/detection-track-d.md`
+
+      包含：
+      1. **逐 API 探测表**：API | 期望 | 实际 | 清理状态
+      2. **测试项目生命周期记录**：从创建到清理的所有 project_id
+      3. **问题清单**
+
+      ## 约束
+      - 不要在别人的画布上写
+      - 测试用临时项目，最终清理掉
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track D：
+      1. 自己 GET /api/projects 列表，确认 producer 报告的测试项目已被清理（不应该出现在 active 列表）
+      2. 自己 GET /api/projects/trash，确认 producer 没把测试项目留到回收站
+      3. 自己创建 + 软删 + 硬删一个全新测试项目，验证 producer 报告的 API 行为是真实的
+      4. 检查 producer 的清理是否完整（不能留垃圾数据）
+      输出 PASS/FAIL。
+
+  - id: track-e-ai-tools
+    title: '9 个 AI 工具模块（前端页面 + API）'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 subworker，负责 Track E：**9 个 AI 工具功能模块**。
+
+      ## 服务地址
+      - 主服务：http://192.168.1.60:3000
+      - 9 个功能模块（参考 main.py 和 static 目录）：
+        1. 2D 风格细化 `/static/app/2dstyle.html`
+        2. 3D 视角变换 `/static/app/angle.html` + `/api/angle/generate` `/api/angle/poll_status`
+        3. CG 一键细化 `/static/app/cgstyle.html`
+        4. 高清修复 `/static/app/gaoqingxiufu.html`
+        5. 图片编辑 (Klein) `/static/app/klein.html`
+        6. 扩图 `/static/app/kuotu.html`
+        7. 图像反推 `/static/app/promptgen.html`
+        8. 一键抠图 `/static/app/rmbg.html`
+        9. 文字抠图 `/static/app/textmatting.html`
+        10. 万物移除 `/static/app/yichuwuti.html`（上次报告 10 个，本次也按 10 个来）
+
+      ## 检测范围
+
+      ### E.1 页面可达性
+      每个页面 curl 一下，验证：
+      - HTTP 200
+      - 页面里有预期的关键 DOM 元素（用 `curl + grep` 关键字）
+
+      ### E.2 模块 API
+      在 main.py 4700+ 范围 grep 找每个模块对应的后端 endpoint，对每个 endpoint curl 探测：
+      - angle 模块：`/api/angle/generate` `POST` + `/api/angle/poll_status` `POST`
+      - 其他模块按 main.py 里的实际定义走
+      - 找出后端 endpoint 后，用 curl 触发 GET（或者发空 body POST），记录 HTTP 码和响应
+
+      ### E.3 上传 + 资产相关
+      - `POST /api/upload`  不带文件应返回错误码（验证 endpoint 存在）
+      - `POST /api/ai/upload`  同上
+      - `POST /api/ai/import-local-image`  同上
+
+      ## 交付物
+      写到：`/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/detection-track-e.md`
+
+      包含：
+      1. **10 个模块矩阵**：模块 | 页面 HTTP | 后端 API | 静态资源 | 判定
+      2. **缺失/异常清单**
+      3. **建议修复点**
+
+      ## 约束
+      - 不要实际上传大文件
+      - 不要触发实际生成任务（耗时长）
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track E：
+      1. 自己 curl 每个 static/app/*.html 页面（至少 3 个），验证 producer 报告的 HTTP 码
+      2. grep main.py 找出所有 9-10 个模块的 endpoint，对比 producer 报告是否漏报
+      3. 自己 curl 至少 1 个模块的 API，验证 producer 报告的 API 行为
+      输出 PASS/FAIL。
+
+  - id: track-f-gpt-settings
+    title: 'GPT/在线生图 + 后台 Provider/ComfyUI 设置'
+    assigned_to: general
+    timeout_ms: 1500000
+    prompt: |
+      你是 subworker，负责 Track F：**GPT 对话 + 在线生图 + 后台设置**。
+
+      ## 服务地址
+      - 主服务：http://192.168.1.60:3000
+      - 默认管理员：admin / admin123
+
+      ## 检测范围
+
+      ### F.1 GPT 对话
+      - `GET /api/conversations`  会话列表
+      - `POST /api/conversations`  新建会话
+      - `POST /api/chat`  发一条消息，记录响应（**如果 401/403/空响应，说明 COMFLY_API_KEY 未配，写明即可，不要尝试破解**）
+      - `POST /api/chat/stream`  流式输出（用 `curl -N` 验证是否真的流）
+      - `GET /api/conversations/{conversation_id}`  会话详情
+      - `DELETE /api/conversations/{conversation_id}`  清理
+
+      ### F.2 在线生图
+      - `POST /api/online-image`  发一条 prompt，验证响应
+      - `POST /api/canvas-image-tasks`  画布生图任务
+      - `GET /api/canvas-image-tasks/{task_id}`  任务状态
+      - `POST /api/canvas-llm`  画布 LLM 调用
+      - `POST /api/canvas-video`  画布视频（**不要真触发**，确认 endpoint 存在即可）
+      - `POST /api/ms/generate`  ModelScope 通道
+      - `POST /api/providers/test-connection`  Provider 连通性测试
+      - `POST /api/providers/probe-async`  异步探测
+      - `POST /api/providers/fetch-models` 拉取模型清单
+      - `GET /api/providers/{provider_id}/fetch-models` 同上
+
+      ### F.3 后台设置
+      - `GET /api/providers` Provider 配置
+      - `PUT /api/providers` **不要** 真改，用 `GET` 拿到当前状态记录即可
+      - `GET /api/config/token` 配置 token
+      - `PUT /api/comfyui/instances` **不要**真改
+      - 列出 settings 页面 (`/api-settings`, `/comfyui-settings`) 是否 200
+      - `GET /api-settings` `/comfyui-settings`  页面 HTTP 码
+
+      ### F.4 更新与备份
+      - `GET /api/update-backups`  列出可回滚的备份
+      - `POST /api/update-from-github` **不要真触发**
+      - `POST /api/update-rollback` **不要真触发**
+      - 验证 endpoint 注册存在（用 grep main.py）
+
+      ## 交付物
+      写到：`/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/detection-track-f.md`
+
+      包含：
+      1. **逐项探测表**：每个 API 的 HTTP 码 + 响应 + 判定
+      2. **GPT/在线生图阻断原因**：是 API Key 没配、还是 endpoint 500、其他
+      3. **Provider 配置现状**：哪些 key 已配、哪些没配（不要泄露真实 key，只列存在与否）
+      4. **后台设置可达性**
+
+      ## 约束
+      - 不要真改 /api/providers
+      - 不要真触发 update-from-github / update-rollback
+      - 不要在响应里写真实 API Key
+    verified_by: verifier
+    verify_prompt: |
+      独立校验 Track F：
+      1. 自己 curl `GET /api/providers` 验证 provider 列表（不要看 producer 报告里的，自己重新看）
+      2. 自己 grep main.py 对比 producer 报告的 endpoint 是否完整（main.py 4700+ 范围）
+      3. 确认 producer 没有泄露任何真实 API Key 到 deliverable 里
+      4. 确认 producer 没有真触发 PUT /api/providers 或 update 类接口
+      输出 PASS/FAIL。
