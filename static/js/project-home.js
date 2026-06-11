@@ -341,6 +341,7 @@
             viewToggleText: $("viewToggleText"),
             newClassicBtn: $("newClassicBtn"),
             newSmartBtn: $("newSmartBtn"),
+            comfyWorkbenchBtn: $("comfyWorkbenchBtn"),
             adminBtn: $("adminBtn"),
             themeToggleBtn: $("themeToggleBtn"),
             changePasswordBtn: $("changePasswordBtn"),
@@ -389,6 +390,7 @@
         };
         els.newClassicBtn.onclick = function () { createProject("classic"); };
         els.newSmartBtn.onclick = function () { createProject("smart"); };
+        els.comfyWorkbenchBtn.onclick = function () { window.location.href = "/comfyui-workbench"; };
         els.adminBtn.onclick = function () { window.location.href = "/admin"; };
         els.themeToggleBtn.onclick = function () {
             var isDark = document.documentElement.classList.contains("theme-dark");

@@ -400,7 +400,7 @@ AUTH_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,40}$")
 AUTH_PASSWORD_MIN_LENGTH = 6
 AUTH_LOCK = Lock()
 
-LOGIN_REQUIRED_PAGES = {"/", "/projects", "/studio", "/canvas", "/smart-canvas"}
+LOGIN_REQUIRED_PAGES = {"/", "/projects", "/studio", "/canvas", "/smart-canvas", "/comfyui-workbench"}
 ADMIN_REQUIRED_PAGES = {"/admin", "/admin/users", "/api-settings", "/comfyui-settings"}
 ADMIN_STATIC_PAGES = {"/static/admin-dashboard.html", "/static/admin-users.html", "/static/api-settings.html", "/static/comfyui-settings.html"}
 PUBLIC_PATHS = {"/login", "/favicon.ico"}
@@ -1712,6 +1712,17 @@ def sync_static_html_versions():
 
 def static_html_response(filename: str):
     path = os.path.join(STATIC_DIR, filename)
+    if not os.path.exists(path):
+        return Response(
+            f"<!DOCTYPE html><html><body style='font-family:sans-serif;padding:40px;text-align:center'>"
+            f"<h1>⚠️ 页面文件缺失</h1>"
+            f"<p>服务器上缺少静态文件：<code>{filename}</code></p>"
+            f"<p>请检查 <code>{path}</code> 是否存在。</p>"
+            f"<p style='color:#666;margin-top:20px'>如果这是新功能，请确保相关文件已部署到服务器。</p>"
+            f"</body></html>",
+            status_code=404,
+            media_type="text/html; charset=utf-8",
+        )
     with open(path, "r", encoding="utf-8") as f:
         html = f.read()
     return Response(
@@ -4809,6 +4820,10 @@ async def api_settings_page():
 @app.get("/comfyui-settings")
 async def comfyui_settings_page():
     return static_html_response("comfyui-settings.html")
+
+@app.get("/comfyui-workbench")
+async def comfyui_workbench_page():
+    return static_html_response("comfyui-workbench.html")
 
 @app.get("/api/view")
 def view_image(filename: str, type: str = "input", subfolder: str = ""):
@@ -10220,6 +10235,60 @@ def comfy_instance_base_url(addr: str) -> str:
         return ""
     return value if re.match(r"^https?://", value, re.I) else f"http://{value}"
 
+def comfy_vram_mb(value: Any) -> Optional[int]:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    if n > 1024 * 1024:
+        return int(round(n / 1024 / 1024))
+    return int(round(n))
+
+def comfy_queue_count(value: Any) -> int:
+    if isinstance(value, list):
+        return len(value)
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+def comfy_device_summary(stats_data: Any) -> Dict[str, Any]:
+    if not isinstance(stats_data, dict):
+        return {}
+    devices = stats_data.get("devices")
+    if not isinstance(devices, list):
+        return {}
+
+    normalized = []
+    for raw in devices:
+        if not isinstance(raw, dict):
+            continue
+        total = comfy_vram_mb(raw.get("vram_total") or raw.get("torch_vram_total"))
+        free = comfy_vram_mb(raw.get("vram_free") or raw.get("torch_vram_free"))
+        used = total - free if total is not None and free is not None else None
+        normalized.append({
+            "name": str(raw.get("name") or raw.get("device_name") or raw.get("type") or "Device"),
+            "type": str(raw.get("type") or ""),
+            "index": raw.get("index"),
+            "vram_total_mb": total,
+            "vram_free_mb": free,
+            "vram_used_mb": used,
+        })
+
+    if not normalized:
+        return {}
+    first = normalized[0]
+    return {
+        "device_name": first.get("name") or "",
+        "gpu": first.get("name") or "",
+        "vram_total_mb": first.get("vram_total_mb"),
+        "vram_free_mb": first.get("vram_free_mb"),
+        "vram_used_mb": first.get("vram_used_mb"),
+        "devices": normalized,
+    }
+
 def probe_comfy_instance(addr: str) -> Dict[str, Any]:
     base_url = comfy_instance_base_url(addr)
     item: Dict[str, Any] = {
@@ -10227,6 +10296,9 @@ def probe_comfy_instance(addr: str) -> Dict[str, Any]:
         "base_url": base_url,
         "ok": False,
         "reason": "地址为空" if not base_url else "",
+        "latency_ms": None,
+        "queue_running": 0,
+        "queue_pending": 0,
     }
     if not base_url:
         return item
@@ -10246,9 +10318,14 @@ def probe_comfy_instance(addr: str) -> Dict[str, Any]:
             "latency_ms": int((time.time() - started) * 1000),
         })
         try:
+            stats_data = stats.json()
+            item.update(comfy_device_summary(stats_data))
+        except Exception:
+            pass
+        try:
             queue_data = queue.json()
-            item["queue_running"] = len(queue_data.get("queue_running", []) or [])
-            item["queue_pending"] = len(queue_data.get("queue_pending", []) or [])
+            item["queue_running"] = comfy_queue_count(queue_data.get("queue_running"))
+            item["queue_pending"] = comfy_queue_count(queue_data.get("queue_pending"))
         except Exception:
             pass
     except requests.RequestException as exc:
@@ -10268,6 +10345,18 @@ def get_comfyui_instances(request: Request):
 def get_comfyui_status(request: Request):
     require_admin_user(request)
     return {"instances": [probe_comfy_instance(addr) for addr in COMFYUI_INSTANCES]}
+
+@app.get("/api/comfyui/workbench-status")
+def get_comfyui_workbench_status(request: Request):
+    user = require_current_user(request)
+    return {
+        "instances": [probe_comfy_instance(addr) for addr in COMFYUI_INSTANCES],
+        "updated_at": now_ts(),
+        "user": {
+            "username": user.get("username") or "",
+            "is_admin": bool(user.get("is_admin")),
+        },
+    }
 
 @app.put("/api/comfyui/instances")
 def save_comfyui_instances(payload: ComfyInstancesPayload, request: Request):
