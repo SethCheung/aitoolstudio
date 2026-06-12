@@ -7372,6 +7372,8 @@ def run_comfy_generate(req: GenerateRequest, owner_key: str = "", instance_overr
 
         with open(workflow_path, 'r', encoding='utf-8') as f:
             workflow = json.load(f)
+        # 过滤非节点的顶层键（如导出工具塞的 "_meta"）：ComfyUI 会把它们当节点而整单拒收
+        workflow = {k: v for k, v in workflow.items() if isinstance(v, dict) and v.get('class_type')}
 
         seed = random.randint(1, 10**15)
 

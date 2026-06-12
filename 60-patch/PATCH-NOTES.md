@@ -143,3 +143,10 @@
   - 运行成功同样写入 last_test（by canvaspro-bridge）
 - CanvasPro 已配置完毕：APIMart apiKey=aitool-local，apiUrl 已直写其 user/config.json 指向 `http://192.168.1.60:3000/bridge/apimart`
 - 协议层端到端验证：curl 模拟其请求 31 秒返回本地生成的 2 张图
+
+## 第十一批：工作流分类跑通矩阵 + _meta 容错（2026-06-12 深夜）
+
+- main.py：运行前过滤工作流 JSON 的非节点顶层键（如 `_meta`），修复 8 个 ltx/seedvr2 系工作流「Node 'ID #_meta' has no class_type」整单拒收。
+- 三轮矩阵实测 31 个已发布工作流：14 个跑通（文生图 2、图生图 8、文生视频 3、图生视频 1），全部自动写入 last_test。
+- 发现 ltx 系列为「{{placeholder}} 模板工作流」，需字段映射注入；ltx-i2v 已按此打通。
+- 未通者归因：8 个需精确字段映射（工作台人工配置）、2 个需视频素材、4 个缺节点、2 个 PS 联动类不适用、1 个显存不足。
