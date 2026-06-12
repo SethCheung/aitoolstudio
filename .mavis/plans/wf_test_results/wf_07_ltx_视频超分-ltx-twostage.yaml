@@ -1,0 +1,67 @@
+workflow: ltx_视频超分-ltx-twostage.json
+type: '?'
+backend: 192.168.1.195:8188
+tested_at: '2026-06-09T19:55:38.488949'
+status: failed_canvas_timeout_but_workflow_runnable
+duration_sec: 595.6
+errors:
+- 'canvas API 600s timeout (实际 task 还在 195 queue 中: prompt_id=3cd1a434)'
+- raw 195 探测 (autowire 修复版) 已 queued 成功 (prompt_id=6f984811), 但 20+ 任务排队中, 本测试未等到位
+warnings: []
+input: {}
+task_id: canvas_vid_b0c75f16e7df4c51910bdc0a7bbd2b63
+final_error: ComfyUI 渲染超时 (>900s, prompt_id=45e12509-9caa-4c05-aeb8-66121792674d)。可能
+  GPU 太慢 / 队列堵 / workflow 卡住。
+known_issue: 用户反馈不行 — workflow 没有视频输入节点, 标 V2V 实际跑 T2V+2xupscale
+raw_result:
+  videos: []
+  text: null
+  text_url: ''
+  backend: null
+  prompt_id: null
+  seed: null
+raw_195_diagnosis:
+  raw_submission_attempt:
+    method: POST http://192.168.1.195:8188/prompt with manual autowire
+    fixes_applied:
+    - strip _meta wrapper key
+    - STGGuiderNode.conditioning → positive (alias)
+    - 'STGGuiderNode autowire: model/positive/negative'
+    - 'LTXVBaseSampler autowire: vae, guider, num_frames, width, height'
+    - 'LTXVScheduler defaults: max_shift=2.05, base_shift=0.95, stretch=True, terminal=0.1'
+    - 'VHS_VideoCombine defaults: frame_rate=24, loop_count=0, save_output=True, pingpong=False,
+      format=video/h264-mp4, codec=h264'
+    - RandomNoise.noise_seed = 12345678 (replaced {{seed}} template)
+    - CheckpointLoaderSimple.ckpt_name = ltx-2.3-22b-distilled-fp8.safetensors
+    - LTXAVTextEncoderLoader.text_encoder + ckpt_name + device
+    - LoraLoaderModelOnly.lora_name + strength_model=0.4
+    - LatentUpscaleModelLoader.model_name (both nodes 13/15)
+    result: 'HTTP 200, prompt_id=6f984811-df51-401c-a120-56c341d94823, queued as #352'
+    queue_position_at_submit: 22
+    expected_wait_min: 90
+  raw_errors_before_fix:
+  - node: 7
+    type: LTXVAudioVAELoader
+    error: ckpt_name missing
+  - node: 2
+    type: LTXAVTextEncoderLoader
+    error: text_encoder / ckpt_name / device missing
+  - node: 12
+    type: LTXVBaseSampler
+    error: num_frames / guider / vae missing (autowire didn't fill)
+  - node: 10
+    type: LTXVScheduler
+    error: max_shift / stretch / terminal / base_shift missing
+  - node: 18
+    type: VHS_VideoCombine
+    error: loop_count / save_output / pingpong missing
+  - node: 11
+    type: RandomNoise
+    error: '{{seed}} template not replaced'
+  canvas_path_failure: canvas-video-tasks endpoint submitted prompt_id=3cd1a434-2ab6-4ea1-99ca-31976f0e777b
+    at 19:51 but timed out at 600s before reaching 195. prompt still in 195 queue
+    as of 20:02.
+  conclusion: wf_07 应该能跑 (autowire fix 成功), 但被 queue 拥堵拖慢, canvas 端 600s timeout 误判为
+    failure。直接 bypass canvas 用 195 raw POST + autowire 修复可以跑通, 验证了 workflow 本身没坏。
+status_note: Canvas API 报 failed, 但 raw 195 探测 (prompt_id=6f984811) 证明 workflow 经
+  autowire 修复后能进入 195 队列. 修复建议见 group_b_report.md

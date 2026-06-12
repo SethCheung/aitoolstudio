@@ -1,0 +1,79 @@
+workflow: ltx_音视频-ltx-av.json
+type: '?'
+backend: 192.168.1.195:8188
+tested_at: '2026-06-09T19:45:42.872389'
+status: failed
+duration_sec: 0.0
+errors:
+- 'ComfyUI 提交失败 HTTP 400 (backend=192.168.1.195:8188): 工作流参数校验失败'
+- node 16 (LTXVAudioVAEDecode) samples 收到 CONDITIONING 而非 LATENT (用户反馈属实, 但本质是 schema
+  不兼容而非单纯连错)
+- LTXVBaseSampler 缺 num_frames/width/height (canvas _auto_inject 未填)
+- LTXVScheduler 缺 max_shift/stretch/terminal/base_shift
+- VHS_VideoCombine 缺 loop_count/save_output/pingpong
+- LTXVAudioVAELoader.ckpt_name 缺
+- LTXAVTextEncoderLoader.text_encoder/ckpt_name/device 缺
+warnings: []
+input: {}
+task_id: canvas_vid_b201e41a4e24439aaf07d7efc2be21e8
+final_error: 'ComfyUI 提交失败 HTTP 400 (backend=192.168.1.195:8188):
+
+  工作流参数校验失败 — 节点连线断或参数类型不对。用 POST /api/canvas-video-tasks/inspect 检查一下,看是不是缺必填连线。'
+known_issue: 已知节点 16 连线错 (用户反馈)
+raw_result:
+  videos: []
+  text: null
+  text_url: ''
+  backend: null
+  prompt_id: null
+  seed: null
+raw_195_diagnosis:
+  raw_submission_attempt:
+    method: POST http://192.168.1.195:8188/prompt with manual autowire + node 16 rewire
+    fixes_applied:
+    - strip _meta
+    - 'Node 16 LTXVAudioVAEDecode.samples: [15,1] → [14,1] (LTXVConcatAVLatent audio
+      output)'
+    - 'Full autowire: STGGuiderNode, LTXVBaseSampler, LTXVScheduler, VHS_VideoCombine,
+      RandomNoise, loaders'
+    result: HTTP 400 (validation failed)
+  root_cause:
+    summary: LTXAV workflow 设计已 broken — node 16 在新 ComfyUI-LTXVideo 版本下无法获得 audio
+      latent
+    details:
+    - '用户反馈的 ''node 16 连线错'' 是真的: workflow 把 [15, 1] 当 audio latent'
+    - 但 195 装的 ComfyUI-LTXVideo 版本中, LTXVBaseSampler output 2 ([15, 1]) 是 CONDITIONING
+      不是 LATENT
+    - 'object_info 验证: LTXVBaseSampler output = [LATENT, CONDITIONING, CONDITIONING]'
+    - '尝试 fix: rewire 到 [14, 1] (LTXVConcatAVLatent audio_latent output) → 195 仍报
+      错, 但错误变成 ''list index out of range'' 在 LTXVAudioVAEDecode 内部'
+    - '根本原因: 195 装的 LTXVConcatAVLatent output 只有 1 个 (combined), 不分 video/audio output'
+    - 'object_info: LTXVConcatAVLatent output = [LATENT] (单输出)'
+    evidence_195_response: 'node 16: "samples, received_type(CONDITIONING) mismatch
+      input_type(LATENT)" — 这是原错, rewire 后变成: "input_name: audio, list index out of
+      range, linked_node: [16, 0]" — 即 audio 字段被自引用, 没有任何 source node 提供 audio'
+  secondary_issues_in_workflow:
+  - node: 7
+    type: LTXVAudioVAELoader
+    missing: ckpt_name
+  - node: 2
+    type: LTXAVTextEncoderLoader
+    missing: text_encoder / ckpt_name / device
+  - node: 12
+    type: LTXVScheduler
+    missing: max_shift / stretch / terminal / base_shift
+  - node: 18
+    type: VHS_VideoCombine
+    missing: loop_count / save_output / pingpong
+  - node: 15
+    type: LTXVBaseSampler
+    missing: num_frames / width / height (canvas autowire fails to fill — unknown
+      root cause)
+  fix_priority:
+  - 'P0: 工作流用了 旧 LTXAV schema — 升级到 ComfyUI-LTXVideo 新版后, audio latent propagation
+    已重做, workflow 需要按新 schema 重画 (找 smb 团队要 22B-LTXAV 官方 example workflow)'
+  - 'P1: canvas-video-tasks 的 autowire + alias 修不全 (num_frames / width / height 仍漏)
+    — canvas_video._auto_inject 在检测到 unknown 角色时可能跳过这些'
+  - 'P2: VHS_VideoCombine / LTXVScheduler 的 default 字段没在 canvas defaults_map 里'
+status_note: 用户反馈的 'node 16 连线错' 已确认 — workflow 在当前 ComfyUI-LTXVideo 版本下结构性 broken
+  (audio latent 没法从 sampler 流到 decoder)。

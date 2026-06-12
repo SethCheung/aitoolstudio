@@ -1,0 +1,21 @@
+workflow: ltx_ltx-t2v-lora.json
+type: '?'
+backend: 192.168.1.195:8188
+tested_at: '2026-06-09T19:55:38.495805'
+status: failed
+duration_sec: 595.6
+errors:
+- ComfyUI 渲染超时 (>900s, prompt_id=34332168-7029-4aa9-a858-be9a5c81e014)。可能 GPU 太慢 /
+  队列堵 / workflow 卡住。
+warnings: []
+input: {}
+task_id: canvas_vid_febce2423d6a4fc0864593b48f7a1998
+final_error: ComfyUI 渲染超时 (>900s, prompt_id=34332168-7029-4aa9-a858-be9a5c81e014)。可能
+  GPU 太慢 / 队列堵 / workflow 卡住。
+raw_result:
+  videos: []
+  text: null
+  text_url: ''
+  backend: null
+  prompt_id: null
+  seed: null

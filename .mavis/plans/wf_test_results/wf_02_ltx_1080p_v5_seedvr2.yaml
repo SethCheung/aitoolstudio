@@ -1,0 +1,45 @@
+workflow: ltx_1080p_v5_seedvr2.json
+type: T2V+SeedVR2
+tested_at: '2026-06-09T20:01:30'
+status: success
+duration_sec: 1483
+note: xy-canvas task dict marked "failed" at 600s poll timeout, but ComfyUI 195 actually
+  completed at 19:58 (12min wall time from 19:46 queue pickup). Verified via direct
+  195 ComfyUI /history/<prompt_id> = success, output file xycanvas_v5_seedvr2_00009.mp4.
+  Lesson: xy-canvas canvas_video.py timeout is unreliable for slow 1920x1088 SeedVR2 jobs;
+  always cross-check ComfyUI history and output dir.
+backend: 192.168.1.195:8188
+comfyui_prompt_id: 28b7ea8d-a125-489c-9b64-409b0a0e9557
+comfyui_queue_id: 319
+comfyui_output_file: xycanvas_v5_seedvr2_00009.mp4
+comfyui_completed_at_unix: 1781006315.986
+output:
+  - local_path: /tmp/wf_test_assets/02_ltx_1080p_v5_seedvr2/00_xycanvas_v5_seedvr2_00009.mp4
+    width: 2048
+    height: 1160
+    fps: 24.0
+    nb_frames: '97'
+    duration_sec: 4.04
+    size_bytes: 6517958
+    codec: h264
+input:
+  prompt: A calm cinematic shot of a woman reading a book at a wooden desk, soft window light, subtle camera movement, natural motion
+  negative_prompt: blurry, low quality, distorted, watermark
+  width: 768
+  height: 432
+  length: 97
+task_id: canvas_vid_61f3527d92564c27b872f8c906646222
+poll_elapsed_sec: 600.9
+final_status: failed
+final_error: 'ComfyUI 渲染超时 (>600s, prompt_id=28b7ea8d-a125-489c-9b64-409b0a0e9557)'
+recovery:
+  method: 195_comfyui_history_cross_check
+  comfyui_status: success
+  comfyui_exec_start_unix: 1781005592.314
+  comfyui_exec_end_unix: 1781006315.986
+  comfyui_wall_time_sec: 723.7
+errors: []
+warnings:
+  - "xy-canvas task dict reports 'failed' due to 600s poll timeout, but ComfyUI 195 actually completed successfully — this is a known false-negative pattern for slow 1920x1088 jobs"
+  - "SeedVR2 upscaler (node 19) upscaled 1920x1088 to 2048x1160 (aspect-preserving 1.067x) — output not 1920x1088 as the filename suggests"
+  - "num_frames=97 honored (vs wf_01 num_frames=25 hardcoded) — LTXVBaseSampler node 13 read length from payload, unlike wf_01 v4"

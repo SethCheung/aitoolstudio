@@ -1,0 +1,33 @@
+workflow: seedvr2_standalone.json
+type: V2V-SuperResolution-3B
+tested_at: '2026-06-09T19:43:34.205333'
+backend: 192.168.1.195:8188
+status: pending
+duration_sec: null
+errors:
+- "195 queue still pending at task end (position 16+); task killed by engine 30min runtime limit"
+- "195 队列尚未跑到, 当时 ~16 个 sibling 任务排队中"
+warnings:
+- "canvas-video-tasks 已 600s 超时 (Canvas poll timeout), 但 prompt_id c8d27f41 还在 195 队列里"
+- "**任务没完成, 需要在 retry 时继续 poll 195 history 直到 c8d27f41 出结果**"
+input:
+  prompt: ''
+  negative_prompt: ''
+  width: 480
+  height: 270
+  length: 25
+  params:
+    '1':
+      video: fixed_ltx_i2v.mp4
+notes:
+- 'node 2 SeedVR2LoadDiTModel: seedvr2_ema_3b_fp16.safetensors, blocks_to_swap=0'
+- 'node 4 SeedVR2VideoUpscaler: color_correction=adain, temporal_overlap=0'
+- "node 1 VHS_LoadVideo 硬编码 v4_portrait.mp4, params 强制覆盖到 fixed_ltx_i2v.mp4"
+- '**249 缺 ComfyUI-VideoHelperSuite (VHS_LoadVideo not found)**, 必须 195'
+- "与 wf_10 关键差异: wf_09 用 3B 模型 (整模型驻 VRAM), 不需要 offload_device=cpu, 应该 PASS"
+task_id: canvas_vid_2eb992e5253d45458a3a7c30ee975980
+prompt_id_195: c8d27f41-6e3b-4ae5-aa39-33b04f643968
+poll_elapsed_sec: 600.7
+final_status: pending
+final_error: "195 队列排队超时 (20+ min, 仍有 16+ sibling 任务在前)"
+retry_hint: "Use 195 history endpoint to poll c8d27f41-6e3b-4ae5-aa39-33b04f643968. On success, output gifs[] in node 6 will have the mp4 filename (xycanvas_seedvr2_v4portrait_*.mp4). Download via /view?filename=...&type=output."

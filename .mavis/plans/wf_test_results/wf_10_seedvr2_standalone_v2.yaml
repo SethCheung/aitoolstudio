@@ -1,0 +1,51 @@
+workflow: seedvr2_standalone_v2.json
+type: V2V-SuperResolution-7B
+tested_at: '2026-06-09T19:43:34.220000'
+backend: 192.168.1.195:8188
+status: failed
+duration_sec: 600.7
+errors:
+- final status=running (canvas 600s poll 超时)
+- 195 history status_str=error: BlockSwap enabled (blocks_to_swap=16) but dit_offload_device
+  is invalid. Current: device='cuda:0', dit_offload_device='none'. BlockSwap requires
+  offload_device on the DiT Model to be set and different from device. Set --dit_offload_device
+  cpu or disable BlockSwap.
+warnings: []
+input:
+  prompt: ''
+  negative_prompt: ''
+  width: 480
+  height: 270
+  length: 25
+  params:
+    '1':
+      video: fixed_ltx_i2v.mp4
+notes:
+- 'node 2 SeedVR2LoadDiTModel: seedvr2_ema_7b_fp16.safetensors, blocks_to_swap=16'
+- 'node 4 SeedVR2VideoUpscaler: color_correction=none, temporal_overlap=1'
+- node 1 VHS_LoadVideo 硬编码 v4_portrait.mp4, params 强制覆盖到 fixed_ltx_i2v.mp4
+- '**7B 模型 + VHS_LoadVideo 都只有 195 有** — wf_10 必须跑 195'
+- '**workflow config bug**: node 2 SeedVR2LoadDiTModel 的 offload_device 字段缺失/默认 none,
+  但 blocks_to_swap=16 要求 offload_device=cpu. 修复需在 SeedVR2LoadDiTModel.inputs
+  显式设 offload_device=cpu (任务说不要改 JSON, 只记录 bug)'
+task_id: canvas_vid_b441da9f8f5b45cbb7366cf8bef2dd76
+prompt_id_195: f948dad2-e269-4440-927b-04d2dd00b336
+poll_elapsed_sec: 600.7
+final_status: error
+final_error: BlockSwap requires offload_device on the DiT Model to be set and different
+  from device. Set --dit_offload_device cpu or disable BlockSwap.
+raw_result:
+  videos: []
+  text: null
+  text_url: ''
+  backend: 192.168.1.195:8188
+  prompt_id: f948dad2-e269-4440-927b-04d2dd00b336
+  seed: 42
+exception_node: '4'
+exception_type: SeedVR2VideoUpscaler
+exception_message: 'BlockSwap enabled (blocks_to_swap=16) but dit_offload_device is invalid. Current: device=''cuda:0'', dit_offload_device=''none''. BlockSwap requires offload_device on the DiT Model to be set and different from device. Set --dit_offload_device cpu or disable BlockSwap.'
+traceback_file: /home/sjm/ComfyUI/custom_nodes/ComfyUI-SeedVR2.5_new/src/optimization/blockswap.py:112
+executed_nodes:
+- '1'
+- '2'
+- '3'

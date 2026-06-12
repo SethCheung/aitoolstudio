@@ -1,0 +1,30 @@
+workflow: ltx_ltx-i2v.json
+type: I2V
+tested_at: '2026-06-09T20:22:15.981655'
+status: failed
+duration_sec: 1200.8
+errors:
+- ComfyUI 渲染超时 (>1200s, prompt_id=5412c5fa-bc8b-4bcb-8e2f-3965ae90a328)。可能 GPU 太慢
+  / 队列堵 / workflow 卡住。
+warnings:
+- 'retry #1 — original task prompt_id edf84269 never reached ComfyUI 195 history'
+input:
+  prompt: A calm cinematic shot of a woman reading a book at a wooden desk, soft window
+    light, subtle camera movement, natural motion
+  negative_prompt: blurry, low quality, distorted, watermark
+  width: 768
+  height: 432
+  length: 49
+  input_image: PHOTO_20260603_172636427.jpg
+task_id: canvas_vid_a96a047df28641d3b6875d9edce91e18
+poll_elapsed_sec: 1200.8
+final_status: failed
+final_error: ComfyUI 渲染超时 (>1200s, prompt_id=5412c5fa-bc8b-4bcb-8e2f-3965ae90a328)。可能
+  GPU 太慢 / 队列堵 / workflow 卡住。
+raw_result:
+  videos: []
+  text: null
+  text_url: ''
+  backend: null
+  prompt_id: null
+  seed: null

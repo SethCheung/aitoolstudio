@@ -1,0 +1,245 @@
+version: 1
+plan:
+  name: 'Video Workflow 端到端测试 (拆分 3 组) — 2026-06-09'
+  max_concurrency: 3
+  max_consecutive_failures: 3
+  max_cycles: 3
+  auto_accept: false
+  auto_reject_retries: 0
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  - id: 'wf-group-a-1080p'
+    title: '测试 1080p 系列 3 个 workflow (1/2/3)'
+    assigned_to: general
+    verified_by: verifier
+    max_retries: 1
+    timeout_ms: 2400000
+    prompt: |
+      你是 video workflow 测试员。目标：用 Playwright 测 xy-canvas 上**组 A 的 3 个 video workflow** 能否用 web UI 框框做输入并跑出视频。
+
+      ## 你的 3 个 workflow (已修复的标 ✅，不要重测)
+
+      1. ltx_1080p_v4.json
+      2. ltx_1080p_v5_seedvr2.json
+      3. ltx_ltx-i2v.json
+
+      **跳过 wf_05/06** — 之前 plan 24cee11b cycle 1 已测，结果在:
+      - `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_05_ltx_studio_quality.yaml` (失败: HTTP 500)
+      - `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_06_ltx_图生视频-ltx2.3.yaml` (成功)
+      你不需要重测，但**最终汇总时要把 5/6 也列进去**。
+
+      ## 工作环境
+
+      - xy-canvas web UI: http://192.168.1.60:3000
+      - 登录: sethchang / 12301230
+      - 视频后端: 195/197/249 任一台 ComfyUI 8188（推荐 195, RTX 4090 48G）
+      - Mac 本地 playwright: /usr/bin/python3 + /Users/apple/Library/Caches/ms-playwright
+      - SSH 60: `sshpass -p '12301230' ssh sethchang@192.168.1.60`
+      - SSH 195/197/249: `sshpass -p 'Sjm744546' ssh sjm@<ip>`
+
+      ## 完整任务说明
+
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/team-wf-test-2026-06-09.md`
+
+      必看测试方法 (Playwright 登录 / 选 workflow / 填输入 / 等结果) + 报告格式 (YAML)。
+
+      ## 现有工具脚本可复用 (强烈建议)
+
+      - `/tmp/v6_check_re/re_play.py` — 完整 web UI 验证脚本 (登录/进画布/视频节点/字段)
+      - `/tmp/v6_check_re/test_output_video.py` — 模拟右键菜单
+      - `/tmp/v6_check_re/test_final.py` — 注入 output 节点 + 跑转换函数
+      - `/tmp/wf_test_scripts/wf_test_all.py` — 之前 worker 写的批处理脚本 (可能没跑完, 可参考)
+      - `/tmp/wf_test_scripts/wf_test_run.log` — 之前的 log (在 1/11 处停止)
+
+      ## 测试资产
+
+      - 测试图片 `PHOTO_20260603_172636427.jpg` (在 195 ComfyUI input 目录)
+      - 测试 prompt: `A calm cinematic shot of a woman reading a book at a wooden desk, soft window light, subtle camera movement, natural motion`
+      - 负向: `blurry, low quality, distorted, watermark`
+
+      ## 必做
+
+      1. 写/复用 Python 脚本，按顺序跑你这 3 个 workflow
+      2. 每个 workflow 输出 YAML 到 `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_<N>_<name>.yaml`
+      3. 拉 PASS 的 mp4 到 `/tmp/wf_test_assets/<N>_<name>/`
+      4. 写**组 A 部分报告** `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_group_a_report.md`
+         - 3 个 workflow 的 PASS/FAIL + 帧数/分辨率/大小/失败原因
+         - 已知问题 (针对你这 3 个)
+
+      ## 不要做
+
+      - **不要改任何 workflow JSON** (只测不修)
+      - 不要跑超过 1 次/每个 workflow (除非出错重试 1 次)
+      - 不要测组 B/C 的 workflow (那是别的 worker 的活)
+      - 不要调 vision MCP
+
+      ## 完成标准
+
+      - 3 个 workflow 全部有 YAML 记录
+      - 失败的要有具体错误信息 (ssh 到 195/197/249 查 ComfyUI queue/history 验证)
+      - PASS 的 mp4 下载到 /tmp/wf_test_assets/
+      - 组 A 报告写完
+      - 把脚本放在 /tmp/wf_test_scripts/group_a/ 供复用
+    verify_prompt: |
+      验证组 A worker 真实跑了 3 个 workflow。
+
+      必查:
+      1. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_group_a_report.md` 存在
+      2. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_01/02/03_*.yaml` 存在
+      3. PASS 的 mp4 在 /tmp/wf_test_assets/
+
+      抽样 1 个 PASS + 1 个 FAIL: ffprobe mp4 属性 + ssh 195 查 ComfyUI history。
+
+  - id: 'wf-group-b-misc'
+    title: '测试 lora/超分/音视频 3 个 workflow (4/7/8)'
+    assigned_to: general
+    verified_by: verifier
+    max_retries: 1
+    timeout_ms: 2400000
+    prompt: |
+      你是 video workflow 测试员。目标：用 Playwright 测 xy-canvas 上**组 B 的 3 个 video workflow**。
+
+      ## 你的 3 个 workflow (含 2 个已知问题)
+
+      4. ltx_ltx-t2v-lora.json
+      7. ltx_视频超分-ltx-twostage.json ⚠️ 用户反馈不行
+      8. ltx_音视频-ltx-av.json ⚠️ 已知节点 16 连线错
+
+      跑这 3 个，**特别关注 7 和 8 的失败原因** (节点错误/连线/模型缺失都记录清楚)。
+
+      跳过 wf_05/06 (已测过)。
+
+      ## 工作环境 (同组 A)
+
+      - xy-canvas web UI: http://192.168.1.60:3000
+      - 登录: sethchang / 12301230
+      - 视频后端: 195/197/249 任一台 ComfyUI 8188 (推荐 195)
+      - SSH: sshpass 起手, 密码见用户档案
+
+      ## 完整任务说明
+
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/team-wf-test-2026-06-09.md`
+
+      ## 现有工具脚本可复用
+
+      - `/tmp/v6_check_re/re_play.py`
+      - `/tmp/v6_check_re/test_output_video.py`
+      - `/tmp/v6_check_re/test_final.py`
+      - `/tmp/wf_test_scripts/wf_test_all.py` (参考)
+
+      ## 测试资产
+
+      - 测试图片 `PHOTO_20260603_172636427.jpg` (195 ComfyUI input)
+      - 测试视频 `ltx_i2v_00031.mp4` (在 /tmp/v6_check_re/wf_quality/, 用于超分/音视频输入)
+      - 测试 prompt: `A calm cinematic shot of a woman reading a book at a wooden desk, soft window light, subtle camera movement, natural motion`
+      - 负向: `blurry, low quality, distorted, watermark`
+
+      ## 必做
+
+      1. 写/复用 Python 脚本，按顺序跑你这 3 个 workflow
+      2. 每个 workflow 输出 YAML 到 `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_<N>_<name>.yaml`
+      3. 拉 PASS 的 mp4 到 `/tmp/wf_test_assets/<N>_<name>/`
+      4. 写**组 B 部分报告** `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_group_b_report.md`
+         - 3 个 workflow 的 PASS/FAIL
+         - **特别注意 7/8 的具体失败原因** (要 ssh 到 195 查 ComfyUI history 看 error)
+         - 修复建议优先级 (针对 lora/超分/音视频)
+
+      ## 不要做
+
+      - 不要改任何 workflow JSON
+      - 不要跑超过 1 次/每个 workflow (重试 1 次除外)
+      - 不要测组 A/C 的 workflow
+      - 不要调 vision MCP
+
+      ## 完成标准
+
+      - 3 个 workflow 全部有 YAML 记录
+      - 7/8 失败原因要具体到节点/连线/模型
+      - 4 如果 PASS, mp4 下载到位
+      - 组 B 报告写完
+      - 脚本放 /tmp/wf_test_scripts/group_b/
+    verify_prompt: |
+      验证组 B worker 真实跑了 3 个 workflow。
+
+      必查:
+      1. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_group_b_report.md` 存在
+      2. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_04/07/08_*.yaml` 存在
+      3. 7/8 失败的 yaml 有具体错误信息 (不能只说 "failed")
+      4. ssh 195 查 ComfyUI history, worker 报告的 error 跟实际 history 对得上
+
+  - id: 'wf-group-c-seedvr2-reverse'
+    title: '测试 seedvr2 x2 + 视频反推 3 个 workflow (9/10/11)'
+    assigned_to: general
+    verified_by: verifier
+    max_retries: 1
+    timeout_ms: 2400000
+    prompt: |
+      你是 video workflow 测试员。目标：用 Playwright 测 xy-canvas 上**组 C 的 3 个 video workflow**。
+
+      ## 你的 3 个 workflow (含 1 个已知问题)
+
+      9. seedvr2_standalone.json
+      10. seedvr2_standalone_v2.json
+      11. 视频反推.json ⚠️ 已知缺 video_output 节点
+
+      跑这 3 个。11 已知有节点问题，记录具体哪个节点缺什么。
+
+      跳过 wf_05/06 (已测过)。
+
+      ## 工作环境 (同组 A/B)
+
+      - xy-canvas web UI: http://192.168.1.60:3000
+      - 登录: sethchang / 12301230
+      - 视频后端: 195/197/249 任一台 ComfyUI 8188 (推荐 195)
+      - SSH: sshpass 起手
+
+      ## 完整任务说明
+
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/team-wf-test-2026-06-09.md`
+
+      ## 现有工具脚本可复用
+
+      - `/tmp/v6_check_re/re_play.py`
+      - `/tmp/v6_check_re/test_output_video.py`
+      - `/tmp/v6_check_re/test_final.py`
+      - `/tmp/wf_test_scripts/wf_test_all.py` (参考)
+
+      ## 测试资产
+
+      - 测试视频 `ltx_i2v_00031.mp4` (/tmp/v6_check_re/wf_quality/) — 用于 9/10/11 输入
+      - 视频反推的 prompt 可以空着 (反推是图生文方向)
+
+      ## 必做
+
+      1. 写/复用 Python 脚本，按顺序跑你这 3 个 workflow
+      2. 每个 workflow 输出 YAML 到 `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_<N>_<name>.yaml`
+      3. 拉 PASS 的 mp4/输出到 `/tmp/wf_test_assets/<N>_<name>/`
+      4. 写**组 C 部分报告** `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_group_c_report.md`
+         - 3 个 workflow 的 PASS/FAIL
+         - 11 缺节点问题要具体到节点 ID/类型
+         - 9 vs 10 的差异 (两个 seedvr2 standalone 的对比)
+
+      ## 不要做
+
+      - 不要改任何 workflow JSON
+      - 不要跑超过 1 次/每个 workflow (重试 1 次除外)
+      - 不要测组 A/B 的 workflow
+      - 不要调 vision MCP
+
+      ## 完成标准
+
+      - 3 个 workflow 全部有 YAML 记录
+      - 11 失败原因要具体到缺哪个节点
+      - 9/10 如果 PASS, mp4 下载到位
+      - 组 C 报告写完
+      - 脚本放 /tmp/wf_test_scripts/group_c/
+    verify_prompt: |
+      验证组 C worker 真实跑了 3 个 workflow。
+
+      必查:
+      1. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_group_c_report.md` 存在
+      2. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_09/10/11_*.yaml` 存在
+      3. 11 失败的 yaml 要说明缺哪个 video_output 节点
+      4. ssh 195 查 ComfyUI history 对比

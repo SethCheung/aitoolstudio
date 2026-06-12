@@ -1,0 +1,122 @@
+version: 1
+plan:
+  name: '11 个 Video Workflow 端到端测试 — 2026-06-09'
+  max_concurrency: 2
+  max_consecutive_failures: 2
+  max_cycles: 5
+  auto_reject_retries: 1
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  - id: 'test-all-workflows'
+    title: '用 Playwright 测全部 11 个 video workflow'
+    assigned_to: general
+    verified_by: verifier
+    max_retries: 1
+    prompt: |
+      你是 video workflow 测试员。目标：用 Playwright headless Chromium 测 xy-canvas 上 11 个 video workflow 能否用 web UI 框框做输入并跑出视频。
+
+      ## 工作环境
+
+      - xy-canvas web UI: http://192.168.1.60:3000
+      - 登录: sethchang / 12301230
+      - 视频后端: 195/197/249 任一台 ComfyUI 8188（推荐 195, RTX 4090 48G）
+      - Mac 本地 playwright: /usr/bin/python3 + /Users/apple/Library/Caches/ms-playwright
+      - SSH 60: `sshpass -p '12301230' ssh sethchang@192.168.1.60`
+      - SSH 195/197/249: `sshpass -p 'Sjm744546' ssh sjm@<ip>`
+      - **ltx 图生视频 workflow 已修复 (2026-06-09)**，其他 10 个未动
+
+      ## 必读
+
+      完整任务说明 + 11 个 workflow 列表 + 测试方法 + 报告格式:
+      `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/team-wf-test-2026-06-09.md`
+
+      必看:
+      - 测试方法 (Playwright 登录 / 选 workflow / 填输入 / 等结果)
+      - 报告格式 (YAML, 每个 workflow 一份, 路径 `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/wf_<N>_<name>.yaml`)
+      - 完成标准 (11 个全测过 + 汇总报告 `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_summary_2026-06-09.md`)
+
+      ## 现有工具脚本可复用 (强烈建议)
+
+      - `/tmp/v6_check_re/re_play.py` — 完整 web UI 验证脚本 (登录/进画布/视频节点/字段)
+      - `/tmp/v6_check_re/test_output_video.py` — 模拟右键菜单
+      - `/tmp/v6_check_re/test_final.py` — 注入 output 节点 + 跑转换函数
+
+      你可以基于这些脚本扩展出 11 个 workflow 的批量测试。
+
+      ## 测试资产
+
+      - 测试图片 `PHOTO_20260603_172636427.jpg` (在 195 ComfyUI input 目录)
+      - 测试视频 `ltx_i2v_00031.mp4` (用刚才跑的 4 秒视频, 在 /tmp/v6_check_re/wf_quality/)
+      - 测试 prompt: `A calm cinematic shot of a woman reading a book at a wooden desk, soft window light, subtle camera movement, natural motion`
+      - 负向: `blurry, low quality, distorted, watermark`
+
+      ## 11 个 workflow 列表 (已修复的标了 ✅)
+
+      1. ltx_1080p_v4.json
+      2. ltx_1080p_v5_seedvr2.json
+      3. ltx_ltx-i2v.json
+      4. ltx_ltx-t2v-lora.json
+      5. ltx_studio_quality.json
+      6. ltx_图生视频-ltx2.3.json ✅ (已修复 lora/steps/rescale)
+      7. ltx_视频超分-ltx-twostage.json ⚠️ 用户反馈这个不行
+      8. ltx_音视频-ltx-av.json ⚠️ 已知节点 16 连线错
+      9. seedvr2_standalone.json
+      10. seedvr2_standalone_v2.json
+      11. 视频反推.json ⚠️ 已知缺 video_output 节点
+
+      ## 必做
+
+      1. 写一个批处理 Python 脚本 (建议放 /tmp/wf_test_all.py)，按顺序跑 11 个 workflow
+      2. 每个 workflow 输出 YAML 结果到 `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/`
+      3. 拉所有输出 mp4 到 `/tmp/wf_test_assets/`
+      4. 写汇总报告 `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_summary_2026-06-09.md`:
+         - 11 行 PASS/FAIL 表 (workflow, 状态, 实际帧数, 实际分辨率, 输出大小, 失败原因)
+         - 修复建议优先级
+         - 已知问题清单
+
+      ## 不要做
+
+      - **不要改任何 workflow JSON 或代码**（只测，不修）
+      - 不要跑超过 1 次/每个 workflow（除非出错重试）
+      - 不要调 vision MCP（之前测过不可用）
+
+      ## 完成标准
+
+      - 11 个 workflow 全部测过（有 PASS/FAIL 记录）
+      - 失败的有具体错误信息 + 失败原因
+      - 输出 mp4 全部下载到 /tmp/wf_test_assets/
+      - 汇总报告写完
+      - 把所有测试脚本放在 /tmp/wf_test_scripts/ 供复用
+
+    verify_prompt: |
+      你是 verifier，验证 worker 是否真实跑了 11 个 workflow。
+
+      ## 必查项
+
+      1. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_summary_2026-06-09.md` 是否存在
+      2. `/Users/apple/Documents/GitHub/aitoolstudio/.mavis/plans/wf_test_results/` 是否有 11 个 YAML 文件
+      3. `/tmp/wf_test_assets/` 是否有对应 mp4（至少 PASS 的有，FAIL 的不强求）
+
+      ## 抽样验证真实性 (关键!)
+
+      任选 2-3 个 PASS 状态的 workflow，亲自跑一次：
+      - 用 Playwright 登录 + 跑那个 workflow
+      - 对比 worker 报告的 width/height/duration/frames 跟你跑出的实际属性
+      - 用 ffprobe 拉 worker 下载的 mp4 属性，跟 worker 报告对比
+
+      ## 抽样验证失败案例 (同样重要)
+
+      任选 1-2 个 FAIL 状态的 workflow，确认：
+      - worker 报告的错误信息是否符合实际 (打开 ComfyUI 端 history 看 error)
+      - 不要光看 worker 写的东西，要 ssh 到 195/197/249 查 ComfyUI queue / history
+
+      ## PASS/FAIL 标准
+
+      - 11 个 workflow 全部有记录 ✅
+      - 抽样 3 个，2 个 PASS 的 mp4 属性跟报告对得上
+      - 抽样 1 个 FAIL 的，错误信息跟 ComfyUI 端 history 对得上
+      - 报告有 PASS/FAIL 表 + 修复建议优先级
+
+      只要一项不满足 → REJECT，要求 worker 补做。

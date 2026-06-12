@@ -1,0 +1,21 @@
+workflow: ltx_1080p_v4.json
+type: '?'
+backend: 192.168.1.195:8188
+tested_at: '2026-06-09T19:55:33.485642'
+status: failed
+duration_sec: 590.6
+errors:
+- ComfyUI 渲染超时 (>900s, prompt_id=2456c9d0-a743-4a12-8fe3-9e382c87d084)。可能 GPU 太慢 /
+  队列堵 / workflow 卡住。
+warnings: []
+input: {}
+task_id: canvas_vid_626c75d7d5964e069e2ac84d5a48639e
+final_error: ComfyUI 渲染超时 (>900s, prompt_id=2456c9d0-a743-4a12-8fe3-9e382c87d084)。可能
+  GPU 太慢 / 队列堵 / workflow 卡住。
+raw_result:
+  videos: []
+  text: null
+  text_url: ''
+  backend: null
+  prompt_id: null
+  seed: null

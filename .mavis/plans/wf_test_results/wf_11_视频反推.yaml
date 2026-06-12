@@ -1,0 +1,20 @@
+workflow: 视频反推.json
+type: '?'
+backend: 192.168.1.195:8188
+tested_at: '2026-06-09T19:45:42.873963'
+status: failed
+duration_sec: 0.0
+errors:
+- 这个 workflow 是视频反推/文本分析流程，不是视频生成流程。请不要在视频生成节点里直接运行它。
+warnings: []
+input: {}
+task_id: canvas_vid_da7141120a994788a94e30af6cf5d857
+final_error: 这个 workflow 是视频反推/文本分析流程，不是视频生成流程。请不要在视频生成节点里直接运行它。
+known_issue: 缺 video_output 节点 — 预期无 mp4 输出, 只出文本
+raw_result:
+  videos: []
+  text: null
+  text_url: ''
+  backend: null
+  prompt_id: null
+  seed: null
