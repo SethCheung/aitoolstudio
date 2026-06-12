@@ -73,13 +73,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+async def serve_static_no_stale(request: Request, call_next, path: str):
+    """静态 js/css/html 走协商缓存（ETag 304），避免发版后浏览器继续用旧缓存。"""
+    response = await call_next(request)
+    if path.lower().endswith((".js", ".css", ".html")):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 @app.middleware("http")
 async def auth_guard_middleware(request: Request, call_next):
     path = request.url.path or "/"
     method = request.method.upper()
     if path.startswith("/static/") and path.endswith(".html"):
         if path == "/static/login.html":
-            return await call_next(request)
+            return await serve_static_no_stale(request, call_next, path)
         token = request_session_token(request)
         user = authenticate_token(token) if token else None
         request.state.current_user = user
@@ -89,12 +96,12 @@ async def auth_guard_middleware(request: Request, call_next):
                 return login_redirect_response(request)
             if not user.get("is_admin"):
                 return JSONResponse(status_code=403, content={"detail": "管理员权限不足"})
-            return await call_next(request)
+            return await serve_static_no_stale(request, call_next, path)
         if not user:
             return login_redirect_response(request)
-        return await call_next(request)
+        return await serve_static_no_stale(request, call_next, path)
     if path.startswith("/static/") or path.startswith("/assets/") or path.startswith("/output/"):
-        return await call_next(request)
+        return await serve_static_no_stale(request, call_next, path)
     if path in PUBLIC_PATHS or path == "/ws/stats":
         return await call_next(request)
     token = request_session_token(request)
