@@ -169,7 +169,8 @@ main() {
   fi
   while true; do
     name=$(pick_job) || { log "没有待训任务，退出"; break; }
-    wait_for_idle_gpu || break
+    touch "$JOBS_DIR/$name/.running"   # 立刻认领，防止双机抢同一任务
+    if ! wait_for_idle_gpu; then rm -f "$JOBS_DIR/$name/.running"; break; fi
     train_job "$name" || true
     hour=$(date +%H)
     if [ "$hour" -ge "$DEADLINE_HOUR" ] && [ "$hour" -lt 22 ]; then
