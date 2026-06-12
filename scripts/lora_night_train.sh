@@ -77,7 +77,7 @@ pick_job() {
     [ -d "$d" ] || continue
     name=$(basename "$d")
     if [ -e "$d/.done" ] || [ -e "$d/.running" ] || [ -e "$d/.failed" ]; then continue; fi
-    [ -d "$d/dataset" ] || continue
+    if [ ! -d "$d/dataset" ] && [ ! -f "$d/dataset.toml" ]; then continue; fi
     echo "$name"
     return 0
   done
@@ -104,6 +104,10 @@ train_job() {
   touch "$job_dir/.running"
   mkdir -p "$work/cache" "$work/out" "$LORA_OUT_DIR"
 
+  # 任务目录里自带 dataset.toml 时优先使用（精细配比/多数据块场景）
+  if [ -f "$job_dir/dataset.toml" ]; then
+    cp "$job_dir/dataset.toml" "$work/dataset.toml"
+  else
   cat > "$work/dataset.toml" <<EOF
 [general]
 resolution = [$RESOLUTION, $RESOLUTION]
@@ -117,6 +121,7 @@ image_directory = "$job_dir/dataset"
 cache_directory = "$work/cache"
 num_repeats = $NUM_REPEATS
 EOF
+  fi
 
   local swap_args=()
   [ "$SWAP_BLOCKS" -gt 0 ] && swap_args=(--blocks_to_swap "$SWAP_BLOCKS")
