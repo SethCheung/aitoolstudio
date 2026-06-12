@@ -86,7 +86,7 @@
             z-index: 10;
             width: 310px;
             padding: 40px;
-            background: rgba(0, 30, 50, 0.45);
+            background: rgba(0, 26, 44, 0.78);
             backdrop-filter: blur(24px);
             -webkit-backdrop-filter: blur(24px);
             border-radius: 28px;
@@ -108,7 +108,7 @@
         }
         .form-group label {
             display: block;
-            color: rgba(0, 200, 240, 0.4);
+            color: rgba(120, 225, 250, 0.85);
             font-size: 10px;
             letter-spacing: 3px;
             margin-bottom: 8px;
@@ -119,14 +119,14 @@
             padding: 10px 0;
             background: transparent;
             border: none;
-            border-bottom: 1px solid rgba(0, 200, 240, 0.15);
-            color: #b0e8ff;
+            border-bottom: 1px solid rgba(0, 200, 240, 0.4);
+            color: #e6f8ff;
             font-size: 14px;
             outline: none;
             box-sizing: border-box;
         }
         .form-group input::placeholder {
-            color: rgba(0, 200, 240, 0.15);
+            color: rgba(140, 220, 245, 0.45);
         }
         .form-group .input-line {
             display: block;
@@ -155,10 +155,10 @@
         .btn-row .btn-action {
             flex: 1;
             height: 44px;
-            border: 1px solid rgba(0, 200, 240, 0.2);
+            border: 1px solid rgba(0, 200, 240, 0.45);
             border-radius: 50px;
-            background: transparent;
-            color: rgba(0, 200, 240, 0.6);
+            background: rgba(0, 200, 240, 0.08);
+            color: rgba(160, 235, 255, 0.95);
             font-size: 12px;
             font-weight: 700;
             letter-spacing: 4px;
@@ -224,6 +224,8 @@
 var canvas = document.getElementById('sandCanvas');
 var ctx = canvas.getContext('2d');
 var loginForm = document.getElementById('loginForm');
+window.__formActivated = false;
+setTimeout(function(){ window.__formActivated = true; }, 900);
 var timerEl = document.getElementById('timer');
 var promptText = document.getElementById('promptText');
 var loginBtn = document.getElementById('loginBtn');
@@ -652,7 +654,9 @@ function animate() {
     }
     prevBreath = breath;
 
-    if (isHovering) {
+    // 体验修复：开场动画约 0.9s 后表单常驻，不再要求鼠标停在中心（打字时表单不会消失）
+    if (isHovering || window.__formActivated) {
+        window.__formActivated = true;
         loginForm.classList.add('visible');
         promptText.classList.add('hidden');
     } else {

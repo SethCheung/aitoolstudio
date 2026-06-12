@@ -1,5 +1,36 @@
 # xy-canvas 60 生产补丁说明（2026-06-12）
 
+## 第七批：下架 5 个坏工具页 + 清理垃圾画布（2026-06-12 晚）
+
+- **static/index.html（旧壳）**：从「ComfyUI应用」子菜单移除 5 个把 ComfyUI 写死为 `http://127.0.0.1:8188`、局域网访问必挂的工具页——3D视角变换 / CG一键细化 / 一键抠图 / 高清修复 / 万物移除（含对应 iframe）。保留可用的：图片编辑、2D风格细化、扩图、图像反推、文字抠图。被下架页面文件仍在 static/app/，直链可访问；后续这些能力统一走画布的已发布工作流。
+- 运营清理（直接在生产执行，无需部署）：10 个垃圾画布（「11」×4、新画布 18:21、e2e_check、新画布 16:08、codex_video_line、未命名画布、111）已移入回收站，可恢复。
+- 注意：本批 index.html 基于生产实时版本制作（生产 index.html 与仓库版本差异大，仓库版已过期，见「结构性还债」事项）。
+
+## 第六批：唯一入口收口到旧壳 XY AI（2026-06-12 晚）
+
+- `/`、`/projects`、`/smart-canvas` 全部 307 → `/static/index.html`：浅色「项目主页」与其画布链路下架，全平台只剩旧壳 XY AI 一个入口、一套画布（无限画布）。
+- ComfyUI 工作台「项目主页」按钮改为「返回主页」（→ /static/index.html）。
+- 项目/回收站数据未动；后台 /admin、/comfyui-workbench、/comfyui-settings 入口保持不变。
+
+## 第五批：下架智能画布、统一 xy-canvas（2026-06-12 晚）
+
+- **智能画布（smart-canvas，白色版）正式下架**：`/smart-canvas` 路由 307 跳回 `/projects`；项目主页移除「新建智能项目」按钮；测试用智能项目已归档（项目 id 3dafbb0c...，回收站可恢复，但恢复后打开会回项目主页）。统一只用经典 xy-canvas。
+- **经典画布工作流下拉改用「已发布」列表**（/api/workflows-public）：只显示在 ComfyUI 工作台发布过的工作流、显示发布标题——与工作台词汇一致，草稿和杂项不再出现在画布。
+- 60 盘上 smart-canvas.html/js/css 不再被路由引用（rsync 不删除文件，留在盘上无影响）。
+
+## 第四批：画布走查修复（2026-06-12 晚）
+
+### static/modules/canvas-all.js（经典画布）
+- 修复 P0 bug：`runCustomWorkflow` 里 `pendingId` 声明在 try 块内、catch 在块外引用，**任何运行失败都会 ReferenceError 自爆**——错误弹窗不出、节点永远卡在「处理中/0%」。现在失败会正常弹出后端错误信息并复位节点状态。
+
+### main.py
+- 工作流列表过滤 SMB 盘的 macOS 元数据文件（`._*`），之前会以「._ltx_音视频-ltx-av」这种形态出现在画布工作流下拉里。
+
+### 已知环境问题（非本补丁范围，需要运维处理）
+- 内置文生图 Z-Image 当前在所有 worker 上失败：节点 20 (VAEDecode) IndexError: tuple index out of range。`ae.safetensors` 在各 worker 的 VAE 列表里都存在，疑似 60 盘上该文件损坏/不完整或与模型不匹配。建议在 ComfyTV 里重新验证并核对文件完整性。
+
+
+
 ## 第三批：SMB 共享 workflow 目录接入 + 列表容错（2026-06-12 傍晚）
 
 ### main.py

@@ -1005,7 +1005,7 @@
 
         applyTheme(getThemeValue());
 
-        els.backBtn.onclick = function () { window.location.href = "/projects"; };
+        els.backBtn.onclick = function () { window.location.href = "/static/index.html"; };
         els.refreshBtn.onclick = function () {
             if (state.view === "workers") {
                 loadStatus("已刷新");

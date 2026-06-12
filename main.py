@@ -4797,11 +4797,12 @@ async def auth_change_password(payload: ChangePasswordRequest, request: Request)
 
 @app.get("/")
 async def index():
-    return static_html_response("project-home.html")
+    # 平台唯一入口：旧壳 XY AI（2026-06-12 决策：浅色项目主页下架，只保留一套画布入口）
+    return RedirectResponse(url="/static/index.html", status_code=307)
 
 @app.get("/projects")
 async def projects_page():
-    return static_html_response("project-home.html")
+    return RedirectResponse(url="/static/index.html", status_code=307)
 
 @app.get("/studio")
 async def studio_page():
@@ -4817,7 +4818,8 @@ async def admin_users_page():
 
 @app.get("/smart-canvas")
 async def smart_canvas_page():
-    return static_html_response("smart-canvas.html")
+    # 智能画布已下架（2026-06-12）：统一使用经典 xy-canvas，旧链接一律回主入口
+    return RedirectResponse(url="/static/index.html", status_code=307)
 
 @app.get("/canvas")
 async def canvas_page():
@@ -9890,6 +9892,9 @@ def workflow_list_items(public_only: bool = False) -> List[Dict[str, Any]]:
             dirs[:] = [d for d in dirs if d in {CUSTOM_WORKFLOW_FOLDER, LEGACY_CUSTOM_WORKFLOW_FOLDER, SHARED_WORKFLOW_FOLDER}]
         for fn in sorted(files):
             if not fn.endswith(".json") or fn.endswith(".config.json"):
+                continue
+            # SMB 共享盘上的 macOS 元数据文件（._xxx / .DS_Store 同类），不是有效 workflow
+            if fn.startswith("._"):
                 continue
             rel = os.path.relpath(os.path.join(root, fn), WORKFLOW_DIR).replace("\\", "/")
             # 文件名不符合命名规则（如全角标点）时跳过，避免一个坏文件让整个列表接口 400
