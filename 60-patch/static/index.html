@@ -905,15 +905,15 @@
             // If this is a child item (has parentId)
             if (parentId) {
                 el.classList.add('submenu-active');
-                // Collapse submenu after selecting a child
+                // 选中子项后保持子菜单展开（修复：原先自动收起，连续切换工具要反复展开）
                 const submenu = document.querySelector('.submenu');
                 if (submenu) {
-                    submenu.classList.remove('expanded');
+                    submenu.classList.add('expanded');
                 }
                 const parent = document.getElementById('nav-comfy');
                 if (parent) {
-                    parent.classList.remove('expanded', 'has-active-child', 'active');
-                    parent.classList.add('collapsed');
+                    parent.classList.add('expanded', 'has-active-child');
+                    parent.classList.remove('collapsed');
                 }
             } else {
                 // Top-level nav item

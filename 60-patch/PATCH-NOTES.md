@@ -120,3 +120,10 @@
 - 经典画布右下角「EMPTY」浮窗样式突兀（minimap/资产托盘）。
 - 登录页「鼠标移至中心」动效降低登录效率、表单对比度低。
 - 原生 prompt/confirm 弹窗、错误提示可见性等体验项。
+
+## 第八批：Z-Image 文生图修复 + 子菜单交互（2026-06-12 晚，Claude 自动部署）
+
+- **Z-Image 文生图修复（一节点修复）**：`workflows/Z-Image.json` 的空 Latent 节点 `EmptyLatentImage`（4 通道）→ `EmptySD3LatentImage`（16 通道，匹配 z_image_turbo + Flux ae 的 latent 格式）。根因：worker ComfyUI 升级后不再自动纠正空 latent 通道数。已在 195/197/249 三台全部验证出图，画布端到端（填词→运行→图回画布）验收通过。
+- 旧壳子菜单修复：选中子项后保持展开（原先自动收起），切换顶级项才收起。
+- 自此部署由 Claude 通过 SSH 全自动执行（rsync + docker restart + 验证），发版前自动顶 VERSION。
+- 注意：195 的 ComfyUI 是 0.19.2，197/249 是 0.21.1——建议运维找时间拉齐版本，避免同 workflow 跨机差异。
