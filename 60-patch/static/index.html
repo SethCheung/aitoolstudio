@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 22 22'%3E%3Cpath d='M11 2L19 11L11 20L3 11L11 2Z' stroke='%230891B2' stroke-width='2' stroke-linejoin='round' fill='none' opacity='0.85'/%3E%3Ccircle cx='11' cy='11' r='4.5' stroke='%230891B2' stroke-width='0.7' opacity='0.35' stroke-dasharray='2.5 2'/%3E%3Cpath d='M6.5 6.5L15.5 15.5M6.5 15.5L15.5 6.5' stroke='%230891B2' stroke-width='0.5' opacity='0.25'/%3E%3Ccircle cx='11' cy='11' r='2' fill='%230891B2' opacity='0.85'/%3E%3Ccircle cx='11' cy='11' r='1' fill='%2306B6D4' opacity='0.5'/%3E%3C/svg%3E">
     <title>XY AI</title>
-    <link rel="stylesheet" href="/static/tailwind.min.css?v=2026.06.12.2">
-    <script src="/static/theme.js?v=2026.06.12.2"></script>
+    <link rel="stylesheet" href="/static/tailwind.min.css?v=2026.06.12.5">
+    <script src="/static/theme.js?v=2026.06.12.5"></script>
     <style>
         :root {
             --accent: #0891B2;
@@ -691,7 +691,7 @@
             }
         }
     </style>
-    <link rel="stylesheet" href="/static/theme.css?v=2026.06.12.2">
+    <link rel="stylesheet" href="/static/theme.css?v=2026.06.12.5">
 </head>
 
 <body>
@@ -777,17 +777,17 @@
         </aside>
 
         <main class="stage">
-            <iframe id="frame-klein" src="/static/app/klein.html?v=2026.06.12.2" class="active"></iframe>
-            <iframe id="frame-2dstyle" data-src="/static/app/2dstyle.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-kuotu" data-src="/static/app/kuotu.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-promptgen" data-src="/static/app/promptgen.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-textmatting" data-src="/static/app/textmatting.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-comfytv" data-src="http://192.168.1.195:8188/?v=2026.06.12.2"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/setting/api-settings.html?v=2026.06.12.2"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/setting/comfyui-settings.html?v=2026.06.12.2"></iframe>
+            <iframe id="frame-klein" src="/static/app/klein.html?v=2026.06.12.5" class="active"></iframe>
+            <iframe id="frame-2dstyle" data-src="/static/app/2dstyle.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-kuotu" data-src="/static/app/kuotu.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-promptgen" data-src="/static/app/promptgen.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-textmatting" data-src="/static/app/textmatting.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-comfytv" data-src="http://192.168.1.195:8188/?v=2026.06.12.5"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/setting/api-settings.html?v=2026.06.12.5"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/setting/comfyui-settings.html?v=2026.06.12.5"></iframe>
 
             <div class="comfytv-worker-switcher" id="comfytv-worker-switcher" aria-label="ComfyTV 节点">
                 <span class="comfytv-worker-label">ComfyTV 节点</span>
@@ -812,7 +812,7 @@
         </main>
     </div>
 
-    <script src="/static/modules/settings.js?v=2026.06.12.2"></script>
+    <script src="/static/modules/settings.js?v=2026.06.12.5"></script>
     <script>
         if (!AuthManager.isLoggedIn()) {
             window.location.replace('/static/login.html');
@@ -844,7 +844,7 @@
 
         function buildComfyTVUrl(workerId) {
             const worker = COMFYTV_WORKERS[workerId] || COMFYTV_WORKERS[DEFAULT_COMFYTV_WORKER];
-            return `http://${worker.host}/?v=2026.06.12.2)}`;
+            return `http://${worker.host}/?v=2026.06.12.5)}`;
         }
 
         function updateComfyTVWorkerButtons(workerId) {
