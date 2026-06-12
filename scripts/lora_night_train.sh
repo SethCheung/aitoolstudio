@@ -27,7 +27,9 @@ TE=$NAS_ROOT/models/text_encoders/qwen_2.5_vl_7b.safetensors
 GPU_BUSY_MB=4000          # 显存占用超过此值视为 ComfyUI 在忙
 DEADLINE_HOUR=6           # 早上 6 点后不再开新任务
 
-# 进度推送（可选）：在 195 的 ~/.lora_notify.env 里配置
+# 进度推送（可选）：在 195 的 ~/.lora_notify.env 里配置，支持三种通道（可同时配多个）
+#   TG_BOT_TOKEN=123456:ABC...     # Telegram 机器人 token（BotFather 创建）
+#   TG_CHAT_ID=123456789           # 你与机器人的会话 chat_id
 #   WEBHOOK_URL=https://...        # 企业微信/钉钉群机器人 webhook
 #   WEBHOOK_STYLE=wecom            # wecom(企微/钉钉同格式) 或 feishu
 [ -f ~/.lora_notify.env ] && . ~/.lora_notify.env
@@ -35,15 +37,21 @@ DEADLINE_HOUR=6           # 早上 6 点后不再开新任务
 log() { echo "[$(date '+%F %T')] $*"; }
 
 notify() {
-  [ -n "${WEBHOOK_URL:-}" ] || return 0
   local msg="[LoRA夜训] $*"
-  local payload
-  if [ "${WEBHOOK_STYLE:-wecom}" = "feishu" ]; then
-    payload=$(printf '{"msg_type":"text","content":{"text":"%s"}}' "$msg")
-  else
-    payload=$(printf '{"msgtype":"text","text":{"content":"%s"}}' "$msg")
+  if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_CHAT_ID:-}" ]; then
+    curl -s -m 15 "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+      --data-urlencode "chat_id=${TG_CHAT_ID}" \
+      --data-urlencode "text=${msg}" >/dev/null 2>&1 || true
   fi
-  curl -s -m 15 -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" >/dev/null 2>&1 || true
+  if [ -n "${WEBHOOK_URL:-}" ]; then
+    local payload
+    if [ "${WEBHOOK_STYLE:-wecom}" = "feishu" ]; then
+      payload=$(printf '{"msg_type":"text","content":{"text":"%s"}}' "$msg")
+    else
+      payload=$(printf '{"msgtype":"text","text":{"content":"%s"}}' "$msg")
+    fi
+    curl -s -m 15 -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" >/dev/null 2>&1 || true
+  fi
 }
 
 gpu_used_mb() {
