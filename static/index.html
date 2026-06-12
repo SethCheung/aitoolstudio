@@ -772,6 +772,15 @@
                     </svg>
                     <span class="nav-text">ComfyTV</span>
                 </div>
+                <div class="nav-item" onclick="switchUI(this, 'canvaspro')">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+                        <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+                        <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+                        <path d="M6.5 14v3.5H10M6.5 21v-3.5"></path>
+                    </svg>
+                    <span class="nav-text">CanvasPro 评估</span>
+                </div>
             </nav>
 
         </aside>
@@ -786,6 +795,8 @@
             <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.06.12.5"></iframe>
             <iframe id="frame-canvas" data-src="/static/canvas.html?v=2026.06.12.5"></iframe>
             <iframe id="frame-comfytv" data-src="http://192.168.1.195:8188/?v=2026.06.12.5"></iframe>
+            <!-- AI-CanvasPro 第三方画布评估卡（容器跑在 60 的 8777 端口，data-src 由脚本按当前主机名拼出） -->
+            <iframe id="frame-canvaspro" data-src=""></iframe>
             <iframe id="frame-api-settings" data-src="/static/setting/api-settings.html?v=2026.06.12.5"></iframe>
             <iframe id="frame-comfyui-settings" data-src="/static/setting/comfyui-settings.html?v=2026.06.12.5"></iframe>
 
@@ -856,6 +867,12 @@
                 if (worker) btn.title = worker.label;
             });
         }
+
+        // AI-CanvasPro 评估卡：服务跑在本机 8777，按当前主机名拼地址（不写死 IP）
+        (function initCanvasProFrame() {
+            const f = document.getElementById('frame-canvaspro');
+            if (f) f.dataset.src = location.protocol + '//' + location.hostname + ':8777/';
+        })();
 
         function applyComfyTVWorker(workerId, shouldReload) {
             const nextWorkerId = COMFYTV_WORKERS[workerId] ? workerId : DEFAULT_COMFYTV_WORKER;

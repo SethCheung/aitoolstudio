@@ -127,3 +127,10 @@
 - 旧壳子菜单修复：选中子项后保持展开（原先自动收起），切换顶级项才收起。
 - 自此部署由 Claude 通过 SSH 全自动执行（rsync + docker restart + 验证），发版前自动顶 VERSION。
 - 注意：195 的 ComfyUI 是 0.19.2，197/249 是 0.21.1——建议运维找时间拉齐版本，避免同 workflow 跨机差异。
+
+## 第九批：AI-CanvasPro 评估功能卡（2026-06-12 夜）
+
+- 第三方画布 AI-CanvasPro（B 站阿硕，Source Available 双许可）部署为**评估卡**：代码在 60 盘 `/vol3/@team/SJM-MediaFile/AI-Tool-Studio/AI-CanvasPro`，容器 `ai-canvaspro-eval`（python:3.11-slim，端口 8777，AIC_LAN_MODE=1 + AIC_ALLOWED_ORIGINS 配置完毕，restart unless-stopped）。
+- 旧壳侧边栏 ComfyTV 下方新增「CanvasPro 评估」卡（iframe 懒加载，地址按主机名拼 :8777）。
+- ⚠️ License 注意：其条款明确「公司/团队使用、企业内部生产系统」需作者书面商业授权；当前仅限**评估用途**。若评估后决定团队正式使用，需联系作者（bilibili 阿硕）购买授权。
+- 它的项目数据存在容器内 /app/user/（即 60 盘 AI-CanvasPro/user/），与平台数据完全隔离。
