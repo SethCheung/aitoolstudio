@@ -98,6 +98,7 @@ train_job() {
   RESOLUTION=1024
   SWAP_BLOCKS=0
   SEED=42
+  NUM_REPEATS=1
   [ -f "$job_dir/job.env" ] && . "$job_dir/job.env"
 
   touch "$job_dir/.running"
@@ -114,7 +115,7 @@ bucket_no_upscale = false
 [[datasets]]
 image_directory = "$job_dir/dataset"
 cache_directory = "$work/cache"
-num_repeats = 1
+num_repeats = $NUM_REPEATS
 EOF
 
   local swap_args=()
