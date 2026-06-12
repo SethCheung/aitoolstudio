@@ -10585,6 +10585,86 @@ def import_workflow_from_history(payload: ComfyHistoryImportRequest, request: Re
         "image_count": summary["image_count"],
     }
 
+# ===== AI-CanvasPro 本地桥（APIMart 兼容协议）=====
+# 在 CanvasPro 的 APIMart provider 里把 apiUrl 配成 http://<本机>:3000/bridge/apimart、
+# apiKey 配成 AIC_BRIDGE_KEY，它的图像节点即可在本地 ComfyUI worker 上出图。
+AIC_BRIDGE_KEY = (os.getenv("AIC_BRIDGE_KEY", "aitool-local") or "").strip()
+AIC_BRIDGE_DEFAULT_WORKFLOW = (os.getenv("AIC_BRIDGE_DEFAULT_WORKFLOW", "Z-Image.json") or "").strip()
+
+def _bridge_auth_ok(request: Request) -> bool:
+    raw = request.headers.get("Authorization", "")
+    key = re.sub(r"^Bearer\s+", "", raw, flags=re.IGNORECASE).strip()
+    return bool(AIC_BRIDGE_KEY) and key == AIC_BRIDGE_KEY
+
+def _bridge_error(status: int, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": {"message": message, "type": "invalid_request_error"}})
+
+def _bridge_resolve_workflow(model: str) -> str:
+    published = workflow_list_items(public_only=True)
+    by_name = {w["name"]: w for w in published}
+    if model in by_name:
+        return model
+    for w in published:
+        if w.get("title") == model:
+            return w["name"]
+    if AIC_BRIDGE_DEFAULT_WORKFLOW in by_name:
+        return AIC_BRIDGE_DEFAULT_WORKFLOW
+    return published[0]["name"] if published else ""
+
+@app.get("/bridge/apimart/v1/models")
+def bridge_apimart_models(request: Request):
+    if not _bridge_auth_ok(request):
+        return _bridge_error(401, "无效的本地桥 API Key")
+    data = [
+        {"id": w["name"], "object": "model", "owned_by": "aitoolstudio-local", "name": w.get("title") or w["name"]}
+        for w in workflow_list_items(public_only=True)
+    ]
+    return {"object": "list", "data": data}
+
+@app.get("/bridge/apimart/v1/balance")
+def bridge_apimart_balance(request: Request):
+    # 本地算力不计费，返回大额余额避免前端弹「余额不足」
+    return {"code": 0, "balance": 999999, "data": {"balance": 999999, "currency": "LOCAL"}}
+
+@app.post("/bridge/apimart/v1/images/generations")
+def bridge_apimart_images(payload: Dict[str, Any], request: Request):
+    if not _bridge_auth_ok(request):
+        return _bridge_error(401, "无效的本地桥 API Key")
+    prompt = str(payload.get("prompt") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    name = _bridge_resolve_workflow(model)
+    if not name:
+        return _bridge_error(400, "平台没有已发布的工作流，请先在 ComfyUI 工作台发布")
+    cfg = load_workflow_config(name)
+    params: Dict[str, Dict[str, Any]] = {}
+    prompt_field = None
+    for f in cfg.fields:
+        if not f.enabled or f.hidden or f.type not in ("text", "textarea"):
+            continue
+        haystack = f"{f.input} {f.name}".lower()
+        if "prompt" in haystack or "提示" in haystack or f.required:
+            prompt_field = f
+            break
+    if prompt_field is None:
+        prompt_field = next((f for f in cfg.fields if f.enabled and f.type in ("text", "textarea")), None)
+    if prompt_field and prompt and prompt_field.node and prompt_field.input:
+        params.setdefault(prompt_field.node, {})[prompt_field.input] = prompt
+    req_g = GenerateRequest(
+        prompt="",
+        workflow_json=name,
+        params=params,
+        type="canvaspro-bridge",
+        client_id=str(uuid.uuid4()),
+    )
+    result = run_comfy_generate(req_g, owner_key="canvaspro-bridge")
+    record_workflow_last_test(name, {"username": "canvaspro-bridge"}, result, {prompt_field.id if prompt_field else "prompt": prompt})
+    host = request.headers.get("host") or "192.168.1.60:3000"
+    base = f"{request.url.scheme}://{host}"
+    urls = [(base + u) if str(u).startswith("/") else str(u) for u in (result.get("images") or [])]
+    if not urls:
+        return _bridge_error(502, "工作流执行成功但没有图像输出")
+    return {"created": now_ts(), "data": [{"url": u} for u in urls]}
+
 @app.get("/api/comfyui/workbench-workflows")
 def get_comfyui_workbench_workflows(request: Request):
     """ComfyTV 工作流面板：全部 workflow（含未启用草稿）+ 各 worker 节点兼容性 + 最近跑通记录。"""

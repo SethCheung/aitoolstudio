@@ -134,3 +134,12 @@
 - 旧壳侧边栏 ComfyTV 下方新增「CanvasPro 评估」卡（iframe 懒加载，地址按主机名拼 :8777）。
 - ⚠️ License 注意：其条款明确「公司/团队使用、企业内部生产系统」需作者书面商业授权；当前仅限**评估用途**。若评估后决定团队正式使用，需联系作者（bilibili 阿硕）购买授权。
 - 它的项目数据存在容器内 /app/user/（即 60 盘 AI-CanvasPro/user/），与平台数据完全隔离。
+
+## 第十批：CanvasPro 本地生成桥（2026-06-12 夜，Claude 自动部署）
+
+- main.py 新增 **APIMart 兼容桥** `/bridge/apimart/v1/*`（models / images/generations / balance）：
+  - 鉴权：Bearer Key（env `AIC_BRIDGE_KEY`，默认 aitool-local）
+  - `models` 列出平台全部已发布工作流；`images/generations` 把 prompt 注入工作流的提示词字段后在本地 worker 执行，返回绝对 URL 的图片；未知模型名回退 env `AIC_BRIDGE_DEFAULT_WORKFLOW`（默认 Z-Image.json）
+  - 运行成功同样写入 last_test（by canvaspro-bridge）
+- CanvasPro 已配置完毕：APIMart apiKey=aitool-local，apiUrl 已直写其 user/config.json 指向 `http://192.168.1.60:3000/bridge/apimart`
+- 协议层端到端验证：curl 模拟其请求 31 秒返回本地生成的 2 张图
