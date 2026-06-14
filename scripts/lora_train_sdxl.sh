@@ -12,7 +12,8 @@ ACC=~/musubi_env/bin/accelerate
 WORK=~/lora_work/ria_sdxl
 LORA_OUT=$NAS/models/loras/digital_humans
 
-CKPT=$NAS/models/checkpoints/juggernautXL_version6Rundiffusion.safetensors
+CKPT=${CKPT:-$NAS/models/checkpoints/juggernautXL_version6Rundiffusion.safetensors}
+NAME=${NAME:-ria_sdxl}
 VAE=$NAS/models/vae/sdxl_vae.safetensors
 DATA=$NAS/training/jobs/ria_sdxl
 
@@ -33,6 +34,6 @@ cd "$SD" || exit 1
   --mixed_precision bf16 --save_precision bf16 \
   --sdpa --gradient_checkpointing --cache_latents --cache_latents_to_disk \
   --no_half_vae --seed 42 \
-  --output_dir "$WORK/out" --output_name ria_sdxl \
-  && cp "$WORK/out/ria_sdxl"*.safetensors "$LORA_OUT/" \
-  && echo "[sdxl] ria_sdxl 完成，LoRA 入库 $LORA_OUT/"
+  --output_dir "$WORK/out" --output_name "$NAME" \
+  && cp "$WORK/out/$NAME"*.safetensors "$LORA_OUT/" \
+  && echo "[sdxl] $NAME 完成，LoRA 入库 $LORA_OUT/"
