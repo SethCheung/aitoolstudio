@@ -92,6 +92,7 @@ train_job() {
 
   # 默认参数，可被 job.env 覆盖
   NETWORK_DIM=16
+  NETWORK_ALPHA=""        # 留空则取 = NETWORK_DIM（缩放=alpha/dim=1.0，正常强度）
   EPOCHS=16
   SAVE_EVERY=4
   LR=1e-4
@@ -99,7 +100,11 @@ train_job() {
   SWAP_BLOCKS=0
   SEED=42
   NUM_REPEATS=1
+  FLOW_SHIFT=2.2          # Qwen-Image 训练 timestep shift
   [ -f "$job_dir/job.env" ] && . "$job_dir/job.env"
+  # 关键修复：musubi 未传 --network_alpha 时默认 alpha=1.0，dim=32 时缩放仅 1/32≈0.03，
+  # LoRA 学习几乎不生效（v1~v3 身份绑不住的元凶之一）。显式按 dim 设 alpha。
+  [ -z "$NETWORK_ALPHA" ] && NETWORK_ALPHA="$NETWORK_DIM"
 
   touch "$job_dir/.running"
   mkdir -p "$work/cache" "$work/out" "$LORA_OUT_DIR"
@@ -127,7 +132,7 @@ EOF
   [ "$SWAP_BLOCKS" -gt 0 ] && swap_args=(--blocks_to_swap "$SWAP_BLOCKS")
 
   {
-    log "=== 任务 $name 开始 (dim=$NETWORK_DIM epochs=$EPOCHS lr=$LR res=$RESOLUTION) ==="
+    log "=== 任务 $name 开始 (dim=$NETWORK_DIM alpha=$NETWORK_ALPHA epochs=$EPOCHS lr=$LR shift=$FLOW_SHIFT res=$RESOLUTION) ==="
     cd "$MUSUBI" &&
     $PY src/musubi_tuner/qwen_image_cache_latents.py \
       --dataset_config "$work/dataset.toml" --vae "$VAE" &&
@@ -137,10 +142,10 @@ EOF
       --dit "$DIT" --vae "$VAE" --text_encoder "$TE" \
       --dataset_config "$work/dataset.toml" \
       --sdpa --mixed_precision bf16 --fp8_base --fp8_scaled --fp8_vl \
-      --timestep_sampling shift --discrete_flow_shift 2.2 \
+      --timestep_sampling shift --discrete_flow_shift "$FLOW_SHIFT" \
       --optimizer_type adamw8bit --learning_rate "$LR" \
       --gradient_checkpointing "${swap_args[@]}" \
-      --network_module networks.lora_qwen_image --network_dim "$NETWORK_DIM" \
+      --network_module networks.lora_qwen_image --network_dim "$NETWORK_DIM" --network_alpha "$NETWORK_ALPHA" \
       --max_train_epochs "$EPOCHS" --save_every_n_epochs "$SAVE_EVERY" \
       --seed "$SEED" \
       --output_dir "$work/out" --output_name "$name"
