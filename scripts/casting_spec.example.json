@@ -1,0 +1,12 @@
+{
+  "template": "studio portrait photo of a {age} chinese woman, {face}, {style}, looking at camera, plain light gray background, soft studio lighting, photorealistic, high detail skin texture",
+  "axes": {
+    "age": ["22 year old", "26 year old"],
+    "face": ["oval face, almond eyes, natural makeup", "round face, gentle smile, light makeup"],
+    "style": ["fashion model look, elegant", "girl next door look, approachable"]
+  },
+  "negative": "lowres, bad anatomy, bad hands, blurry, watermark, text, cartoon, anime",
+  "width": 1140,
+  "height": 1472,
+  "steps": 20
+}

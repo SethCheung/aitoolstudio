@@ -16,15 +16,15 @@
             } catch (e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=2026.05.28.2"></script>
-    <script src="/static/js/theme.js?v=2026.05.28.2"></script>
-    <script src="/static/js/auth.js?v=2026.05.28.2"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.06.12.5"></script>
+    <script src="/static/js/theme.js?v=2026.06.12.5"></script>
+    <script src="/static/js/auth.js?v=2026.06.12.5"></script>
     <script>
         if (window.StudioAuth) {
             StudioAuth.guard({ requireAuth: true, redirect: true });
         }
     </script>
-    <link rel="stylesheet" href="/static/css/comfyui-workbench.css?v=2026.05.28.2">
+    <link rel="stylesheet" href="/static/css/comfyui-workbench.css?v=2026.06.12.5">
 </head>
 <body>
     <div class="workbench-shell">
@@ -35,9 +35,13 @@
                 <p id="pageSummary">正在读取 worker 状态...</p>
             </div>
             <div class="topbar-actions">
+                <nav class="view-tabs" id="viewTabs">
+                    <button id="tabWorkers" class="view-tab active" type="button">Worker 状态</button>
+                    <button id="tabWorkflows" class="view-tab hidden" type="button">工作流试跑</button>
+                </nav>
                 <button id="backBtn" class="tool-btn" type="button">
                     <i data-lucide="arrow-left" class="icon-16"></i>
-                    <span>项目主页</span>
+                    <span>返回主页</span>
                 </button>
                 <button id="refreshBtn" class="tool-btn" type="button">
                     <i data-lucide="refresh-cw" class="icon-16"></i>
@@ -54,27 +58,53 @@
         </header>
 
         <main class="workbench-main">
-            <section class="status-strip">
-                <div class="metric">
-                    <span>在线</span>
-                    <strong id="onlineCount">0</strong>
-                </div>
-                <div class="metric">
-                    <span>总数</span>
-                    <strong id="totalCount">0</strong>
-                </div>
-                <div class="metric">
-                    <span>队列</span>
-                    <strong id="queueCount">0</strong>
-                </div>
-                <div class="metric wide">
-                    <span>更新时间</span>
-                    <strong id="updatedAt">-</strong>
-                </div>
+            <section id="workerView">
+                <section class="status-strip">
+                    <div class="metric">
+                        <span>在线</span>
+                        <strong id="onlineCount">0</strong>
+                    </div>
+                    <div class="metric">
+                        <span>总数</span>
+                        <strong id="totalCount">0</strong>
+                    </div>
+                    <div class="metric">
+                        <span>队列</span>
+                        <strong id="queueCount">0</strong>
+                    </div>
+                    <div class="metric wide">
+                        <span>更新时间</span>
+                        <strong id="updatedAt">-</strong>
+                    </div>
+                </section>
+
+                <section id="messageBar" class="message-bar">加载中...</section>
+                <section id="workerList" class="worker-list"></section>
             </section>
 
-            <section id="messageBar" class="message-bar">加载中...</section>
-            <section id="workerList" class="worker-list"></section>
+            <section id="workflowView" class="hidden">
+                <section id="wfMessageBar" class="message-bar">加载中...</section>
+                <div class="wf-layout">
+                    <aside class="wf-list-pane">
+                        <button id="importFromComfyBtn" class="primary-btn" type="button">
+                            <i data-lucide="download" class="icon-14"></i>
+                            <span>从 ComfyUI 跑通记录导入</span>
+                        </button>
+                        <div class="wf-filters" id="wfFilters">
+                            <button class="wf-chip active" data-filter="all" type="button">全部</button>
+                            <button class="wf-chip" data-filter="published" type="button">已发布</button>
+                            <button class="wf-chip" data-filter="tested" type="button">已跑通</button>
+                            <button class="wf-chip" data-filter="draft" type="button">待试跑</button>
+                            <button class="wf-chip" data-filter="missing" type="button">缺依赖</button>
+                        </div>
+                        <input id="wfSearch" class="wf-search" type="text" placeholder="搜索工作流...">
+                        <div id="wfList" class="wf-list"></div>
+                    </aside>
+                    <section class="wf-detail-pane" id="wfDetail">
+                        <div class="wf-empty">在左侧选择一个工作流开始试跑</div>
+                    </section>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -123,6 +153,30 @@
         </article>
     </template>
 
-    <script src="/static/js/comfyui-workbench.js?v=2026.05.28.2"></script>
+    <div id="importDialog" class="wf-dialog-mask hidden">
+        <div class="wf-dialog wf-dialog-wide">
+            <h3>从 ComfyUI 跑通记录导入</h3>
+            <p class="wf-dialog-sub">在 worker 的 ComfyUI（ComfyTV）里跑通工作流后，这里直接选那次运行导入平台；导入自带 API 格式与「已跑通」记录，确认参数后即可发布到画布。</p>
+            <div class="wf-worker-select" id="importWorkerSelect"></div>
+            <div id="importHistoryList" class="import-history-list"></div>
+            <div class="wf-dialog-actions">
+                <button id="importCancelBtn" class="tool-btn" type="button">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="publishDialog" class="wf-dialog-mask hidden">
+        <div class="wf-dialog">
+            <h3 id="publishTitle">发布到画布</h3>
+            <p class="wf-dialog-sub">勾选要暴露给普通用户的参数；未勾选的字段将隐藏并使用默认值。</p>
+            <div id="publishFields" class="publish-fields"></div>
+            <div class="wf-dialog-actions">
+                <button id="publishCancelBtn" class="tool-btn" type="button">取消</button>
+                <button id="publishConfirmBtn" class="primary-btn" type="button">确认发布</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/comfyui-workbench.js?v=2026.06.12.5"></script>
 </body>
 </html>

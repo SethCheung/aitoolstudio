@@ -16,15 +16,15 @@
             } catch (e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=2026.05.28.2"></script>
-    <script src="/static/js/theme.js?v=2026.05.28.2"></script>
-    <script src="/static/js/auth.js?v=2026.05.28.2"></script>
+    <script src="/static/vendor/js/lucide.js?v=2026.06.12.5"></script>
+    <script src="/static/js/theme.js?v=2026.06.12.5"></script>
+    <script src="/static/js/auth.js?v=2026.06.12.5"></script>
     <script>
         if (window.StudioAuth) {
             StudioAuth.guard({ requireAuth: true, redirect: true });
         }
     </script>
-    <link rel="stylesheet" href="/static/css/project-home.css?v=2026.05.28.2">
+    <link rel="stylesheet" href="/static/css/project-home.css?v=2026.06.12.5">
 </head>
 <body>
     <div class="home-shell">
@@ -55,10 +55,7 @@
                     <i data-lucide="plus" class="icon-16"></i>
                     <span>新建项目</span>
                 </button>
-                <button id="newSmartBtn" class="smart-btn" type="button">
-                    <i data-lucide="sparkles" class="icon-16"></i>
-                    <span>新建智能项目</span>
-                </button>
+                <!-- 智能画布已下架（2026-06-12）：统一使用经典 xy-canvas -->
                 <button id="comfyWorkbenchBtn" class="tool-btn" type="button">
                     <i data-lucide="monitor-cog" class="icon-16"></i>
                     <span>ComfyUI 工作台</span>
@@ -158,6 +155,6 @@
         </section>
     </div>
 
-    <script src="/static/js/project-home.js?v=2026.05.28.2"></script>
+    <script src="/static/js/project-home.js?v=2026.06.12.5"></script>
 </body>
 </html>

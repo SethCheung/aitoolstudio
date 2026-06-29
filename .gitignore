@@ -39,3 +39,6 @@ dist/
 build/
 .cache/
 node_modules/
+
+# 60 生产代码同步副本（基线参考，不入库）
+60-live/

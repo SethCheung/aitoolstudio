@@ -70,5 +70,18 @@
       "hidden": false
     }
   ],
-  "mini_cards": {}
+  "mini_cards": {},
+  "last_test": {
+    "ok": true,
+    "at": 1781244176,
+    "by": "admin",
+    "backend": "192.168.1.249:8188",
+    "output_count": 1,
+    "fields": {
+      "prompt": "a small red apple on a white table, studio light",
+      "negative": "low quality, blurry",
+      "seed": 123456,
+      "steps": 4
+    }
+  }
 }
