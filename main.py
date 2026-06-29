@@ -20,7 +20,7 @@ import hmac
 import requests
 import zipfile
 import mimetypes
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from threading import Lock, Thread
 import httpx
 from PIL import Image
@@ -10592,6 +10592,130 @@ def import_workflow_from_history(payload: ComfyHistoryImportRequest, request: Re
 # apiKey 配成 AIC_BRIDGE_KEY，它的图像节点即可在本地 ComfyUI worker 上出图。
 AIC_BRIDGE_KEY = (os.getenv("AIC_BRIDGE_KEY", "aitool-local") or "").strip()
 AIC_BRIDGE_DEFAULT_WORKFLOW = (os.getenv("AIC_BRIDGE_DEFAULT_WORKFLOW", "Z-Image.json") or "").strip()
+AIC_BRIDGE_WORKFLOWS = tuple(
+    item.strip()
+    for item in re.split(r"[,，]", os.getenv("AIC_BRIDGE_WORKFLOWS", "") or "")
+    if item.strip()
+)
+BRIDGE_MODEL_NAME_PREFIX = "本地 ComfyUI · "
+BRIDGE_NO_WORKFLOWS_MESSAGE = (
+    "没有可供 AI-CanvasPro 调用的本地 ComfyUI 工作流：请先在平台后台启用并发布 workflow，"
+    "或配置 AIC_BRIDGE_WORKFLOWS 指定 workflow name/title。"
+)
+BRIDGE_SUPPORTED_MEDIA_FIELD_TYPES = {"image"}
+BRIDGE_LTX_VIDEO_WORKFLOW_NAMES = {
+    "LTXDirectorv2-API.json",
+    "ltx_ltx-t2v-lora.json",
+    "ltx_ltx-i2v.json",
+    "ltx_图生视频-ltx2.3.json",
+    "ltx_1080p_v4.json",
+    "ltx_1080p_v5_seedvr2.json",
+    "ltx_studio_quality.json",
+    "ltx_视频超分-ltx-twostage.json",
+    "ltx_音视频-ltx-av.json",
+}
+BRIDGE_LTX_VIDEO_TITLES = {
+    "LTXDirectorv2-API.json": "本地 LTX · 智能画布 Director v2",
+    "ltx_ltx-t2v-lora.json": "本地 LTX · 文生视频 LoRA",
+    "ltx_ltx-i2v.json": "本地 LTX · 图生视频",
+    "ltx_图生视频-ltx2.3.json": "本地 LTX · 图生视频 2.3",
+    "ltx_1080p_v4.json": "本地 LTX · 1080P",
+    "ltx_1080p_v5_seedvr2.json": "本地 LTX · 1080P SeedVR2",
+    "ltx_studio_quality.json": "本地 LTX · Studio Quality",
+    "ltx_视频超分-ltx-twostage.json": "本地 LTX · 两段超分",
+    "ltx_音视频-ltx-av.json": "本地 LTX · 音视频",
+}
+BRIDGE_LTX_LORA_DIR = "LTX-Video/creative-lab"
+BRIDGE_LTX_LORA_PRESETS = {
+    "day-to-night": {
+        "label": "Day to Night",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-day-to-night-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+    "colorization": {
+        "label": "Colorization",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-colorization-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+    "decompression": {
+        "label": "Decompression",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-decompression-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+    "deblur": {
+        "label": "Deblur",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-deblur-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+    "cross-eyed": {
+        "label": "Cross Eyed",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-cross-eyed-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "text-to-video",
+    },
+    "water-simulation": {
+        "label": "Water Simulation",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-water-simulation-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+    "ingredients": {
+        "label": "Ingredients",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+    "instant-shave": {
+        "label": "Instant Shave",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-instant-shave-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+    "in-outpainting": {
+        "label": "In/Outpainting",
+        "lora_name": f"{BRIDGE_LTX_LORA_DIR}/ltx-2.3-22b-ic-lora-in-outpainting-0.9.safetensors",
+        "strength": 0.9,
+        "mode": "video-to-video",
+    },
+}
+BRIDGE_LTX_LORA_ALIASES = {
+    "day_to_night": "day-to-night",
+    "daytonight": "day-to-night",
+    "colorize": "colorization",
+    "colourization": "colorization",
+    "decompress": "decompression",
+    "water": "water-simulation",
+    "water_simulation": "water-simulation",
+    "beard-removal": "instant-shave",
+    "beard_removal": "instant-shave",
+    "instant_shave": "instant-shave",
+    "shave": "instant-shave",
+    "inpainting": "in-outpainting",
+    "outpainting": "in-outpainting",
+    "in_outpainting": "in-outpainting",
+    "in-outpaint": "in-outpainting",
+}
+BRIDGE_MEDIA_PAYLOAD_KEYS = {
+    "image": (
+        "image_urls", "image_url", "images", "input_images", "input_image_urls",
+        "inputImages", "imageUrls", "reference_images", "referenceImages",
+        "first_frame_image", "last_frame_image",
+    ),
+    "video": (
+        "video_urls", "video_url", "videos", "input_videos", "input_video_urls",
+        "inputVideos", "videoUrls", "reference_videos", "referenceVideos",
+        "source_video", "sourceVideo", "originalVideo",
+    ),
+    "audio": (
+        "audio_urls", "audio_url", "audios", "input_audios", "input_audio_urls",
+        "inputAudios", "audioUrls", "reference_audios", "referenceAudios",
+        "source_audio", "sourceAudio",
+    ),
+}
 
 def _bridge_auth_ok(request: Request) -> bool:
     raw = request.headers.get("Authorization", "")
@@ -10601,27 +10725,648 @@ def _bridge_auth_ok(request: Request) -> bool:
 def _bridge_error(status: int, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"message": message, "type": "invalid_request_error"}})
 
-def _bridge_resolve_workflow(model: str) -> str:
-    published = workflow_list_items(public_only=True)
-    by_name = {w["name"]: w for w in published}
-    if model in by_name:
-        return model
-    for w in published:
-        if w.get("title") == model:
-            return w["name"]
-    if AIC_BRIDGE_DEFAULT_WORKFLOW in by_name:
-        return AIC_BRIDGE_DEFAULT_WORKFLOW
-    return published[0]["name"] if published else ""
+def _bridge_display_name(title: str) -> str:
+    clean_title = str(title or "").strip() or "未命名工作流"
+    return clean_title if clean_title.startswith(BRIDGE_MODEL_NAME_PREFIX) else f"{BRIDGE_MODEL_NAME_PREFIX}{clean_title}"
+
+def _bridge_prompt_field(cfg: WorkflowConfig) -> Optional[WorkflowField]:
+    public_text_fields = [
+        f for f in (cfg.fields or [])
+        if workflow_field_is_public(f) and str(f.type or "").lower() in {"text", "textarea"}
+    ]
+    if not public_text_fields:
+        return None
+    def prompt_haystack(field: WorkflowField) -> str:
+        return f"{field.id} {field.input} {field.name}".lower()
+    for f in public_text_fields:
+        haystack = prompt_haystack(f)
+        if ("prompt" in haystack or "提示" in haystack) and not any(mark in haystack for mark in ("negative", "反向", "负面")):
+            return f
+    for f in public_text_fields:
+        haystack = prompt_haystack(f)
+        if "prompt" in haystack or "提示" in haystack:
+            return f
+    return next((f for f in public_text_fields if f.required), public_text_fields[0])
+
+def _bridge_field_is_media_like(field: WorkflowField) -> bool:
+    field_type = str(field.type or "").lower()
+    if field_type in {"image", "video", "audio", "file"}:
+        return True
+    haystack = f"{field.id} {field.input} {field.name}".lower()
+    return bool(re.search(r"(^|[\s_:\-])(image|img|mask|video|audio|file|filename|upload)([\s_:\-]|$)", haystack))
+
+def _bridge_public_config_fields(cfg: WorkflowConfig) -> List[WorkflowField]:
+    return [f for f in (cfg.fields or []) if workflow_field_is_public(f)]
+
+def _bridge_media_fields(cfg: WorkflowConfig) -> List[WorkflowField]:
+    return [f for f in _bridge_public_config_fields(cfg) if _bridge_field_is_media_like(f)]
+
+def _bridge_image_fields(cfg: WorkflowConfig) -> List[WorkflowField]:
+    return [f for f in _bridge_media_fields(cfg) if str(f.type or "").lower() in BRIDGE_SUPPORTED_MEDIA_FIELD_TYPES]
+
+def _bridge_required_unsupported_media_fields(cfg: WorkflowConfig) -> List[WorkflowField]:
+    return [
+        f for f in _bridge_media_fields(cfg)
+        if f.required and str(f.type or "").lower() not in BRIDGE_SUPPORTED_MEDIA_FIELD_TYPES
+    ]
+
+def _bridge_workflow_allowed(name: str, title: str) -> bool:
+    if not AIC_BRIDGE_WORKFLOWS:
+        return True
+    aliases = {str(name or "").strip(), str(title or "").strip()}
+    return any(item in aliases for item in AIC_BRIDGE_WORKFLOWS)
+
+def _bridge_workflow_supported(cfg: WorkflowConfig) -> bool:
+    return not _bridge_required_unsupported_media_fields(cfg)
+
+def _bridge_safe_workflows() -> List[Dict[str, Any]]:
+    items = []
+    for w in workflow_list_items(public_only=True):
+        name = str(w.get("name") or "").strip()
+        if not name:
+            continue
+        if os.path.basename(name) in BRIDGE_LTX_VIDEO_WORKFLOW_NAMES:
+            continue
+        cfg = load_workflow_config(name)
+        title = str(cfg.title or w.get("title") or workflow_default_title(name)).strip()
+        if not _bridge_workflow_allowed(name, title):
+            continue
+        prompt_field = _bridge_prompt_field(cfg)
+        if not _bridge_workflow_supported(cfg):
+            continue
+        image_fields = _bridge_image_fields(cfg)
+        item = dict(w)
+        item["title"] = title
+        item["display_name"] = _bridge_display_name(title)
+        item["prompt_field_id"] = prompt_field.id if prompt_field else ""
+        item["image_field_count"] = len(image_fields)
+        item["required_image_count"] = len([f for f in image_fields if f.required])
+        items.append(item)
+    return items
+
+def _bridge_model_aliases(w: Dict[str, Any]) -> set:
+    title = str(w.get("title") or workflow_default_title(str(w.get("name") or ""))).strip()
+    display_name = str(w.get("display_name") or _bridge_display_name(title)).strip()
+    return {item for item in {str(w.get("name") or "").strip(), title, display_name} if item}
+
+def _bridge_resolve_workflow(model: str, safe_workflows: Optional[List[Dict[str, Any]]] = None) -> str:
+    safe = safe_workflows if safe_workflows is not None else _bridge_safe_workflows()
+    if not safe:
+        return ""
+    requested = str(model or "").strip()
+    if requested:
+        for w in safe:
+            if requested in _bridge_model_aliases(w):
+                return str(w["name"])
+        return ""
+    if AIC_BRIDGE_DEFAULT_WORKFLOW:
+        for w in safe:
+            if AIC_BRIDGE_DEFAULT_WORKFLOW in _bridge_model_aliases(w):
+                return str(w["name"])
+    return str(safe[0]["name"])
+
+def _bridge_response_base_url(request: Request) -> str:
+    host = request.headers.get("host") or "192.168.1.60:3000"
+    return f"{request.url.scheme}://{host}"
+
+def _bridge_scalar_payload_value(payload: Dict[str, Any], field: WorkflowField) -> Any:
+    keys = [
+        str(field.id or "").strip(),
+        str(field.input or "").strip(),
+        str(field.name or "").strip(),
+    ]
+    containers = [payload]
+    for container_key in ("fields", "params", "parameters"):
+        container = payload.get(container_key)
+        if isinstance(container, dict):
+            containers.append(container)
+    for container in containers:
+        for key in keys:
+            if key and key in container:
+                return container.get(key)
+    return None
+
+def _bridge_coerce_field_value(field: WorkflowField, value: Any) -> Any:
+    if field.type in ("number", "slider"):
+        try:
+            return float(value) if (field.step and field.step < 1) else int(float(value))
+        except Exception:
+            return value
+    if field.type == "boolean":
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on", "y"}
+        return bool(value)
+    if field.type == "dropdown" and isinstance(value, str):
+        s = value.strip()
+        try:
+            if s and ('.' in s or 'e' in s.lower()):
+                return float(s)
+            if s and s.lstrip('-').isdigit():
+                return int(s)
+        except (ValueError, TypeError):
+            return value
+    return value
+
+def _bridge_collect_payload_media(payload: Dict[str, Any], kind: str = "image") -> List[Any]:
+    values: List[Any] = []
+    keys = BRIDGE_MEDIA_PAYLOAD_KEYS.get(kind, BRIDGE_MEDIA_PAYLOAD_KEYS["image"])
+    def push(value: Any):
+        if value is None or value == "":
+            return
+        if isinstance(value, list):
+            for item in value:
+                push(item)
+            return
+        if isinstance(value, dict):
+            for key in (
+                "url", "src", "path", "cdnUrl", "download_url",
+                "image_url", "imageUrl", "video_url", "videoUrl", "audio_url", "audioUrl",
+            ):
+                if value.get(key):
+                    values.append(value.get(key))
+                    return
+            return
+        values.append(value)
+    for key in keys:
+        push(payload.get(key))
+    return values
+
+def _bridge_collect_payload_images(payload: Dict[str, Any]) -> List[Any]:
+    return _bridge_collect_payload_media(payload, "image")
+
+def _bridge_collect_payload_videos(payload: Dict[str, Any]) -> List[Any]:
+    return _bridge_collect_payload_media(payload, "video")
+
+def _bridge_collect_payload_audios(payload: Dict[str, Any]) -> List[Any]:
+    return _bridge_collect_payload_media(payload, "audio")
+
+def _bridge_filename_from_local_view(value: str) -> str:
+    parsed = urllib.parse.urlparse(value)
+    if parsed.path != "/api/view":
+        return ""
+    query = urllib.parse.parse_qs(parsed.query or "")
+    filename = (query.get("filename") or [""])[0]
+    return os.path.basename(urllib.parse.unquote(filename))
+
+def _bridge_upload_comfy_input_bytes(content: bytes, filename: str, content_type: str = "image/png", label: str = "文件") -> str:
+    if not content:
+        raise HTTPException(status_code=400, detail=f"上传{label}为空")
+    safe_base = os.path.basename(filename or "").replace('"', "_").strip()
+    ext = os.path.splitext(safe_base)[1].lower()
+    if not ext:
+        ext = mimetypes.guess_extension(content_type or "image/png") or ".png"
+    safe_name = f"canvaspro_ref_{uuid.uuid4().hex[:12]}{ext}"
+    success_count = 0
+    last_name = safe_name
+    for addr in COMFYUI_INSTANCES:
+        try:
+            files_data = {'image': (safe_name, content, content_type or "image/png")}
+            response = requests.post(f"http://{addr}/upload/image", files=files_data, timeout=15)
+            if response.status_code == 200:
+                try:
+                    last_name = response.json().get("name") or safe_name
+                except Exception:
+                    last_name = safe_name
+                success_count += 1
+        except Exception as e:
+            print(f"CanvasPro bridge upload error for {addr}: {e}")
+    if success_count <= 0:
+        raise HTTPException(status_code=502, detail=f"{label}上传到本地 ComfyUI 失败")
+    return last_name
+
+def _bridge_import_media_to_comfy(value: Any, request: Request, kind: str = "image") -> str:
+    if isinstance(value, dict):
+        for key in (
+            "url", "src", "path", "cdnUrl", "download_url",
+            "image_url", "imageUrl", "video_url", "videoUrl", "audio_url", "audioUrl",
+        ):
+            if value.get(key):
+                value = value.get(key)
+                break
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if re.match(r"^[^/?#\\]+\.(png|jpe?g|webp|gif|bmp|tiff?|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)$", text, flags=re.I):
+        return os.path.basename(text)
+    local_view_name = _bridge_filename_from_local_view(text)
+    if local_view_name:
+        return local_view_name
+    if text.startswith("data:") and ";base64," in text:
+        header, encoded = text.split(";base64,", 1)
+        mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "application/octet-stream"
+        try:
+            raw = base64.b64decode(encoded)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"{kind} data URL 解码失败：{exc}")
+        return _bridge_upload_comfy_input_bytes(raw, "canvaspro_data_url", mime, label=kind)
+    local_path = output_file_from_url(text)
+    if not local_path:
+        parsed = urllib.parse.urlparse(text)
+        request_host = str(request.headers.get("host") or "").lower()
+        if parsed.scheme in ("http", "https") and parsed.netloc.lower() == request_host:
+            local_path = output_file_from_url(parsed.path)
+    if local_path:
+        with open(local_path, "rb") as f:
+            content = f.read()
+        return _bridge_upload_comfy_input_bytes(content, os.path.basename(local_path), content_type_for_path(local_path), label=kind)
+    if text.startswith("/api/view?"):
+        name = _bridge_filename_from_local_view(text)
+        if name:
+            return name
+    if text.startswith("http://") or text.startswith("https://"):
+        try:
+            r = requests.get(text, timeout=30)
+            r.raise_for_status()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"下载远程{kind}素材失败：{text[:120]}（{exc}）")
+        content_type = r.headers.get("Content-Type") or "application/octet-stream"
+        filename = os.path.basename(urllib.parse.urlparse(text).path) or f"canvaspro_remote_{kind}"
+        return _bridge_upload_comfy_input_bytes(r.content, filename, content_type, label=kind)
+    return os.path.basename(text)
+
+def _bridge_import_image_to_comfy(value: Any, request: Request) -> str:
+    return _bridge_import_media_to_comfy(value, request, "image")
+
+def _bridge_add_param(params: Dict[str, Dict[str, Any]], field: WorkflowField, value: Any):
+    if not field.node or not field.input:
+        return
+    params.setdefault(field.node, {})[field.input] = value
+
+def _bridge_build_params(cfg: WorkflowConfig, payload: Dict[str, Any], request: Request) -> Dict[str, Dict[str, Any]]:
+    prompt = str(payload.get("prompt") or "").strip()
+    prompt_field = _bridge_prompt_field(cfg)
+    image_values = _bridge_collect_payload_images(payload)
+    image_fields = _bridge_image_fields(cfg)
+    params: Dict[str, Dict[str, Any]] = {}
+    image_index = 0
+    for field in _bridge_public_config_fields(cfg):
+        if not field.node or not field.input:
+            continue
+        value = None
+        is_prompt_field = bool(prompt_field and field.id == prompt_field.id)
+        is_image_field = field in image_fields
+        if is_prompt_field:
+            value = prompt if prompt else field.default
+        elif is_image_field:
+            if image_index < len(image_values):
+                value = _bridge_import_image_to_comfy(image_values[image_index], request)
+                image_index += 1
+            else:
+                value = field.default
+        else:
+            value = _bridge_scalar_payload_value(payload, field)
+            if value is None:
+                value = field.default
+        if field.required and (value is None or value == ""):
+            raise HTTPException(status_code=400, detail=f"缺少必填参数：{field.name or field.input}")
+        if value is None or (value == "" and not field.required):
+            continue
+        _bridge_add_param(params, field, _bridge_coerce_field_value(field, value))
+    apply_ltx_public_run_defaults(str(payload.get("model") or ""), params)
+    return params
+
+def _bridge_payload_containers(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    containers: List[Dict[str, Any]] = [payload]
+    for key in ("generationParams", "params", "parameters", "fields"):
+        item = payload.get(key)
+        if isinstance(item, dict):
+            containers.append(item)
+    return containers
+
+def _bridge_payload_first(payload: Dict[str, Any], *keys: str) -> Any:
+    for container in _bridge_payload_containers(payload):
+        for key in keys:
+            if key in container and container.get(key) not in (None, ""):
+                return container.get(key)
+    return None
+
+def _bridge_ltx_lora_preset_key(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    key = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return BRIDGE_LTX_LORA_ALIASES.get(key, key)
+
+def _bridge_ltx_lora_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    preset_raw = _bridge_payload_first(payload, "loraPreset", "lora_preset", "lora", "loraId", "lora_id")
+    name_raw = _bridge_payload_first(payload, "loraName", "lora_name", "loraFile", "lora_file", "loraPath", "lora_path")
+    strength_raw = _bridge_payload_first(payload, "loraStrength", "lora_strength", "strength")
+    preset_key = _bridge_ltx_lora_preset_key(preset_raw)
+    preset = BRIDGE_LTX_LORA_PRESETS.get(preset_key) if preset_key else None
+    lora_name = str(name_raw or "").strip()
+    if not lora_name and preset:
+        lora_name = str(preset.get("lora_name") or "").strip()
+    if not lora_name and preset_key and preset_key not in {"none", "off", "disabled"}:
+        lora_name = str(preset_raw or "").strip()
+    try:
+        default_strength = float(preset.get("strength", 0.9) if preset else 0.9)
+        strength = float(strength_raw) if strength_raw is not None and strength_raw != "" else default_strength
+    except Exception:
+        strength = float(preset.get("strength", 0.9) if preset else 0.9)
+    strength = max(0.0, min(2.0, strength))
+    return {
+        "preset_key": preset_key,
+        "preset": preset or {},
+        "lora_name": lora_name,
+        "strength": strength,
+        "requested": bool(lora_name or preset_key),
+    }
+
+def _bridge_apply_ltx_lora_params(workflow_name: str, payload: Dict[str, Any], params: Dict[str, Dict[str, Any]]):
+    base_name = os.path.basename(str(workflow_name or ""))
+    if base_name not in BRIDGE_LTX_VIDEO_WORKFLOW_NAMES:
+        return
+    lora = _bridge_ltx_lora_payload(payload)
+    if not lora.get("requested"):
+        return
+    if lora.get("preset_key") in {"none", "off", "disabled"}:
+        return
+    lora_name = str(lora.get("lora_name") or "").strip()
+    if not lora_name:
+        return
+    workflow = _bridge_load_workflow_nodes(workflow_name)
+    if not workflow:
+        return
+    strength = float(lora.get("strength") or 0.9)
+    touched: List[str] = []
+    has_lora_node = False
+    reserved_distill = False  # 工作流里是否有出图必需、不可覆盖的蒸馏 LoRA
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type") or "")
+        if class_type not in {"LoraLoader", "LoraLoaderModelOnly"}:
+            continue
+        has_lora_node = True
+        inputs = node.get("inputs") if isinstance(node.get("inputs"), dict) else {}
+        current_lora = str(inputs.get("lora_name") or inputs.get("lora") or "")
+        # 承重蒸馏 LoRA（如 LTX 2.3 distilled）是底模出图必需的，绝不能被 creative-lab 预设覆盖，
+        # 否则采样器去噪错乱，产出坏图。跳过它，只往“空闲”的 LoRA 槽注入。
+        if "distill" in current_lora.lower():
+            reserved_distill = True
+            continue
+        key = "lora_name" if "lora_name" in inputs else ("lora" if "lora" in inputs else "")
+        if not key:
+            continue
+        _bridge_set_node_param(params, str(node_id), key, lora_name)
+        for strength_key in ("strength_model", "strength_clip", "strength", "lora_strength"):
+            if strength_key in inputs:
+                _bridge_set_node_param(params, str(node_id), strength_key, strength)
+        touched.append(str(node_id))
+    if not touched:
+        if reserved_distill:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"LTX 工作流 {base_name} 只有承重的蒸馏 LoRA 节点，无法在不破坏底模的前提下叠加 creative-lab 预设。"
+                    "请改用预留了额外 LoraLoader 槽的 LTX 工作流，或去掉 LoRA 预设后重试。"
+                ),
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"LTX 工作流 {base_name} 不支持 LoRA（没有 LoraLoader 节点）。"
+                "请选择支持 LoRA 的 LTX 视频工作流，或去掉 LoRA 预设后重试。"
+            ),
+        )
+
+def _bridge_parse_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or value is None or value == "":
+        return None
+    try:
+        parsed = int(float(str(value).strip()))
+        return parsed if parsed > 0 else None
+    except Exception:
+        return None
+
+def _bridge_parse_seconds(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or value is None or value == "":
+        return None
+    try:
+        parsed = float(str(value).strip())
+        return parsed if parsed > 0 else None
+    except Exception:
+        return None
+
+def _bridge_dimensions_from_payload(payload: Dict[str, Any], default_width: int = 768, default_height: int = 512) -> Tuple[int, int]:
+    width = _bridge_parse_int(_bridge_payload_first(payload, "width", "videoWidth"))
+    height = _bridge_parse_int(_bridge_payload_first(payload, "height", "videoHeight"))
+    if width and height:
+        return width, height
+    resolution = str(_bridge_payload_first(payload, "resolution", "videoSize") or "").strip().lower()
+    ratio = str(_bridge_payload_first(payload, "aspectRatio", "aspect_ratio", "ratio", "size") or "").strip()
+    if "1080" in resolution:
+        base = 1080
+    elif "768" in resolution:
+        base = 768
+    elif "720" in resolution:
+        base = 720
+    elif "512" in resolution:
+        base = 512
+    else:
+        base = 0
+    if not base:
+        return default_width, default_height
+    ratio_pairs = {
+        "16:9": (16, 9),
+        "9:16": (9, 16),
+        "1:1": (1, 1),
+        "4:3": (4, 3),
+        "3:4": (3, 4),
+    }
+    # 未识别的比例默认按 16:9 横屏，绝不能把 (default_width, default_height) 这种像素默认值当成宽高比，
+    # 否则 resolution=1080 无比例时会算出 1632x1080 这种畸形尺寸。
+    rw, rh = ratio_pairs.get(ratio, (16, 9))
+    if rw >= rh:
+        height = base
+        width = int(round(base * rw / rh / 32) * 32)
+    else:
+        width = base
+        height = int(round(base * rh / rw / 32) * 32)
+    return max(32, width), max(32, height)
+
+def _bridge_frame_count_from_payload(payload: Dict[str, Any], default_frames: int = 49, fps: int = 24) -> int:
+    frames = _bridge_parse_int(_bridge_payload_first(payload, "num_frames", "frames", "duration_frames", "durationFrames"))
+    if frames:
+        return frames
+    seconds = _bridge_parse_seconds(_bridge_payload_first(payload, "duration", "duration_seconds", "durationSeconds"))
+    if seconds:
+        return max(1, int(round(seconds * fps)) + 1)
+    return default_frames
+
+def _bridge_load_workflow_nodes(workflow_name: str) -> Dict[str, Any]:
+    try:
+        with open(workflow_path_from_name(workflow_name), "r", encoding="utf-8") as f:
+            workflow = json.load(f) or {}
+        if not isinstance(workflow, dict):
+            return {}
+        return {str(k): v for k, v in workflow.items() if isinstance(v, dict) and v.get("class_type")}
+    except Exception:
+        return {}
+
+def _bridge_set_node_param(params: Dict[str, Dict[str, Any]], node_id: str, input_name: str, value: Any):
+    if value is None or value == "":
+        return
+    params.setdefault(str(node_id), {})[str(input_name)] = value
+
+def _bridge_is_placeholder(value: Any, key: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    return bool(re.fullmatch(r"\{\{\s*" + re.escape(key) + r"\s*\}\}", value.strip(), flags=re.I))
+
+def _bridge_ltx_text_is_negative(input_name: str, value: Any) -> bool:
+    haystack = f"{input_name} {value}".lower()
+    return any(token in haystack for token in (
+        "negative", "low quality", "blurry", "distorted", "jittery",
+        "bad motion", "bad audio", "watermark", "ugly", "低画质", "负面", "反向",
+    ))
+
+def _bridge_apply_ltx_video_params(workflow_name: str, payload: Dict[str, Any], request: Request, params: Dict[str, Dict[str, Any]]):
+    base_name = os.path.basename(str(workflow_name or ""))
+    if base_name not in BRIDGE_LTX_VIDEO_WORKFLOW_NAMES:
+        return
+    workflow = _bridge_load_workflow_nodes(workflow_name)
+    if not workflow:
+        return
+    prompt = str(_bridge_payload_first(payload, "prompt") or "").strip()
+    negative_prompt = str(_bridge_payload_first(payload, "negative_prompt", "negativePrompt") or "").strip()
+    width, height = _bridge_dimensions_from_payload(payload)
+    frames = _bridge_frame_count_from_payload(payload)
+    duration_seconds = max(0.1, round(max(frames - 1, 1) / 24, 2))
+    seed = _bridge_parse_int(_bridge_payload_first(payload, "seed", "noise_seed", "noiseSeed")) or random.randint(1, 10**15)
+
+    image_values = _bridge_collect_payload_images(payload)
+    video_values = _bridge_collect_payload_videos(payload)
+    audio_values = _bridge_collect_payload_audios(payload)
+    first_image = _bridge_import_media_to_comfy(image_values[0], request, "image") if image_values else ""
+    first_video = _bridge_import_media_to_comfy(video_values[0], request, "video") if video_values else ""
+    first_audio = _bridge_import_media_to_comfy(audio_values[0], request, "audio") if audio_values else ""
+    requires_image = False
+
+    for node_id, node in workflow.items():
+        inputs = node.get("inputs") if isinstance(node.get("inputs"), dict) else {}
+        class_type = str(node.get("class_type") or "")
+        for input_name, current_value in inputs.items():
+            if comfy_is_link_value(current_value):
+                continue
+            input_key = str(input_name)
+            input_key_lower = input_key.lower()
+            if prompt and input_key_lower in {"global_prompt", "local_prompts", "prompt", "positive"}:
+                _bridge_set_node_param(params, node_id, input_key, prompt)
+            elif prompt and input_key_lower == "text" and not _bridge_ltx_text_is_negative(input_key, current_value):
+                if class_type == "CLIPTextEncode" or _bridge_is_placeholder(current_value, "prompt") or str(current_value).strip().upper() == "PROMPT":
+                    _bridge_set_node_param(params, node_id, input_key, prompt)
+            elif negative_prompt and (
+                input_key_lower in {"negative", "negative_prompt", "negativeprompt"}
+                or (input_key_lower == "text" and _bridge_ltx_text_is_negative(input_key, current_value))
+                or str(current_value).strip().upper() == "NEGATIVE"
+            ):
+                _bridge_set_node_param(params, node_id, input_key, negative_prompt)
+
+            if input_key_lower in {"image", "filename"} and (class_type == "LoadImage" or _bridge_is_placeholder(current_value, "image")):
+                if first_image:
+                    _bridge_set_node_param(params, node_id, input_key, first_image)
+                elif _bridge_is_placeholder(current_value, "image"):
+                    requires_image = True
+            if input_key_lower in {"video", "video_path", "video_url"} and first_video:
+                _bridge_set_node_param(params, node_id, input_key, first_video)
+            if input_key_lower in {"audio", "audio_path", "audio_url"} and first_audio:
+                _bridge_set_node_param(params, node_id, input_key, first_audio)
+
+            if _bridge_is_placeholder(current_value, "width"):
+                _bridge_set_node_param(params, node_id, input_key, width)
+            elif _bridge_is_placeholder(current_value, "height"):
+                _bridge_set_node_param(params, node_id, input_key, height)
+            elif _bridge_is_placeholder(current_value, "seed") or (input_key_lower in {"seed", "noise_seed"} and str(current_value).strip().startswith("{{")):
+                _bridge_set_node_param(params, node_id, input_key, seed)
+            elif _bridge_is_placeholder(current_value, "num_frames") or _bridge_is_placeholder(current_value, "frames"):
+                _bridge_set_node_param(params, node_id, input_key, frames)
+
+        if class_type == "LTXDirector":
+            if prompt:
+                _bridge_set_node_param(params, node_id, "global_prompt", prompt)
+                _bridge_set_node_param(params, node_id, "local_prompts", prompt)
+            _bridge_set_node_param(params, node_id, "duration_frames", frames)
+            _bridge_set_node_param(params, node_id, "duration_seconds", duration_seconds)
+            _bridge_set_node_param(params, node_id, "segment_lengths", str(frames))
+            if width and height:
+                _bridge_set_node_param(params, node_id, "custom_width", width)
+                _bridge_set_node_param(params, node_id, "custom_height", height)
+
+    if requires_image:
+        raise HTTPException(status_code=400, detail="这个 LTX 图生视频工作流需要先放入一张首帧图")
+    apply_ltx_public_run_defaults(workflow_name, params)
+
+def _bridge_video_workflows() -> List[Dict[str, Any]]:
+    items = []
+    for w in workflow_list_items(public_only=True):
+        name = str(w.get("name") or "").strip()
+        if os.path.basename(name) not in BRIDGE_LTX_VIDEO_WORKFLOW_NAMES:
+            continue
+        cfg = load_workflow_config(name)
+        title = BRIDGE_LTX_VIDEO_TITLES.get(os.path.basename(name)) or str(cfg.title or w.get("title") or workflow_default_title(name)).strip()
+        if not _bridge_workflow_allowed(name, title):
+            continue
+        item = dict(w)
+        item["title"] = title
+        item["display_name"] = title
+        items.append(item)
+    return items
+
+def _bridge_absolute_urls(request: Request, urls: List[Any]) -> List[str]:
+    base = _bridge_response_base_url(request)
+    return [(base + str(u)) if str(u).startswith("/") else str(u) for u in urls if str(u or "").strip()]
 
 @app.get("/bridge/apimart/v1/models")
 def bridge_apimart_models(request: Request):
     if not _bridge_auth_ok(request):
         return _bridge_error(401, "无效的本地桥 API Key")
+    safe_workflows = _bridge_safe_workflows()
+    if not safe_workflows:
+        return _bridge_error(400, BRIDGE_NO_WORKFLOWS_MESSAGE)
     data = [
-        {"id": w["name"], "object": "model", "owned_by": "aitoolstudio-local", "name": w.get("title") or w["name"]}
-        for w in workflow_list_items(public_only=True)
+        {
+            "id": w["name"],
+            "object": "model",
+            "owned_by": "aitoolstudio-local",
+            "name": w["display_name"],
+            "metadata": {
+                "prompt_field_id": w.get("prompt_field_id") or "",
+                "image_field_count": w.get("image_field_count") or 0,
+                "required_image_count": w.get("required_image_count") or 0,
+            },
+        }
+        for w in safe_workflows
     ]
     return {"object": "list", "data": data}
+
+@app.post("/bridge/apimart/v1/uploads/images")
+async def bridge_apimart_upload_image(request: Request, file: UploadFile = File(...)):
+    if not _bridge_auth_ok(request):
+        return _bridge_error(401, "无效的本地桥 API Key")
+    content = await file.read()
+    content_type = file.content_type or content_type_for_path(file.filename or "upload.png")
+    name = _bridge_upload_comfy_input_bytes(content, file.filename or "upload.png", content_type, label="图片")
+    url = f"{_bridge_response_base_url(request)}/api/view?filename={urllib.parse.quote(name)}&type=input"
+    return {"url": url, "cdnUrl": url, "data": {"url": url, "cdnUrl": url, "name": name}, "name": name}
+
+async def _bridge_apimart_upload_media(request: Request, file: UploadFile, kind: str):
+    if not _bridge_auth_ok(request):
+        return _bridge_error(401, "无效的本地桥 API Key")
+    content = await file.read()
+    fallback_name = f"upload.{kind}"
+    content_type = file.content_type or content_type_for_path(file.filename or fallback_name)
+    name = _bridge_upload_comfy_input_bytes(content, file.filename or fallback_name, content_type, label=kind)
+    url = f"{_bridge_response_base_url(request)}/api/view?filename={urllib.parse.quote(name)}&type=input"
+    return {"url": url, "cdnUrl": url, "data": {"url": url, "cdnUrl": url, "name": name}, "name": name}
+
+@app.post("/bridge/apimart/v1/uploads/videos")
+async def bridge_apimart_upload_video(request: Request, file: UploadFile = File(...)):
+    return await _bridge_apimart_upload_media(request, file, "video")
+
+@app.post("/bridge/apimart/v1/uploads/audio")
+async def bridge_apimart_upload_audio(request: Request, file: UploadFile = File(...)):
+    return await _bridge_apimart_upload_media(request, file, "audio")
 
 @app.get("/bridge/apimart/v1/balance")
 def bridge_apimart_balance(request: Request):
@@ -10634,38 +11379,99 @@ def bridge_apimart_images(payload: Dict[str, Any], request: Request):
         return _bridge_error(401, "无效的本地桥 API Key")
     prompt = str(payload.get("prompt") or "").strip()
     model = str(payload.get("model") or "").strip()
-    name = _bridge_resolve_workflow(model)
+    safe_workflows = _bridge_safe_workflows()
+    if not safe_workflows:
+        return _bridge_error(400, BRIDGE_NO_WORKFLOWS_MESSAGE)
+    name = _bridge_resolve_workflow(model, safe_workflows)
     if not name:
-        return _bridge_error(400, "平台没有已发布的工作流，请先在 ComfyUI 工作台发布")
+        return _bridge_error(400, f"未找到可用的本地桥模型：{model or '(未指定)'}。请使用 /bridge/apimart/v1/models 返回的 id 或 name。")
     cfg = load_workflow_config(name)
-    params: Dict[str, Dict[str, Any]] = {}
-    prompt_field = None
-    for f in cfg.fields:
-        if not f.enabled or f.hidden or f.type not in ("text", "textarea"):
-            continue
-        haystack = f"{f.input} {f.name}".lower()
-        if "prompt" in haystack or "提示" in haystack or f.required:
-            prompt_field = f
-            break
-    if prompt_field is None:
-        prompt_field = next((f for f in cfg.fields if f.enabled and f.type in ("text", "textarea")), None)
-    if prompt_field and prompt and prompt_field.node and prompt_field.input:
-        params.setdefault(prompt_field.node, {})[prompt_field.input] = prompt
+    prompt_field = _bridge_prompt_field(cfg)
+    try:
+        params = _bridge_build_params(cfg, {**payload, "model": name}, request)
+    except HTTPException as exc:
+        return _bridge_error(exc.status_code, str(exc.detail))
+    except Exception as exc:
+        # 媒体导入里的 requests/base64/open 抛的不是 HTTPException，兜底成清晰 4xx/5xx，避免裸 500
+        return _bridge_error(502, f"处理图像生成参数失败：{exc}")
     req_g = GenerateRequest(
-        prompt="",
+        prompt="" if prompt_field else prompt,
         workflow_json=name,
         params=params,
         type="canvaspro-bridge",
         client_id=str(uuid.uuid4()),
     )
     result = run_comfy_generate(req_g, owner_key="canvaspro-bridge")
-    record_workflow_last_test(name, {"username": "canvaspro-bridge"}, result, {prompt_field.id if prompt_field else "prompt": prompt})
-    host = request.headers.get("host") or "192.168.1.60:3000"
-    base = f"{request.url.scheme}://{host}"
+    record_workflow_last_test(name, {"username": "canvaspro-bridge"}, result, {"prompt": prompt, "input_images": len(_bridge_collect_payload_images(payload))})
+    base = _bridge_response_base_url(request)
     urls = [(base + u) if str(u).startswith("/") else str(u) for u in (result.get("images") or [])]
     if not urls:
         return _bridge_error(502, "工作流执行成功但没有图像输出")
     return {"created": now_ts(), "data": [{"url": u} for u in urls]}
+
+@app.post("/bridge/apimart/v1/videos/generations")
+def bridge_apimart_videos(payload: Dict[str, Any], request: Request):
+    if not _bridge_auth_ok(request):
+        return _bridge_error(401, "无效的本地桥 API Key")
+    prompt = str(payload.get("prompt") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    safe_workflows = _bridge_video_workflows()
+    if not safe_workflows:
+        return _bridge_error(400, "没有可供 AI-CanvasPro 调用的本地 LTX 视频工作流")
+    name = _bridge_resolve_workflow(model, safe_workflows)
+    if not name:
+        return _bridge_error(400, f"未找到可用的本地 LTX 视频模型：{model or '(未指定)'}。")
+    cfg = load_workflow_config(name)
+    try:
+        params = _bridge_build_params(cfg, {**payload, "model": name}, request)
+        _bridge_apply_ltx_video_params(name, {**payload, "model": name}, request, params)
+        _bridge_apply_ltx_lora_params(name, {**payload, "model": name}, params)
+    except HTTPException as exc:
+        return _bridge_error(exc.status_code, str(exc.detail))
+    except Exception as exc:
+        # 媒体导入/参数注入里的 requests/base64/open 抛的不是 HTTPException，兜底成清晰 5xx，避免裸 500
+        return _bridge_error(502, f"处理视频生成参数失败：{exc}")
+    req_g = GenerateRequest(
+        prompt="",
+        workflow_json=name,
+        params=params,
+        type="canvaspro-video-bridge",
+        client_id=str(uuid.uuid4()),
+    )
+    result = run_comfy_generate(req_g, owner_key="canvaspro-video-bridge")
+    record_workflow_last_test(
+        name,
+        {"username": "canvaspro-video-bridge"},
+        result,
+        {
+            "prompt": prompt,
+            "input_images": len(_bridge_collect_payload_images(payload)),
+            "input_videos": len(_bridge_collect_payload_videos(payload)),
+            "input_audios": len(_bridge_collect_payload_audios(payload)),
+        },
+    )
+    video_urls = result.get("videos") or [
+        item.get("url")
+        for item in (result.get("items") or [])
+        if isinstance(item, dict) and item.get("kind") == "video"
+    ]
+    if not video_urls:
+        video_urls = [
+            u for u in (result.get("outputs") or [])
+            if re.search(r"\.(mp4|webm|mov|m4v|avi|mkv)(?:\?|$)", str(u), flags=re.I)
+        ]
+    urls = _bridge_absolute_urls(request, video_urls)
+    if not urls:
+        return _bridge_error(502, "工作流执行成功但没有视频输出")
+    data = [{"url": u, "videoUrl": u} for u in urls]
+    return {
+        "created": now_ts(),
+        "data": data,
+        "results": data,
+        "url": urls[0],
+        "videoUrl": urls[0],
+        "result": {"videos": [{"url": u} for u in urls]},
+    }
 
 @app.get("/api/comfyui/workbench-workflows")
 def get_comfyui_workbench_workflows(request: Request):

@@ -150,3 +150,69 @@
 - 三轮矩阵实测 31 个已发布工作流：14 个跑通（文生图 2、图生图 8、文生视频 3、图生视频 1），全部自动写入 last_test。
 - 发现 ltx 系列为「{{placeholder}} 模板工作流」，需字段映射注入；ltx-i2v 已按此打通。
 - 未通者归因：8 个需精确字段映射（工作台人工配置）、2 个需视频素材、4 个缺节点、2 个 PS 联动类不适用、1 个显存不足。
+
+## 第十二批：CanvasPro 桥降噪 + 同源加载修复（2026-06-14，Codex 验收部署）
+
+- APIMart 兼容桥不再把所有已发布工作流直接暴露给 CanvasPro，只列出「有公开 prompt 文本字段、且没有必填图片/视频/文件字段」的安全工作流；如需手动收窄，可用 env `AIC_BRIDGE_WORKFLOWS` 指定 workflow name/title。
+- CanvasPro 模型显示名统一加前缀「本地 ComfyUI · 」，避免用户误点成线上模型；未知模型名不再静默回退，改为返回清晰错误。
+- 旧壳入口从「CanvasPro 评估」改为「AI-CanvasPro（第三方评估）」，iframe title/aria-label 标明第三方评估与数据隔离。
+- 修复 ComfyTV iframe 地址版本号拼接多出 `)}` 的问题。
+- 60 盘 AI-CanvasPro `server.py` 已补丁：允许浏览器同源、无 Origin 的只读 GET/HEAD 读取配置/项目/工作流等接口，普通无头请求与非白名单 Origin 仍保持 403。
+- 60 远端已配置非默认 `AIC_BRIDGE_KEY`，并用 `AIC_BRIDGE_WORKFLOWS=Z-Image.json,custom/黑白线稿.json` 固定 CanvasPro 可见模型；换 key 后已完成一次 Z-Image 真实出图 smoke test。
+
+## 第十三批：CanvasPro API 设置精简（2026-06-15，Codex 远端部署）
+
+- 60 盘 AI-CanvasPro API Key 设置页删除 GRSAI、派欧云（PPIO）、Agnes AI、火山方舟卡片。
+- 新增 `Kimi Coding Plan` 与 `MiniMax Coding Plan` 卡片，均提供接口地址和 API Key 输入框；默认接口分别为 `https://api.kimi.com/coding/v1` 与 `https://api.minimax.io/v1`。
+- 同步更新 CanvasPro `user/config.json`，仅保留 OpenAI、APIMart、本地新增 Kimi/MiniMax、RunningHUB；已有 APIMart 桥密钥未打印、不落文档。
+- 连接测试白名单改为明文 provider id：`kimi`、`minimax`、`apimart`、`openai`、`runninghub`；旧 provider 测试入口返回不支持。
+- 已完成远端 `node --check`、测试模块直调、服务重启与浏览器可见性验收。
+
+## 第十四批：Kimi Coding Plan 连接测试修复（2026-06-15，Codex 远端部署）
+
+- 修复 Kimi key 被误报为“无效/过期/无权限”：Kimi Coding Plan 的 `/models` 可验证 key 有效，但通用 `chat/completions` 会被官方限制为 Coding Agent 场景；连接测试改为模型列表通过后跳过额外聊天探针。
+- `server.py` 将 `/api/v2/proxy/task` 加入同源无 Origin 的 GET/HEAD 只读白名单，用于浏览器同源模型列表探测；错误 Origin 仍返回 403。
+- 为 `index.html`、`main.js`、`api/index.js` 增加版本化导入，避免浏览器复用旧连接测试模块。
+- 已验证：Kimi 模型列表代理 200、恶意 Origin 403、浏览器内 Kimi Coding Plan 测试按钮显示“通过”。
+
+## 第十五批：CanvasPro 文本模型菜单接入 Kimi/MiniMax（2026-06-15，Codex 远端部署）
+
+- 文本模型分类从旧供应商列表收窄为 Kimi Coding Plan、MiniMax Coding Plan、APIMart、RunningHUB；旧供应商底层 manifest 保留，避免历史画布引用直接断裂。
+- 新增文本模型 manifest：`kimi/kimi-for-coding`（Kimi For Coding）与 `minimax/MiniMax-M3`（MiniMax M3），并补齐对应 chat completion 执行 manifest、provider 前缀识别、错误提示名称。
+- 修复文本节点模型菜单仍按旧 provider 索引生成子菜单的问题；Kimi/MiniMax 分类下现在会生成可点击模型项。
+- 已验证：远端 `node --check`、manifest 动态导入、菜单 HTML 生成、浏览器内选择 `Kimi For Coding` 与 `MiniMax M3` 均通过。
+- 接口状态：Kimi `/models` 返回 200 且包含 `kimi-for-coding`；MiniMax 当前 `/models` 返回 401，需要换有效 MiniMax Key 后再测。
+
+## 第十六批：Kimi/MiniMax 文本生成真实跑通（2026-06-16，Codex 远端部署）
+
+- Kimi Coding Plan 不再走 OpenAI `chat/completions` 生成链路：改由 CanvasPro 本地代理转发到 Kimi Code Anthropic Messages 接口，并把返回结构转换成 CanvasPro 现有 `choices[0].message.content` 格式。
+- 修复 Kimi 代理补丁变量误插到图片代理导致文本代理 `RemoteDisconnected` 的问题；`server.py` 已通过 `python3 -m py_compile` 并重启容器。
+- MiniMax Coding Plan 默认接口从 `https://api.minimaxi.com/v1` 改为 `https://api.minimaxi.com`，避免 manifest 再拼 `/v1/chat/completions` 后变成双 `/v1/v1/...`。
+- MiniMax 文本生成加入专用分支：兼容用户填入带 `/v1` 或不带 `/v1` 的地址，并固定 `thinking: { type: "disabled" }`，避免 `<think>...</think>` 混入画布输出。
+- 已验证：Kimi 代理真实请求 200 且返回 `OK`；MiniMax 代理真实请求 200 且返回 `OK`；前端 `generateText` 同款链路对 `kimi/kimi-for-coding`、`minimax/MiniMax-M3` 均返回 `OK`；浏览器打开 `?v=202606160016` 后确认 MiniMax 设置栏已更新为 `https://api.minimaxi.com`，旧 `/v1` 占位不存在。
+
+## 第十七批：CanvasPro 带入本地 ComfyUI 工作流（2026-06-16，Codex 远端部署）
+
+- 旧平台 APIMart 兼容桥从“只暴露纯 prompt 工作流”改为暴露 31 个已发布本地 ComfyUI 工作流；带参考图的细节增强、3D 视角、Flux2 编辑、高清修复等不再被过滤。
+- 兼容桥新增 `/bridge/apimart/v1/uploads/images`，CanvasPro 的 APIMart 上传代理可以把参考图先传入本地 ComfyUI input，再由工作流节点使用。
+- 兼容桥生成接口现在会把 `image_urls` / `inputImages` 等图片输入映射到公开图片字段，同时继续把 prompt 映射到公开提示词字段；无效模型名仍返回明确错误，不静默回退。
+- 60 盘 AI-CanvasPro 新增 `localComfyImageModelApiManifests.js`，并注册 31 个 `apimart/local-comfy/...` 图像模型；模型菜单里会显示「本地 ComfyUI · ...」，需要参考图的模型声明对应图片槽位。
+- 已验证：后端 `/bridge/apimart/v1/models` 返回 31 个本地模型；CanvasPro manifest 注册后图像模型总数 85、本地 ComfyUI 31；上传代理带浏览器 Origin 时可返回本地 `/api/view` URL；Z-Image 真实出图返回 2 张图。
+
+## 第十八批：CanvasPro 接入本地 LTX 视频工作流（2026-06-16，Codex 远端部署）
+
+- 旧平台 APIMart 兼容桥新增 `/bridge/apimart/v1/videos/generations`，把 CanvasPro 视频生成请求转成本地 ComfyUI LTX 工作流运行，并返回 APIMart 风格视频结果。
+- 新增视频/音频上传入口 `/bridge/apimart/v1/uploads/videos`、`/bridge/apimart/v1/uploads/audio`；CanvasPro 本地 APIMart 上传代理在本地桥地址下会直传图片/视频/音频，不再对本地桥走官方 presign。
+- LTX 工作流加入自动参数映射：prompt、负向提示词、首帧图、尺寸、时长、seed 会写入对应 ComfyUI 节点；图生视频未放首帧时返回明确提示。
+- LTX 视频工作流从图片桥模型清单中排除，只在 CanvasPro 视频分类中出现，避免误选到图片节点。
+- 60 盘 AI-CanvasPro 新增 `localComfyVideoModelApiManifests.js`，注册 9 个 `apimart/local-ltx/...` 视频模型：Director v2、文生视频 LoRA、图生视频、图生视频 2.3、1080P、1080P SeedVR2、Studio Quality、两段超分、音视频。
+- 已验证：兼容桥识别 9 个 LTX 视频工作流；图片桥 `/models` 无 LTX；CanvasPro manifest 视频模型总数 61、本地 LTX 9；视频菜单渲染函数可生成 9 个「本地 LTX · ...」菜单项。
+
+## 第十九批：CanvasPro APIMart 改为本地节点（2026-06-16，Codex 远端部署）
+
+- 60 盘 AI-CanvasPro 不再注册线上 APIMart 图片、视频、文字模型：APIMart 图片从 33 个收窄为 23 个 `apimart/local-comfy/...`，视频从 29 个收窄为 9 个 `apimart/local-ltx/...`，文字 APIMart 模型为 0。
+- 可见 provider 显示名从 `APIMart` 改为「本地节点」；图片模型分类、图片功能菜单、API 设置页 provider 名称均同步更新。
+- 视频模型菜单移除 APIMart Dreamina/线上视频特例，只保留本地 LTX；文字模型菜单隐藏 APIMart 分组，保留 Kimi Coding Plan、MiniMax Coding Plan、RunningHUB。
+- 已重启 `ai-canvaspro-eval` 并完成模块级验收：图片菜单 HTML 中 APIMart 线上计数 0、本地 ComfyUI 23；视频菜单 HTML 中 APIMart 线上计数 0、本地 LTX 9；前端页面加载无 console error。
+- 逐节点参数映射自检：23 个图片节点、9 个视频节点全部能解析工作流并完成参数映射，LTX 视频没有残留未替换占位符。
+- 后端兼容性检查结果：当前可用 ComfyUI 实例 `192.168.1.195:8188` 可运行 12/32 个本地节点；其余 20 个因当前实例缺自定义节点失败，备用实例 `192.168.1.197:8188` 超时/无路由，`192.168.1.249:8188` 连接拒绝。失败主因包括 Inspire 共享加载节点、LayerUtility/LayerColor、InspyrenetRembg、Photoshop 插件、llama_cpp、部分 LTX 1080P 所需节点缺失。
